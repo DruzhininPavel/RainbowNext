@@ -1,0 +1,73 @@
+# Roadmap
+
+Milestones are ordered so that each one is independently testable and leaves the
+emulator in a usable state. Everything is validated by `ctest`; visual checks are
+done by loading a ROM or a snapshot.
+
+## M0 — 48K Spectrum (current)
+
+* [x] Z80 interpreter: documented + undocumented opcodes, `IXH/IXL/IYH/IYL`,
+      `DDCB`, `SLL`, `MEMPTR` (`WZ`), IM 0/1/2, NMI, HALT, EI delay
+* [x] ULA: port `0xFE` read/write, border, beeper, keyboard matrix 8×5
+* [x] Contention (Fuse pattern) and floating bus
+* [x] Frame timing: 69 888 T-states, 50.08 Hz
+* [x] Screen rendering with the classic `((y & 0xC0) << 5) | ((y & 7) << 8) | ((y & 0x38) << 2)` addressing
+* [x] Audio sample accumulator (beeper → float samples)
+* [x] SNA and Z80 v1/v2/v3 snapshot loading (plain + RLE)
+* [x] SDL3 + Dear ImGui frontend: window, pacing, menus, drag & drop, debugger overlay
+* [x] 47 unit tests including an end-to-end "boot a hand-assembled program" test
+* [ ] `z80test` / `zexall` conformance runs in CI
+* [ ] TAP/TZX tape loading
+* [ ] Golden-frame image hashes
+
+**Exit criteria:** `48.rom` boots to the BASIC prompt; a multicolour demo
+renders correctly; `z80test` passes.
+
+## M1 — 128K / +2 / +3 / Pentagon
+
+* [ ] `0x7FFD` paging lock semantics end to end (partly done)
+* [ ] AY-3-8912: 3 channels, envelope, noise, stereo ABC/ACB
+* [ ] Exact 128K contention (`offset` 1 vs 4, `line_times[]`)
+* [ ] +3 disk controller (µPD765) and `.dsk`/`.edsk`
+* [ ] Pentagon timings and 71680/70908 T-state frames
+* [ ] `.tap`/`.tzx` accelerated loading
+
+## M2 — ZX Spectrum Next
+
+* [ ] Z80N instruction set
+* [ ] MMU / NextREG file
+* [ ] Layer 2 (256×192 and 320×256), ULA+ palettes, Radastan mode
+* [ ] 128 sprites (4B/5B), tilemap, Copper, DMA
+* [ ] 3× AY with stereo, specdrum, `.nex` snapshot format
+* [ ] SD card image access for NextZXOS
+* [ ] Video pipeline: ULA/Timex → Layer 2 → sprites → tilemap → compositor → palette
+
+## M3 — Tooling and shipping
+
+* [ ] Debugger: breakpoints, memory editor, disassembler, profiler
+* [ ] RZX replay and recording, rewind buffer
+* [ ] Save states in a versioned binary format
+* [ ] CRT/scanline shaders (SDL_GPU backend)
+* [ ] CI releases: macOS universal + SteamOS/Linux AppImage
+* [ ] Steam Deck controller profiles, 1280×800 default scaling
+
+## Known gaps in M0
+
+These are deliberate simplifications, tracked here so they are not forgotten:
+
+1. `Machine::contention` uses the simplified pattern without `line_times[]`;
+   it can differ from Fuse by a few T-states at the exact border edges.
+2. `Ula::reset()` always sets `defaultValue_ = 0xBF`; 128K Issue 3 should use
+   `b & 0x10 ? 0xFF : 0xBF`.
+3. `ioRead` for ports other than `0xFE` does not return the floating bus on 48K.
+4. IM 0 is handled like IM 1 (equivalent on Spectrum, where the bus floats to
+   `0xFF` = `RST 38h`).
+5. No tape, no AY output, no Kempston mouse.
+
+## Open decisions
+
+* **License.** MIT/Apache-2.0 keeps the option of reading GPL projects as
+  reference only. GPL-3.0 would allow lifting code from JNEXT/ZEsarUX/MAME.
+* **NextZXOS distribution.** Likely user-supplied SD image only, as JNEXT does.
+* **Renderer.** SDL_Renderer is enough for M0-M2; SDL_GPU is the target for
+  shaders in M3.

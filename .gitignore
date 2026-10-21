@@ -1,0 +1,22 @@
+build/
+build-*/
+cmake-build-*/
+compile_commands.json
+.cache/
+.DS_Store
+*.o
+*.a
+*.dSYM/
+*.swo
+.vscode/
+.idea/
+
+# ROM images are never committed (see roms/README.md)
+roms/*.rom
+roms/*.ROM
+roms/*.bin
+roms/*.nex
+roms/*.tap
+roms/*.tzx
+roms/*.sna
+roms/*.z80
