@@ -20,9 +20,15 @@ public:
   App(const App&) = delete;
   App& operator=(const App&) = delete;
 
-  // `romPath` is optional; when it is empty the usual candidate locations are
-  // probed and the emulator still starts (with a warning) if none are found.
-  bool init(const std::string& romPath);
+  // Every path is optional. When `rom` is empty the usual candidate locations
+  // are probed and the emulator still starts (with a warning) if none are found.
+  struct Options {
+    std::string rom;
+    std::string tape;
+    std::string snapshot;
+  };
+
+  bool init(const Options& options);
   void run();
   void shutdown();
 
@@ -38,9 +44,12 @@ private:
   void pushAudio();
 
   void setMachine(MachineType type);
+  enum class DialogKind { Rom, Snapshot, Tape };
+
   bool loadRom(const std::string& path);
   bool loadSnapshot(const std::string& path);
-  void openFileDialog(bool snapshot);
+  bool loadTape(const std::string& path);
+  void openFileDialog(DialogKind kind);
   void reset();
 
   static void SDLCALL onFileDialog(void* userdata, const char* const* filelist, int filter);
@@ -57,7 +66,7 @@ private:
   std::string romPath_;
   std::string pendingDialogResult_;
   bool dialogOpen_ = false;
-  bool dialogForSnapshot_ = false;
+  DialogKind dialogKind_ = DialogKind::Rom;
 
   ui::Fonts fonts_;
   float framebufferScale_ = 1.0f;

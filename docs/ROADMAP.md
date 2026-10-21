@@ -14,13 +14,15 @@ done by loading a ROM or a snapshot.
 * [x] Screen rendering with the classic `((y & 0xC0) << 5) | ((y & 7) << 8) | ((y & 0x38) << 2)` addressing
 * [x] Audio sample accumulator (beeper → float samples)
 * [x] SNA and Z80 v1/v2/v3 snapshot loading (plain + RLE)
+* [x] TAP and TZX tape loading: block model, EAR playback, instant load through
+      the ROM loader trap at `0x0556`
 * [x] SDL3 + Dear ImGui frontend: window, pacing, menus, drag & drop, debugger overlay
-* [x] 51 unit tests including an end-to-end "boot a hand-assembled program" test
-      and golden tests that boot the real `roms/48.rom`
+* [x] 62 unit tests including an end-to-end "boot a hand-assembled program" test,
+      a `LOAD ""` run from a real TAP, and golden tests that boot the real `roms/48.rom`
 * [x] `48.rom` boots to the BASIC prompt: the copyright message is printed and
       `PRINT 42` evaluates to `42` with the `0 OK, 0:1` report
 * [ ] `z80test` / `zexall` conformance runs in CI
-* [ ] TAP/TZX tape loading
+* [x] TAP/TZX tape loading
 * [ ] Golden-frame image hashes
 
 **Exit criteria:** `48.rom` boots to the BASIC prompt and executes BASIC (done);
@@ -33,7 +35,7 @@ a multicolour demo renders correctly; `z80test` passes.
 * [ ] Exact 128K contention (`offset` 1 vs 4, `line_times[]`)
 * [ ] +3 disk controller (µPD765) and `.dsk`/`.edsk`
 * [ ] Pentagon timings and 71680/70908 T-state frames
-* [ ] `.tap`/`.tzx` accelerated loading
+* [ ] Real-time tape playback tuning for protected loaders (turbo blocks, custom pilots)
 
 ## M2 — ZX Spectrum Next
 
@@ -65,7 +67,9 @@ These are deliberate simplifications, tracked here so they are not forgotten:
 3. `ioRead` for ports other than `0xFE` does not return the floating bus on 48K.
 4. IM 0 is handled like IM 1 (equivalent on Spectrum, where the bus floats to
    `0xFF` = `RST 38h`).
-5. No tape, no AY output, no Kempston mouse.
+5. Tape playback is real-time only through the EAR bit; protected loaders that
+   depend on exact pilot lengths are best run with instant load enabled.
+6. No AY output, no Kempston mouse.
 
 ## Open decisions
 

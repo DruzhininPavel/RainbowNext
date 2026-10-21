@@ -60,11 +60,18 @@ ctest --test-dir build --output-on-failure
 ROM images are not bundled — see [`roms/README.md`](roms/README.md).
 
 ```sh
-./build/mynext roms/48.rom          # explicit ROM
 ./build/mynext                      # searches roms/48.rom, roms/48.ROM, 48.rom
+./build/mynext roms/48.rom          # explicit ROM
+./build/mynext game.tap             # ROM from roms/, tape inserted
+./build/mynext --rom 48.rom --tape game.tzx --snapshot save.z80
 ```
 
-Drop a `.sna` or `.z80` file onto the window to load a snapshot.
+A bare path is routed by extension: `.rom`, `.tap`/`.tzx`, `.sna`/`.z80`.
+The same files can be dropped onto the window.
+
+Tape playback is real-time through the EAR bit, so `LOAD ""` works as on real
+hardware. `Tape > Instant load` (on by default) short-circuits the ROM loader for
+instant loading; turn it off to hear and debug the actual tape signal.
 
 ### Keys
 
@@ -79,12 +86,14 @@ Drop a `.sna` or `.z80` file onto the window to load a snapshot.
 | Debugger | `F1` |
 | Pause | `F2` |
 | Reset | `F5` |
+| Tape play / stop | `F6` |
+| Tape rewind | `F7` |
 
 ## Layout
 
 ```
 src/core/       Z80, ULA, keyboard, beeper, Machine — no OS dependencies
-src/formats/    SNA / Z80 snapshot loaders
+src/formats/    SNA / Z80 snapshot loaders, TAP / TZX tape parsers
 src/frontend/   SDL3 + Dear ImGui host: app, audio, input, debugger
 tests/          unit tests, incl. an end-to-end boot test (no ROM required)
 docs/           ARCHITECTURE.md, REFERENCES.md, ROADMAP.md

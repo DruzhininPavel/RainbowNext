@@ -89,6 +89,7 @@ void Machine::reset() {
   ula_.reset(type_ != MachineType::Spectrum48);
   keyboard_.reset();
   beeper_.reset();
+  tape_.rewind();
 
   ram_.assign(RamBanks * BankSize, 0);
   framebuffer_.assign(FrameWidth * FrameHeight, Palette[0]);
@@ -122,6 +123,40 @@ bool Machine::loadRomData(const u8* data, size_t size, int bank) {
   if (copy == 0) return false;
   std::memcpy(rom_.data() + size_t(bank) * BankSize, data, copy);
   romLoaded_ = true;
+  return true;
+}
+
+bool Machine::loadTape(const std::string& path, std::string& error) {
+  return tape_.load(path, error);
+}
+
+// Serves the ROM's LD-BYTES routine (0x0556) from the loaded image instead of
+// waiting for the real pulse train. On entry A holds the flag byte the caller
+// expects, IX the destination and DE the length; on success the routine would
+// leave with DE = 0 and carry set, which the exit at 0x05DF reproduces by
+// loading A from a zero checksum and comparing it against 1.
+bool Machine::applyTapeFastLoad() {
+  const formats::TapeBlock* block = tape_.seekDataBlock();
+  if (block == nullptr || block->data.empty()) return false;
+
+  Z80::Registers& regs = cpu_.regs();
+  if (block->data[0] != regs.a) return false; // misaligned tape: let the ROM wait
+
+  const size_t length = size_t(regs.d) << 8 | regs.e;
+  const size_t available = block->data.size() - 1;
+  const size_t count = std::min(length, available);
+  for (size_t i = 0; i < count; ++i) memWrite(u16(regs.ix + i), block->data[1 + i], 0);
+
+  tape_.stepBlock();
+  regs.d = 0;
+  regs.e = 0;
+  regs.ix = u16(regs.ix + count);
+  // The loader ends with `LD A,H / XOR L / LD H,A / CP 1`: success is carry,
+  // so the two checksum accumulators must xor to zero.
+  regs.h = 0;
+  regs.l = 0;
+  regs.a = 0;
+  regs.pc = 0x05DF;
   return true;
 }
 
@@ -192,6 +227,7 @@ void Machine::applySnapshot(const formats::Snapshot& snapshot) {
 
 void Machine::stepInstruction() {
   if (irqLine_) cpu_.interrupt();
+  if (cpu_.regs().pc == 0x0556 && tape_.fastLoad() && applyTapeFastLoad()) return;
   cpu_.step();
 }
 
@@ -233,7 +269,11 @@ void Machine::memWrite(u16 addr, u8 value, u32) {
 
 u8 Machine::ioRead(u16 port, u32) {
   if ((port & 0x0001) == 0) {
-    if ((port & 0x00FF) == 0xFE) return ula_.read(port, keyboard_);
+    if ((port & 0x00FF) == 0xFE) {
+      u8 value = ula_.read(port, keyboard_);
+      value = u8((value & ~0x40) | (tape_.ear() ? 0x40 : 0x00));
+      return value;
+    }
     return floatingBus();
   }
 
@@ -367,6 +407,7 @@ void Machine::tick(u32 cycles) {
 
     tstates_ += step;
     remaining -= step;
+    tape_.advance(step);
 
     audioAccum_ += u64(step) * u64(sampleRate_);
     while (audioAccum_ >= u64(timings_.cpuHz)) {

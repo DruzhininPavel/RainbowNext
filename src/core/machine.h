@@ -7,6 +7,7 @@
 #include "core/beeper.h"
 #include "core/bus.h"
 #include "core/keyboard.h"
+#include "core/tape.h"
 #include "core/types.h"
 #include "core/ula.h"
 #include "core/z80.h"
@@ -68,6 +69,7 @@ public:
   bool loadRoms(const std::string& rom0, const std::string& rom1);
   bool loadRomData(const u8* data, size_t size, int bank);
   bool loadSnapshot(const std::string& path, std::string& error);
+  bool loadTape(const std::string& path, std::string& error);
 
   void runFrame();
   void runCycles(u32 cycles);
@@ -89,6 +91,8 @@ public:
   Z80& cpu() { return cpu_; }
   const Z80& cpu() const { return cpu_; }
   Keyboard& keyboard() { return keyboard_; }
+  Tape& tape() { return tape_; }
+  const Tape& tape() const { return tape_; }
   const u32* framebuffer() const { return framebuffer_.data(); }
   int frameWidth() const { return FrameWidth; }
   int frameHeight() const { return FrameHeight; }
@@ -120,6 +124,7 @@ private:
   u8 readAy(u16 port) const;
   void writeAy(u16 port, u8 value);
   void applySnapshot(const formats::Snapshot& snapshot);
+  bool applyTapeFastLoad();
 
   MachineType type_;
   Timings timings_;
@@ -130,6 +135,7 @@ private:
   Ula ula_;
   Keyboard keyboard_;
   Beeper beeper_;
+  Tape tape_;
 
   std::vector<u8> rom_;
   std::vector<u8> ram_;

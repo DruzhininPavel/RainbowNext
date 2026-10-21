@@ -49,7 +49,7 @@ void SDLCALL App::onFileDialog(void* userdata, const char* const* filelist, int)
   app->dialogOpen_ = false;
 }
 
-bool App::init(const std::string& romPath) {
+bool App::init(const Options& options) {
   SDL_SetAppMetadata("myNext", "0.1.0", "com.mynext.emulator");
 
   if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO | SDL_INIT_GAMEPAD)) {
@@ -84,7 +84,7 @@ bool App::init(const std::string& romPath) {
   machine_->setSampleRate(audio_.sampleRate() > 0 ? audio_.sampleRate() : 44100);
 
   std::vector<std::string> candidates;
-  if (!romPath.empty()) candidates.push_back(romPath);
+  if (!options.rom.empty()) candidates.push_back(options.rom);
   candidates.emplace_back("roms/48.rom");
   candidates.emplace_back("roms/48.ROM");
   candidates.emplace_back("48.rom");
@@ -98,6 +98,9 @@ bool App::init(const std::string& romPath) {
   if (!machine_->romLoaded()) {
     status_ = "No ROM loaded - put 48.rom into roms/ or use File > Open ROM";
   }
+
+  if (!options.snapshot.empty()) loadSnapshot(options.snapshot);
+  if (!options.tape.empty()) loadTape(options.tape);
 
   input_.openGamepads();
 
@@ -154,10 +157,10 @@ void App::run() {
     if (!pendingDialogResult_.empty()) {
       const std::string path = pendingDialogResult_;
       pendingDialogResult_.clear();
-      if (dialogForSnapshot_) {
-        loadSnapshot(path);
-      } else {
-        loadRom(path);
+      switch (dialogKind_) {
+        case DialogKind::Snapshot: loadSnapshot(path); break;
+        case DialogKind::Tape: loadTape(path); break;
+        case DialogKind::Rom: loadRom(path); break;
       }
     }
 
@@ -226,6 +229,12 @@ void App::handleEvent(const SDL_Event& event) {
         case SDLK_F5:
           reset();
           break;
+        case SDLK_F6:
+          machine_->tape().setPlaying(!machine_->tape().playing());
+          break;
+        case SDLK_F7:
+          machine_->tape().rewind();
+          break;
         case SDLK_F11:
           toggleFullscreen();
           break;
@@ -248,8 +257,11 @@ void App::handleEvent(const SDL_Event& event) {
     case SDL_EVENT_DROP_FILE: {
       const std::string path = event.drop.data != nullptr ? event.drop.data : "";
       if (path.empty()) break;
-      if (lowerExtension(path) == ".rom") {
+      const std::string extension = lowerExtension(path);
+      if (extension == ".rom") {
         loadRom(path);
+      } else if (extension == ".tap" || extension == ".tzx") {
+        loadTape(path);
       } else {
         loadSnapshot(path);
       }
@@ -302,16 +314,30 @@ bool App::loadSnapshot(const std::string& path) {
   return true;
 }
 
-void App::openFileDialog(bool snapshot) {
+bool App::loadTape(const std::string& path) {
+  std::string error;
+  if (!machine_->loadTape(path, error)) {
+    status_ = "Tape failed: " + error;
+    return false;
+  }
+  status_ = "Tape loaded: " + machine_->tape().title();
+  return true;
+}
+
+void App::openFileDialog(DialogKind kind) {
   if (dialogOpen_) return;
   static const SDL_DialogFileFilter romFilters[] = {{"Spectrum ROM", "rom"}, {"All files", "*"}};
   static const SDL_DialogFileFilter snapshotFilters[] = {
       {"Snapshots", "sna;z80"}, {"All files", "*"}};
+  static const SDL_DialogFileFilter tapeFilters[] = {
+      {"Tape images", "tap;tzx"}, {"All files", "*"}};
 
-  dialogForSnapshot_ = snapshot;
+  dialogKind_ = kind;
   dialogOpen_ = true;
-  SDL_ShowOpenFileDialog(onFileDialog, this, window_,
-                         snapshot ? snapshotFilters : romFilters, 2, nullptr, false);
+  const SDL_DialogFileFilter* filters = romFilters;
+  if (kind == DialogKind::Snapshot) filters = snapshotFilters;
+  if (kind == DialogKind::Tape) filters = tapeFilters;
+  SDL_ShowOpenFileDialog(onFileDialog, this, window_, filters, 2, nullptr, false);
 }
 
 // ---------------------------------------------------------------------------
@@ -384,12 +410,28 @@ void App::drawToolbar() {
   };
 
   menu("File", [this] {
-    if (ImGui::MenuItem("Open ROM...")) openFileDialog(false);
-    if (ImGui::MenuItem("Open Snapshot...")) openFileDialog(true);
+    if (ImGui::MenuItem("Open ROM...")) openFileDialog(DialogKind::Rom);
+    if (ImGui::MenuItem("Open Snapshot...")) openFileDialog(DialogKind::Snapshot);
+    if (ImGui::MenuItem("Open Tape...")) openFileDialog(DialogKind::Tape);
     ImGui::Separator();
     if (ImGui::MenuItem("Reset", "F5")) reset();
     ImGui::Separator();
     if (ImGui::MenuItem("Quit")) running_ = false;
+  });
+
+  menu("Tape", [this] {
+    if (ImGui::MenuItem("Open Tape...")) openFileDialog(DialogKind::Tape);
+    ImGui::Separator();
+    Tape& tape = machine_->tape();
+    const bool loaded = tape.loaded();
+    if (ImGui::MenuItem(tape.playing() ? "Stop" : "Play", "F6", false, loaded)) {
+      tape.setPlaying(!tape.playing());
+    }
+    if (ImGui::MenuItem("Rewind", "F7", false, loaded)) tape.rewind();
+    ImGui::Separator();
+    bool fastLoad = tape.fastLoad();
+    if (ImGui::MenuItem("Instant load", nullptr, &fastLoad)) tape.setFastLoad(fastLoad);
+    if (ImGui::MenuItem("Eject", nullptr, false, loaded)) tape.eject();
   });
 
   menu("Machine", [this] {
@@ -504,7 +546,8 @@ void App::drawStatusOverlay() {
     ImGui::TextUnformatted("Copy a 16K 48K ROM to roms/48.rom or use File > Open ROM.");
     ImGui::TextUnformatted("ROM images are copyrighted and are not bundled with myNext.");
     ImGui::Spacing();
-    ImGui::TextUnformatted("Keyboard: F1 debugger, F2 pause, F5 reset, arrows/Ctrl = Kempston.");
+    ImGui::TextUnformatted(
+        "Keyboard: F1 debugger, F2 pause, F5 reset, F6 tape, F7 rewind, arrows/Ctrl = Kempston.");
     ImGui::End();
   }
 
@@ -518,8 +561,14 @@ void App::drawStatusOverlay() {
                  ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoSavedSettings |
                      ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoFocusOnAppearing |
                      ImGuiWindowFlags_NoNav | ImGuiWindowFlags_NoMove);
+    const Tape& tape = machine_->tape();
     ImGui::Text("%s  |  %.1f Hz", status_.c_str(),
                 double(machine_->timings().cpuHz) / double(machine_->tstatesPerFrameValue()));
+    if (tape.loaded()) {
+      ImGui::Text("Tape %zu/%zu %s  %s", tape.blockIndex() + 1, tape.blockCount(),
+                  tape.playing() ? "PLAY" : (tape.atEnd() ? "END" : "STOP"),
+                  tape.currentBlockName().c_str());
+    }
     ImGui::End();
     ImGui::PopFont();
     ImGui::PopStyleVar();

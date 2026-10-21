@@ -1,15 +1,70 @@
+#include <cctype>
+#include <cstdio>
 #include <string>
 
 #include <SDL3/SDL_main.h>
 
 #include "frontend/app.h"
 
+namespace {
+
+std::string lowerExtension(const std::string& path) {
+  const size_t dot = path.find_last_of('.');
+  if (dot == std::string::npos) return {};
+  std::string ext = path.substr(dot);
+  for (char& c : ext) c = char(std::tolower(static_cast<unsigned char>(c)));
+  return ext;
+}
+
+void printUsage() {
+  std::printf(
+      "usage: mynext [options] [file]\n"
+      "\n"
+      "  file              .rom, .tap, .tzx, .sna or .z80, picked by extension\n"
+      "  --rom FILE        Spectrum ROM image\n"
+      "  --tape FILE       TAP or TZX image to insert into the tape deck\n"
+      "  --snapshot FILE   SNA or Z80 snapshot to restore at startup\n"
+      "  -h, --help        this message\n");
+}
+
+} // namespace
+
 int main(int argc, char** argv) {
-  std::string romPath;
-  if (argc > 1) romPath = argv[1];
+  mynext::frontend::App::Options options;
+
+  for (int i = 1; i < argc; ++i) {
+    const std::string argument = argv[i];
+    const bool hasValue = i + 1 < argc;
+
+    if (argument == "-h" || argument == "--help") {
+      printUsage();
+      return 0;
+    }
+    if ((argument == "--rom" || argument == "--tape" || argument == "--snapshot") && hasValue) {
+      const std::string value = argv[++i];
+      if (argument == "--rom") options.rom = value;
+      if (argument == "--tape") options.tape = value;
+      if (argument == "--snapshot") options.snapshot = value;
+      continue;
+    }
+
+    // A bare path is routed by its extension so the desktop can pass a file.
+    const std::string extension = lowerExtension(argument);
+    if (extension == ".rom") {
+      options.rom = argument;
+    } else if (extension == ".tap" || extension == ".tzx") {
+      options.tape = argument;
+    } else if (extension == ".sna" || extension == ".z80") {
+      options.snapshot = argument;
+    } else {
+      std::fprintf(stderr, "mynext: unsupported argument '%s'\n", argument.c_str());
+      printUsage();
+      return 2;
+    }
+  }
 
   mynext::frontend::App app;
-  if (!app.init(romPath)) return 1;
+  if (!app.init(options)) return 1;
 
   app.run();
   return 0;
