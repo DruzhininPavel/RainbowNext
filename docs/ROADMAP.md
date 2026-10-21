@@ -96,7 +96,13 @@ a multicolour demo renders correctly; `z80test` passes.
       (bit 1), and clears both as it is read.
 * [ ] The second Layer 2 palette and its priority bit, ULA+ palettes, Radastan
       mode
-* [ ] Copper, DMA
+* [x] The Copper of registers `0x60`-`0x63`: 2K of program memory addressed by
+      `0x61` (low byte) and bits 2:0 of `0x62` (high three bits), the `WAIT`
+      and `MOVE` instructions, `0x0000` as a no-op and `0xFFFF` as the halt,
+      the four modes of `0x62` (stop, restart, continue, restart every frame),
+      a repeated mode that only moves the write index, and a compositor that
+      samples the register file per scanline so a write shows up on its line.
+* [ ] DMA
 * [ ] 3× AY with stereo, specdrum, `.nex` snapshot format
 * [ ] SD card image access for NextZXOS
 * [ ] Video pipeline: Timex modes, ULA+ palettes, blending modes 6 and 7 of the
@@ -134,6 +140,10 @@ These are deliberate simplifications, tracked here so they are not forgotten:
    flushed back to the `.dsk` file.
 9. Contention uses one fixed pattern per line instead of a per-line
    `line_times[]` table, so the 128K/+3 windows start a few T-states early.
+10. The Copper's horizontal `WAIT` position is decoded but does not delay the
+    instruction: the compositor samples the register file once per scanline, so
+    a Copper write lands at the start of its line rather than at its column.
+    Likewise a `MOVE` costs no T-states in the frame budget.
 
 ## Open decisions
 

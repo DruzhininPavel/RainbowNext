@@ -7,6 +7,7 @@
 #include "core/ay.h"
 #include "core/beeper.h"
 #include "core/bus.h"
+#include "core/copper.h"
 #include "core/keyboard.h"
 #include "core/nextreg.h"
 #include "core/palette.h"
@@ -140,6 +141,7 @@ public:
   const NextRegFile& nextRegs() const { return next_; }
   const NextPalette& palette() const { return palette_; }
   const Sprites& sprites() const { return sprites_; }
+  const Copper& copper() const { return copper_; }
   u8 readNextReg(u8 reg) const;
   void writeNextReg(u8 reg, u8 value);
   u32 tstatesPerLineValue() const { return tstatesPerLine_; }
@@ -213,9 +215,11 @@ private:
   // Register 0x15 orders sprites, Layer 2 and the ULA from top to bottom.
   std::array<int, 3> layerOrder() const;
   static int layerDepth(const std::array<int, 3>& order, int layer);
-  // Sprites are a separate pass over the finished frame: they may sit above
-  // or below the other layers and may reach into the border.
-  void renderSprites();
+  // The raster line the framebuffer row `r` belongs to, border included.
+  int rasterLineFor(int r) const;
+  // Sprites are drawn after the row's layers, because they may sit above or
+  // below them and may reach into the border.
+  void renderSpriteRow(int r);
   // The colour the ULA draws with, honouring the Next palette when present.
   u32 ulaColour(u8 index) const;
   u32 paperColour(u8 index) const;
@@ -241,6 +245,7 @@ private:
   NextRegFile next_;
   NextPalette palette_;
   Sprites sprites_;
+  Copper copper_;
   // Register 0x18 takes four writes in a row, so the position needs a counter.
   std::array<u8, 4> layer2Clip_ = {0, 255, 0, 191};
   u8 layer2ClipIndex_ = 0;
@@ -249,8 +254,8 @@ private:
   u8 tilemapClipIndex_ = 0;
   // Bit per pixel: the layers that hide a sprite at that position.
   std::vector<u8> occluders_;
-  // Bit per pixel: a sprite has already drawn there, which is a collision.
-  std::vector<u8> spriteDrawn_;
+  // One scanline of the collision map: a sprite has already drawn there.
+  std::array<bool, FrameWidth> spriteDrawn_{};
 
   std::vector<u8> rom_;
   std::vector<u8> ram_;

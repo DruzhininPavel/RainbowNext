@@ -126,13 +126,19 @@ the controller free of I/O and lets tests construct one on the stack.
 
 ## Video pipeline
 
-One frame is composed pixel by pixel, with sprites in a second pass.
-`renderFrame()` walks the 320x256 framebuffer row by row. For each row it takes
-the border colour from the ULA's recorded border byte, decodes the 256x192
-bitmap into `renderUlaRow()` when the row is a screen row, and then resolves
-each of the 320 columns: the ULA pixel, the tilemap pixel and the Layer 2 pixel
-are all looked up for that coordinate and stacked by `layerOrder()`, which
-decodes the priority table of register `0x15`.
+One frame is composed pixel by pixel, scanline by scanline.
+`renderFrame()` walks the 320x256 framebuffer row by row. For each row it maps
+the framebuffer row back to its raster line with `rasterLineFor()`, hands that
+line to the Copper, and then samples the layer registers -- the priority table
+of `0x15`, the ULA blanking bit of `0x68`, the tilemap view, the Layer 2 view
+and the recorded border byte. Sampling per scanline is what lets the Copper
+change a colour, a scroll offset or a priority partway down the frame: the
+change is visible from the line it was made on.
+
+The row itself is then resolved column by column: the ULA pixel (decoded into
+`ulaRow` by `renderUlaRow()` when the row is a screen row), the tilemap pixel
+and the Layer 2 pixel are all looked up for that coordinate and stacked by
+`layerOrder()`, which decodes the priority table of register `0x15`.
 
 The tilemap shares the ULA's display layer. When both cover the same pixel, the
 tile's own "ULA on top" bit picks the winner; a force bit in `0x6B` overrides
@@ -141,12 +147,13 @@ it, and `0x68` bit 0 combines the two with a bitwise AND instead. Register
 pixel rather than by skipping the row.
 
 While stacking, the composer records an `occluders_` mask: a pixel is set when
-an opaque layer sits above the sprites in the priority order. `renderSprites()`
-then makes a second pass over the whole surface -- sprites may reach into the
-border and may sit above or below the other layers -- and skips the pixels the
-mask marks as hidden. This keeps the expensive sprite scan out of the layer
-loop and gives sprite-0-on-top, over-border drawing and the priority table for
-free.
+an opaque layer sits above the sprites in the priority order. `renderSpriteRow()`
+then makes a second pass over that one row -- sprites may reach into the border
+and may sit above or below the other layers -- and skips the pixels the mask
+marks as hidden. This keeps the expensive sprite scan out of the layer loop and
+gives sprite-0-on-top, over-border drawing and the priority table for free. The
+`0x303B` collision map is one scanline wide for the same reason: it is filled
+while the row is drawn and cleared for the next one.
 
 Every colour goes through `NextPalette`, which maps a palette index to ARGB.
 The ULA and the border read the ULA palettes (register `0x43` bit 1 selects the
@@ -168,14 +175,46 @@ anchor's mirror, rotate and scale, and their offsets are scaled and turned with
 the anchor. Rendering then works purely from the resolved states, which keeps
 the relative logic in one place.
 
-`renderSprites()` also maintains the two flags of the status port `0x303B`.
-Collisions come from a bit-per-pixel `spriteDrawn_` map: a sprite that writes
-over a pixel another sprite already drew raises the collision flag. The budget
-check is a pre-pass that counts how many sprites cover each of the 256
-scanlines; the hundredth sprite on a line is the last one that fits, and
-anything past it is dropped from the frame and raises the overflow flag. Both
-flags clear themselves when the port is read, so a program can poll them per
-frame without a separate reset.
+`renderSpriteRow()` also maintains the two flags of the status port `0x303B`.
+Collisions come from a bit-per-pixel `spriteDrawn_` map, one scanline wide and
+cleared as the row starts: a sprite that writes over a pixel another sprite
+already drew raises the collision flag. The budget check counts how many sprites
+cover the row being drawn; the hundredth sprite on a line is the last one that
+fits, and anything past it is dropped from the frame and raises the overflow
+flag. Both flags clear themselves when the port is read, so a program can poll
+them per frame without a separate reset.
+
+## Copper
+
+The Copper lives in `src/core/copper.*` and is the machine's own small
+coprocessor rather than part of the CPU: it has 2K of program memory, addressed
+as 1024 two-byte instructions, and a ten-bit program counter that wraps back to
+the start. `Machine::renderFrame()` calls `Copper::runToLine()` with the raster
+line it is about to draw, and the Copper runs until it blocks on a `WAIT` for a
+later line, calling back into `writeNextReg()` for every `MOVE`. That callback
+is the whole interface, which keeps the Copper independent of the machine and
+lets tests drive it with a recording lambda.
+
+The instruction word shares one bit between the two opcodes: `1hhhhhhv vvvvvvvv`
+is a `WAIT` for line `v` at horizontal position `h*8`, and `0rrrrrrr vvvvvvvv`
+is a `MOVE` of `v` into Next register `r`. `0x0000` is a no-op, and `0xFFFF`
+waits for a line past the end of the frame, which is how a program halts. The
+run loop is bounded to one pass over the program so a program without waits
+cannot stall the frame.
+
+Register `0x61` holds the low byte of the write index and bits 2:0 of `0x62`
+its top three bits; bits 7:6 of `0x62` are the mode -- stop, restart, continue,
+or restart every frame. A control write whose mode bits match the previous
+value only moves the write index, so a program can be uploaded while it is
+running. `0x63` takes a word as two writes, high byte then low byte, and
+commits it only when the second one arrives, so a half-written instruction is
+never executed.
+
+The horizontal position of a `WAIT` is decoded and kept, but the compositor
+samples the register file once per scanline, so it does not delay the
+instruction past the start of its line. That is the one deliberate
+simplification in the model; it is what the pixel-accurate version would need
+mid-line register sampling for.
 
 ## Frame buffer
 

@@ -101,12 +101,12 @@ void Machine::reset() {
   next_.reset();
   palette_.reset();
   sprites_.reset();
+  copper_.reset();
   layer2Clip_ = {0, 255, 0, 191};
   layer2ClipIndex_ = 0;
   tilemapClip_ = {0, 159, 0, 255};
   tilemapClipIndex_ = 0;
   occluders_.assign(FrameWidth * FrameHeight, 0);
-  spriteDrawn_.assign(FrameWidth * FrameHeight, 0);
   // Bits 6:4 are the display timing and bits 2:0 the machine type; a Next in
   // Next mode presents itself as a +2A/+3.
   if (type_ == MachineType::Next) next_.write(0x03, 0x33);
@@ -521,6 +521,8 @@ u8 Machine::readNextReg(u8 reg) const {
   // The raster counters are the only registers whose value lives in the
   // machine rather than in the file itself.
   if (reg == 0x40) return palette_.index();
+  if (reg == 0x61) return copper_.addressLsb();
+  if (reg == 0x62) return copper_.control();
   if (reg == 0x1E || reg == 0x1F) {
     const u32 line = u32(tstates_ % tstatesPerFrame_) / tstatesPerLine_;
     return reg == 0x1E ? u8(line) : u8(line >> 8);
@@ -560,6 +562,18 @@ void Machine::writeNextReg(u8 reg, u8 value) {
       return;
     case 0x44: // 9-bit palette colour
       palette_.write9(value);
+      return;
+    case 0x60: // Copper program byte
+      copper_.writeData8(value);
+      return;
+    case 0x61: // Copper write index, low byte
+      copper_.writeAddressLsb(value);
+      return;
+    case 0x62: // Copper write index high bits and control mode
+      copper_.writeControl(value);
+      return;
+    case 0x63: // Copper program word, committed after the second byte
+      copper_.writeData16(value);
       return;
     case 0x09: // peripheral 2: bit 4 locks sprite number to port 0x303B
       next_.write(reg, value);
@@ -794,26 +808,38 @@ int Machine::layerDepth(const std::array<int, 3>& order, int layer) {
   return 3;
 }
 
+int Machine::rasterLineFor(int r) const {
+  int line = 0;
+  if (r < BorderHeight) {
+    line = r;
+  } else if (r >= BorderHeight + ScreenHeight) {
+    line = timings_.topBorder + ScreenHeight + (r - BorderHeight - ScreenHeight);
+  } else {
+    line = timings_.topBorder + (r - BorderHeight);
+  }
+  if (line < 0 || line >= int(borderLines_.size())) line = 0;
+  return line;
+}
+
 void Machine::renderFrame() {
-  const std::array<int, 3> order = layerOrder();
-  const int spriteDepth = layerDepth(order, LayerSprites);
-  // 0x68 bit 7 blanks the ULA without touching the tilemap it shares a layer
-  // with, so it has to be handled per pixel rather than by skipping the row.
-  const bool ulaOn = !isNext() || (next_.read(0x68) & 0x80) == 0;
-  const TilemapView tilemap = tilemapView();
-  const Layer2View layer2 = layer2View();
+  // Every layer register is sampled per scanline, so the Copper can rewrite
+  // them while the frame is being drawn and the change shows up on the line it
+  // was made for.
+  if (copper_.mode() == 3) copper_.resetProgramCounter();
+  sprites_.clearStatus();
 
   std::array<u32, ScreenWidth> ulaRow{};
   for (int r = 0; r < FrameHeight; ++r) {
-    int line = 0;
-    if (r < BorderHeight) {
-      line = r;
-    } else if (r >= BorderHeight + ScreenHeight) {
-      line = timings_.topBorder + ScreenHeight + (r - BorderHeight - ScreenHeight);
-    } else {
-      line = timings_.topBorder + (r - BorderHeight);
-    }
-    if (line < 0 || line >= int(borderLines_.size())) line = 0;
+    const int line = rasterLineFor(r);
+    copper_.runToLine(line, [this](u8 reg, u8 value) { writeNextReg(reg, value); });
+
+    const std::array<int, 3> order = layerOrder();
+    const int spriteDepth = layerDepth(order, LayerSprites);
+    // 0x68 bit 7 blanks the ULA without touching the tilemap it shares a layer
+    // with, so it has to be handled per pixel rather than by skipping the row.
+    const bool ulaOn = !isNext() || (next_.read(0x68) & 0x80) == 0;
+    const TilemapView tilemap = tilemapView();
+    const Layer2View layer2 = layer2View();
     const u32 border = paperColour(borderLines_[size_t(line)] & 0x07);
 
     const int y = r - BorderHeight;
@@ -864,9 +890,9 @@ void Machine::renderFrame() {
       row[x] = rgb;
       occluders[x] = occluder;
     }
-  }
 
-  renderSprites();
+    renderSpriteRow(r);
+  }
 }
 
 
@@ -1078,8 +1104,7 @@ void Machine::renderUlaRow(int y, std::array<u32, ScreenWidth>& row) const {
 
 
 
-void Machine::renderSprites() {
-  sprites_.clearStatus();
+void Machine::renderSpriteRow(int r) {
   if (!isNext()) return;
   const u8 control = next_.read(0x15);
   if ((control & 0x01) == 0) return; // sprites disabled
@@ -1091,39 +1116,23 @@ void Machine::renderSprites() {
   const int palette = (palette_.control() & 0x08) != 0 ? NextPalette::SpritesSecond
                                                        : NextPalette::SpritesFirst;
   const auto& clip = sprites_.clip();
+  // Resolving per row keeps sprite attribute writes made by the Copper on an
+  // earlier scanline visible on the lines that follow them.
   const auto states = sprites_.resolve();
-  std::fill(spriteDrawn_.begin(), spriteDrawn_.end(), 0);
+
+  const bool rowInScreen = r >= BorderHeight && r < BorderHeight + ScreenHeight;
+  u32* row = framebuffer_.data() + size_t(r) * FrameWidth;
+  const u8* occluders = occluders_.data() + size_t(r) * FrameWidth;
+  spriteDrawn_.fill(false);
 
   // The hardware prepares sprites in list order and can only manage about a
   // hundred unscaled ones per scanline. Whatever it never reached is left out
-  // of the frame, and port 0x303B reports that the line ran over.
+  // of the line, and port 0x303B reports that the budget ran out.
   constexpr int SpritesPerLine = 100;
-  std::array<u8, FrameHeight> lineSprites{};
-  std::array<bool, Sprites::Count> dropped{};
-  for (int sprite = 0; sprite < Sprites::Count; ++sprite) {
-    const SpriteState& state = states[size_t(sprite)];
-    if (!state.visible) continue;
-    const int height = Sprites::Size * state.scaleY;
-    bool fits = true;
-    for (int dy = 0; dy < height && fits; ++dy) {
-      const int surfaceY = (state.y + dy) & 0x1FF;
-      if (surfaceY >= FrameHeight) continue;
-      fits = lineSprites[size_t(surfaceY)] < SpritesPerLine;
-    }
-    if (!fits) {
-      dropped[size_t(sprite)] = true;
-      sprites_.noteOverflow();
-      continue;
-    }
-    for (int dy = 0; dy < height; ++dy) {
-      const int surfaceY = (state.y + dy) & 0x1FF;
-      if (surfaceY < FrameHeight) ++lineSprites[size_t(surfaceY)];
-    }
-  }
+  int prepared = 0;
 
   for (int n = 0; n < Sprites::Count; ++n) {
     const int sprite = zeroOnTop ? Sprites::Count - 1 - n : n;
-    if (dropped[size_t(sprite)]) continue;
     const SpriteState& state = states[size_t(sprite)];
     if (!state.visible) continue;
 
@@ -1131,57 +1140,54 @@ void Machine::renderSprites() {
     const int scaleY = state.scaleY;
     const int width = Sprites::Size * scaleX;
     const int height = Sprites::Size * scaleY;
-    const int originX = state.x;
-    const int originY = state.y;
+
+    // Sprite coordinates wrap at 512, so a sprite hanging off the top or the
+    // right edge reappears on the opposite side.
+    const int dy = (r - state.y) & 0x1FF;
+    if (dy >= height) continue;
+
+    if (++prepared > SpritesPerLine) {
+      sprites_.noteOverflow();
+      continue;
+    }
+
     const int offset = state.paletteOffset << 4;
+    for (int dx = 0; dx < width; ++dx) {
+      const int surfaceX = (state.x + dx) & 0x1FF;
+      if (surfaceX >= FrameWidth) continue;
 
-    for (int dy = 0; dy < height; ++dy) {
-      // Sprite coordinates wrap at 512, so a sprite hanging off the top or
-      // the right edge reappears on the opposite side.
-      const int surfaceY = (originY + dy) & 0x1FF;
-      if (surfaceY >= FrameHeight) continue;
-      const bool rowInScreen =
-          surfaceY >= BorderHeight && surfaceY < BorderHeight + ScreenHeight;
-      const size_t rowBase = size_t(surfaceY) * FrameWidth;
-      u32* row = framebuffer_.data() + rowBase;
+      // Sprites only reach into the border when over-border drawing is on.
+      const bool inScreen = rowInScreen && surfaceX >= BorderWidth &&
+                            surfaceX < BorderWidth + ScreenWidth;
+      if (!inScreen && !overBorder) continue;
 
-      for (int dx = 0; dx < width; ++dx) {
-        const int surfaceX = (originX + dx) & 0x1FF;
-        if (surfaceX >= FrameWidth) continue;
+      // The compositor recorded the layers that sit above the sprites, so a
+      // pixel of any of them hides the sprite.
+      if (occluders[surfaceX] != 0) continue;
 
-        // Sprites only reach into the border when over-border drawing is on.
-        const bool inScreen = rowInScreen && surfaceX >= BorderWidth &&
-                              surfaceX < BorderWidth + ScreenWidth;
-        if (!inScreen && !overBorder) continue;
-
-        // The compositor recorded the layers that sit above the sprites, so a
-        // pixel of any of them hides the sprite.
-        if (occluders_[rowBase + size_t(surfaceX)] != 0) continue;
-
-        // The clip window is measured from the ULA origin unless the sprites
-        // reach into the border, where it moves to the sprite origin and its
-        // X coordinates count double.
-        if (!overBorder || clipOverBorder) {
-          int clipX = overBorder ? surfaceX : surfaceX - BorderWidth;
-          if (overBorder) clipX >>= 1;
-          const int clipY = overBorder ? surfaceY : surfaceY - BorderHeight;
-          if (clipX < clip[0] || clipX > clip[1]) continue;
-          if (clipY < clip[2] || clipY > clip[3]) continue;
-        }
-
-        const int index =
-            sprites_.pixel(state, dx / scaleX, dy / scaleY, transparency);
-        if (index < 0) continue;
-
-        // Two sprites over the same pixel are what the collision flag is for.
-        if (spriteDrawn_[rowBase + size_t(surfaceX)] != 0) {
-          sprites_.noteCollision();
-        } else {
-          spriteDrawn_[rowBase + size_t(surfaceX)] = 1;
-        }
-
-        row[surfaceX] = palette_.colour(palette, u8((offset + index) & 0xFF));
+      // The clip window is measured from the ULA origin unless the sprites
+      // reach into the border, where it moves to the sprite origin and its X
+      // coordinates count double.
+      if (!overBorder || clipOverBorder) {
+        int clipX = overBorder ? surfaceX : surfaceX - BorderWidth;
+        if (overBorder) clipX >>= 1;
+        const int clipY = overBorder ? r : r - BorderHeight;
+        if (clipX < clip[0] || clipX > clip[1]) continue;
+        if (clipY < clip[2] || clipY > clip[3]) continue;
       }
+
+      const int index =
+          sprites_.pixel(state, dx / scaleX, dy / scaleY, transparency);
+      if (index < 0) continue;
+
+      // Two sprites over the same pixel are what the collision flag is for.
+      if (spriteDrawn_[size_t(surfaceX)]) {
+        sprites_.noteCollision();
+      } else {
+        spriteDrawn_[size_t(surfaceX)] = true;
+      }
+
+      row[surfaceX] = palette_.colour(palette, u8((offset + index) & 0xFF));
     }
   }
 }

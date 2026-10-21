@@ -39,6 +39,10 @@ Status: M1 — 48K and 128K/+2/+3 boot with AY sound, tape loading, disk images
   tiles or monochrome text tiles, 512-tile mode, a default attribute, mirror,
   rotate, hardware scroll, a clip window, a transparency index, and per-tile
   control over whether it sits over or under the ULA.
+* **Copper** — the 2K program memory of registers `0x60`-`0x63` with its `WAIT`
+  and `MOVE` instructions, the four control modes of `0x62`, and a compositor
+  that samples the register file once per scanline so a Copper write lands on
+  the line it was made for.
 * **ULA** — port `0xFE` read/write, border, beeper, 8×5 keyboard matrix,
   Fuse-compatible memory contention, floating bus.
 * **Machines** — 48K, 128K, +2, +3 and Pentagon, each with its own timings
@@ -142,10 +146,10 @@ roms/           user-supplied ROMs (empty by design)
 ctest --test-dir build --output-on-failure
 ```
 
-222 tests cover the Z80 core (timings, flags, undocumented opcodes,
+239 tests cover the Z80 core (timings, flags, undocumented opcodes,
 interrupts), the Z80N extension, the Next MMU, palette, Layer 2, sprites
-(including relative and unified sprites and the collision flags) and the
-tilemap, ULA
+(including relative and unified sprites and the collision flags), the tilemap
+and the Copper, ULA
 behaviour, contention, floating bus, frame length, audio rate, both snapshot
 formats, the AY, 128K/+3 paging and timings, tape blocks, the µPD765 and the DSK
 parser, and end-to-end runs of
