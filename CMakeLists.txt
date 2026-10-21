@@ -84,6 +84,7 @@ add_library(mynext_core STATIC
   src/core/upd765.cpp
   src/core/nextreg.cpp
   src/core/palette.cpp
+  src/core/sprites.cpp
   src/formats/dsk.cpp
   src/formats/sna.cpp
   src/formats/tape.cpp
@@ -123,6 +124,7 @@ if(MYNEXT_BUILD_TESTS)
     tests/test_z80.cpp
     tests/test_z80n.cpp
     tests/test_palette.cpp
+    tests/test_sprites.cpp
     tests/test_nextreg.cpp
     tests/test_ula.cpp
     tests/test_formats.cpp

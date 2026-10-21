@@ -72,13 +72,21 @@ a multicolour demo renders correctly; `z80test` passes.
       over the ULA per pixel while the ULA still owns the border.
 * [x] Layer 2 clip window (`0x18`, four writes: X1, X2, Y1, Y2, applied to the
       layer coordinates before compositing).
+* [x] Sprites — 128 sprites of 16×16 with four or five attribute bytes
+      (`0x34`-`0x39`, `0x75`-`0x79`, ports `0x303B`/`0x57`/`0x5B`), a separate
+      16K pattern RAM, 8-bit and 4-bit patterns, palette offsets, mirror,
+      rotate, 1×-8× scaling, per-sprite transparency (`0x4B`), the sprite clip
+      window (`0x19`, reset through `0x1C`) and the whole `0x15` control byte:
+      enable, over-border, clipping in over-border mode, sprite-0-on-top and
+      the layer priority order.
+* [ ] Relative and unified sprites, sprite collision detection
 * [ ] The second Layer 2 palette and its priority bit, ULA+ palettes, Radastan
       mode
-* [ ] 128 sprites (4B/5B), tilemap, Copper, DMA
+* [ ] Tilemap, Copper, DMA
 * [ ] 3× AY with stereo, specdrum, `.nex` snapshot format
 * [ ] SD card image access for NextZXOS
 * [ ] Video pipeline: ULA/Timex → Layer 2 → sprites → tilemap → compositor → palette
-      (the ULA → Layer 2 → palette path is in place)
+      (the ULA → Layer 2 → sprites → palette path is in place)
 
 ## M3 — Tooling and shipping
 

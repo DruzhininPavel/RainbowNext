@@ -10,6 +10,7 @@
 #include "core/keyboard.h"
 #include "core/nextreg.h"
 #include "core/palette.h"
+#include "core/sprites.h"
 #include "core/tape.h"
 #include "core/upd765.h"
 #include "core/types.h"
@@ -138,6 +139,7 @@ public:
   void setKempston(u8 value) { kempston_ = value; }
   const NextRegFile& nextRegs() const { return next_; }
   const NextPalette& palette() const { return palette_; }
+  const Sprites& sprites() const { return sprites_; }
   u8 readNextReg(u8 reg) const;
   void writeNextReg(u8 reg, u8 value);
   u32 tstatesPerLineValue() const { return tstatesPerLine_; }
@@ -181,6 +183,10 @@ private:
   // One framebuffer pixel of Layer 2, or Transparent when nothing is drawn.
   u32 layer2Pixel(const Layer2View& view, int x, int y) const;
   bool layer2AboveUla() const;
+  // Sprites are a separate pass over the finished frame: they may sit above
+  // or below the other layers and may reach into the border.
+  void renderSprites();
+  bool spriteAboveUla() const;
   // The colour the ULA draws with, honouring the Next palette when present.
   u32 ulaColour(u8 index) const;
   u32 paperColour(u8 index) const;
@@ -205,6 +211,7 @@ private:
   formats::DiskImage disk_;
   NextRegFile next_;
   NextPalette palette_;
+  Sprites sprites_;
   // Register 0x18 takes four writes in a row, so the position needs a counter.
   std::array<u8, 4> layer2Clip_ = {0, 255, 0, 191};
   u8 layer2ClipIndex_ = 0;

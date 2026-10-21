@@ -124,6 +124,21 @@ read can hand out a fixed-size block regardless of how the image was written.
 `DiskImage` and re-points the controller after a load or a reset, which keeps
 the controller free of I/O and lets tests construct one on the stack.
 
+## Video pipeline
+
+One frame is composed in two passes. `renderFrame()` walks the 320x256
+framebuffer row by row: the border rows take their colour from the ULA's
+recorded border byte and the screen rows come from `renderScreenRow()`, which
+decodes the bitmap, picks ink and paper through the palette and lets Layer 2
+overwrite individual pixels. `renderSprites()` then makes a second pass over
+the whole surface, because sprites may reach into the border and may sit above
+or below the other layers.
+
+Every colour goes through `NextPalette`, which maps a palette index to ARGB.
+The ULA and the border read the ULA palettes (register `0x43` bit 1 selects the
+second one), Layer 2 reads one of its two palettes (bit 2) and the sprites read
+theirs (bit 3). Bits 6:4 of `0x43` only choose where palette *writes* land.
+
 ## Frame buffer
 
 `Machine::framebuffer()` is `320x256` ARGB8888: a 32-pixel border around a

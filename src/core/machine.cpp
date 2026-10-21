@@ -100,6 +100,7 @@ void Machine::reset() {
 
   next_.reset();
   palette_.reset();
+  sprites_.reset();
   layer2Clip_ = {0, 255, 0, 191};
   layer2ClipIndex_ = 0;
   // Bits 6:4 are the display timing and bits 2:0 the machine type; a Next in
@@ -312,6 +313,7 @@ u8 Machine::ioRead(u16 port, u32) {
   if (isNext()) {
     if (port == 0x243B) return next_.selected();
     if (port == 0x253B) return readNextReg(next_.selected());
+    if (port == 0x303B) return 0x00; // collision bits are not modelled yet
   }
 
   if ((port & 0x0001) == 0) {
@@ -345,6 +347,18 @@ void Machine::ioWrite(u16 port, u8 value, u32) {
     }
     if (port == 0x253B) {
       writeNextReg(next_.selected(), value);
+      return;
+    }
+    if (port == 0x303B) {
+      sprites_.selectPort(value);
+      return;
+    }
+    if ((port & 0x00FF) == 0x57) { // sprite attributes, streamed
+      sprites_.writeAttributePort(value);
+      return;
+    }
+    if ((port & 0x00FF) == 0x5B) { // sprite pattern bytes
+      sprites_.writePattern(value);
       return;
     }
   }
@@ -538,6 +552,32 @@ void Machine::writeNextReg(u8 reg, u8 value) {
     case 0x44: // 9-bit palette colour
       palette_.write9(value);
       return;
+    case 0x09: // peripheral 2: bit 4 locks sprite number to port 0x303B
+      next_.write(reg, value);
+      sprites_.setLockstep((value & 0x10) != 0);
+      return;
+    case 0x19: // sprite clip window, four writes: X1, X2, Y1, Y2
+      next_.write(reg, value);
+      sprites_.writeClip(value);
+      return;
+    case 0x1C: // reset the clip window write positions
+      next_.write(reg, value);
+      if (value & 0x02) sprites_.resetClipIndex();
+      if (value & 0x01) layer2ClipIndex_ = 0;
+      return;
+    case 0x34: // sprite number
+      next_.write(reg, value);
+      sprites_.setNumber(value);
+      if (sprites_.lockstep()) sprites_.selectPort(value);
+      return;
+    case 0x35: case 0x36: case 0x37: case 0x38: case 0x39: // sprite attributes
+      next_.write(reg, value);
+      sprites_.writeAttribute(reg - 0x35, value, false);
+      return;
+    case 0x75: case 0x76: case 0x77: case 0x78: case 0x79: // with auto-increment
+      next_.write(reg, value);
+      sprites_.writeAttribute(reg - 0x75, value, true);
+      return;
     case 0x18: // Layer 2 clip window, four writes: X1, X2, Y1, Y2
       next_.write(reg, value);
       layer2Clip_[layer2ClipIndex_ & 0x03] = value;
@@ -726,12 +766,14 @@ void Machine::renderFrame() {
       renderScreenRow(r - BorderHeight);
     }
   }
+  renderSprites();
 }
 
 int Machine::ulaPalette() const {
-  // 0x43 bits 6:4 select which palette the ULA reads from; only 100 is ULA2.
-  return ((palette_.control() >> 4) & 0x07) == 4 ? NextPalette::Ula1
-                                                 : NextPalette::Ula0;
+  // 0x43 bit 1 picks the second ULA palette for rendering; bits 6:4 only
+  // choose the palette the write registers land in.
+  return (palette_.control() & 0x02) != 0 ? NextPalette::Ula1
+                                          : NextPalette::Ula0;
 }
 
 u32 Machine::ulaColour(u8 index) const {
@@ -756,7 +798,8 @@ Machine::Layer2View Machine::layer2View() const {
   view.fourBit = mode == 2;
   view.width = view.fourBit ? 640 : (mode == 1 ? 320 : 256);
   view.height = mode == 0 ? 192 : 256;
-  view.palette = NextPalette::Layer2First;
+  view.palette = (palette_.control() & 0x04) != 0 ? NextPalette::Layer2Second
+                                                  : NextPalette::Layer2First;
   view.transparency = next_.read(0x14);
   view.scrollX = next_.read(0x16) | ((next_.read(0x71) & 0x01) << 8);
   view.scrollY = next_.read(0x17);
@@ -797,10 +840,17 @@ u32 Machine::layer2Pixel(const Layer2View& view, int x, int y) const {
 }
 
 bool Machine::layer2AboveUla() const {
-  // 0x15 bits 4:2 hold the layer priority order; Layer 2 sits above the ULA
-  // for the first two and the two blending modes.
+  // 0x15 bits 4:2 name the layers from top to bottom. Layer 2 is listed before
+  // the ULA in S L U, L S U and L U S; the two blending modes (110 and 111)
+  // merge the layers instead of ordering them, so Layer 2 stays on top.
   const int priority = (next_.read(0x15) >> 2) & 0x07;
-  return priority <= 1 || priority >= 6;
+  return priority == 0 || priority == 1 || priority == 3 || priority >= 6;
+}
+
+bool Machine::spriteAboveUla() const {
+  // Sprites come first in S L U, S U L and L S U.
+  const int priority = (next_.read(0x15) >> 2) & 0x07;
+  return priority <= 2 || priority >= 6;
 }
 
 void Machine::renderScreenRow(int y) {
@@ -840,6 +890,85 @@ void Machine::renderScreenRow(int y) {
         if (overlay != Transparent) rgb = overlay;
       }
       dest[b] = rgb;
+    }
+  }
+}
+
+
+void Machine::renderSprites() {
+  if (!isNext()) return;
+  const u8 control = next_.read(0x15);
+  if ((control & 0x01) == 0) return; // sprites disabled
+
+  const int priority = (control >> 2) & 0x07;
+  const bool overBorder = (control & 0x02) != 0;
+  const bool clipOverBorder = (control & 0x20) != 0;
+  const bool zeroOnTop = (control & 0x40) != 0;
+  const bool aboveUla = spriteAboveUla();
+  // In L S U the sprites sit between Layer 2 and the ULA, so an opaque Layer 2
+  // pixel hides them.
+  const Layer2View layer2 = (priority == 1) ? layer2View() : Layer2View{};
+  const u8 transparency = next_.read(0x4B);
+  const int palette = (palette_.control() & 0x08) != 0 ? NextPalette::SpritesSecond
+                                                       : NextPalette::SpritesFirst;
+  const auto& clip = sprites_.clip();
+
+  for (int n = 0; n < Sprites::Count; ++n) {
+    const int sprite = zeroOnTop ? Sprites::Count - 1 - n : n;
+    if (!sprites_.visible(sprite)) continue;
+
+    const int scaleX = sprites_.scaleX(sprite);
+    const int scaleY = sprites_.scaleY(sprite);
+    const int width = Sprites::Size * scaleX;
+    const int height = Sprites::Size * scaleY;
+    const int originX = sprites_.x(sprite);
+    const int originY = sprites_.y(sprite);
+    const int offset = sprites_.paletteOffset(sprite) << 4;
+
+    for (int dy = 0; dy < height; ++dy) {
+      // Sprite coordinates wrap at 512, so a sprite hanging off the top or
+      // the right edge reappears on the opposite side.
+      const int surfaceY = (originY + dy) & 0x1FF;
+      if (surfaceY >= FrameHeight) continue;
+      const bool rowInScreen =
+          surfaceY >= BorderHeight && surfaceY < BorderHeight + ScreenHeight;
+      u32* row = framebuffer_.data() + size_t(surfaceY) * FrameWidth;
+
+      for (int dx = 0; dx < width; ++dx) {
+        const int surfaceX = (originX + dx) & 0x1FF;
+        if (surfaceX >= FrameWidth) continue;
+
+        const bool inScreen = rowInScreen && surfaceX >= BorderWidth &&
+                              surfaceX < BorderWidth + ScreenWidth;
+        if (inScreen) {
+          if (!aboveUla) continue;
+        } else if (!overBorder) {
+          continue;
+        }
+
+        // The clip window is measured from the ULA origin unless the sprites
+        // reach into the border, where it moves to the sprite origin and its
+        // X coordinates count double.
+        if (!overBorder || clipOverBorder) {
+          int clipX = overBorder ? surfaceX : surfaceX - BorderWidth;
+          if (overBorder) clipX >>= 1;
+          const int clipY = overBorder ? surfaceY : surfaceY - BorderHeight;
+          if (clipX < clip[0] || clipX > clip[1]) continue;
+          if (clipY < clip[2] || clipY > clip[3]) continue;
+        }
+
+        const int index = sprites_.pixel(sprite, dx / scaleX, dy / scaleY,
+                                         transparency);
+        if (index < 0) continue;
+
+        if (layer2.active && inScreen &&
+            layer2Pixel(layer2, surfaceX - BorderWidth,
+                        surfaceY - BorderHeight) != Transparent) {
+          continue;
+        }
+
+        row[surfaceX] = palette_.colour(palette, u8((offset + index) & 0xFF));
+      }
     }
   }
 }

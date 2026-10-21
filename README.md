@@ -28,6 +28,10 @@ Status: M1 — 48K and 128K/+2/+3 boot with AY sound, tape loading, disk images
   640×256×4 modes, hardware scroll, a clip window, a transparency index and the
   layer priority order of register `0x15`, composited over the ULA every
   scanline.
+* **Next sprites** — all 128 sprites of 16×16 with 8-bit or 4-bit patterns from
+  a separate 16K pattern RAM, palette offsets, mirror, rotate, 1×-8× scaling,
+  per-sprite transparency, a clip window, over-border drawing and the full
+  layer priority order — including sprite 0 on top when the program asks for it.
 * **ULA** — port `0xFE` read/write, border, beeper, 8×5 keyboard matrix,
   Fuse-compatible memory contention, floating bus.
 * **Machines** — 48K, 128K, +2, +3 and Pentagon, each with its own timings
@@ -131,8 +135,8 @@ roms/           user-supplied ROMs (empty by design)
 ctest --test-dir build --output-on-failure
 ```
 
-164 tests cover the Z80 core (timings, flags, undocumented opcodes,
-interrupts), the Z80N extension, the Next MMU, palette and Layer 2, ULA
+183 tests cover the Z80 core (timings, flags, undocumented opcodes,
+interrupts), the Z80N extension, the Next MMU, palette, Layer 2 and sprites, ULA
 behaviour, contention, floating bus, frame length, audio rate, both snapshot
 formats, the AY, 128K/+3 paging and timings, tape blocks, the µPD765 and the DSK
 parser, and end-to-end runs of
