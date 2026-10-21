@@ -94,6 +94,7 @@ add_executable(mynext
   src/frontend/audio.cpp
   src/frontend/input.cpp
   src/frontend/debugger.cpp
+  src/frontend/ui.cpp
 )
 target_link_libraries(mynext PRIVATE mynext_core SDL3::SDL3 imgui Threads::Threads)
 target_compile_options(mynext PRIVATE -Wall -Wextra -Wpedantic)

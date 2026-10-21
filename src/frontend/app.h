@@ -8,6 +8,7 @@
 #include "core/machine.h"
 #include "frontend/audio.h"
 #include "frontend/input.h"
+#include "frontend/ui.h"
 
 namespace mynext::frontend {
 
@@ -27,10 +28,12 @@ public:
 
 private:
   void handleEvent(const SDL_Event& event);
-  void newFrame();
-  void render();
-  void drawMenuBar();
+  void drawToolbar();
   void drawStatusOverlay();
+  void drawScreen();
+  void updateLayout();
+  void computeToolbarMetrics();
+  void toggleFullscreen();
   void updateTexture();
   void pushAudio();
 
@@ -56,10 +59,23 @@ private:
   bool dialogOpen_ = false;
   bool dialogForSnapshot_ = false;
 
+  ui::Fonts fonts_;
+  float framebufferScale_ = 1.0f;
+  float toolbarRowHeight_ = 0.0f;
+  float toolbarHeight_ = 0.0f;
+  // Screen rectangle in logical points, recomputed every frame to letterbox
+  // the 320x256 picture into whatever space the toolbar leaves over.
+  ImVec2 screenMin_{};
+  ImVec2 screenMax_{};
+
   bool running_ = true;
   bool paused_ = false;
   bool showDebugger_ = false;
   bool showAbout_ = false;
+  bool fullscreen_ = false;
+  bool toolbarPinned_ = true;
+  bool toolbarVisible_ = true;
+  u64 toolbarRevealUntilNs_ = 0;
   int speedMultiplier_ = 1;
   std::string status_;
 };
