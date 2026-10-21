@@ -79,8 +79,8 @@ Machine::Machine(MachineType type)
     : type_(type), timings_(timingsFor(type)), cpu_(*this) {
   tstatesPerLine_ = tstatesPerLine(timings_);
   tstatesPerFrame_ = tstatesPerFrame(timings_);
-  rom_.assign(RomBanks * BankSize, 0);
-  ram_.assign(RamBanks * BankSize, 0);
+  rom_.assign(RomPages * PageSize, 0);
+  ram_.assign(RamPages * PageSize, 0);
   framebuffer_.assign(FrameWidth * FrameHeight, Palette[0]);
   borderLines_.fill(0);
   reset();
@@ -94,10 +94,11 @@ void Machine::reset() {
   beeper_.reset();
   tape_.rewind();
 
-  ram_.assign(RamBanks * BankSize, 0);
+  ram_.assign(RamPages * PageSize, 0);
   framebuffer_.assign(FrameWidth * FrameHeight, Palette[0]);
   borderLines_.fill(0);
 
+  next_.reset();
   ramBank_ = 0;
   screenBank_ = 5;
   romBank_ = 0;
@@ -243,8 +244,9 @@ bool Machine::loadSnapshot(const std::string& path, std::string& error) {
 
 void Machine::applySnapshot(const formats::Snapshot& snapshot) {
   cpu_.regs() = snapshot.regs;
-  ram_ = snapshot.ram;
-  if (ram_.size() != size_t(RamBanks * BankSize)) ram_.resize(RamBanks * BankSize, 0);
+  std::fill(ram_.begin(), ram_.end(), 0);
+  const size_t ramCopy = std::min(snapshot.ram.size(), ram_.size());
+  std::copy_n(snapshot.ram.begin(), ramCopy, ram_.begin());
 
   port7ffd_ = snapshot.port7ffd;
   port1ffd_ = 0;
@@ -283,15 +285,15 @@ void Machine::runCycles(u32 cycles) {
 // which is what CP/M runs in. Every other machine keeps bank 5 at 0x4000 and
 // bank 2 at 0x8000, with 0xC000 switchable.
 u8 Machine::memRead(u16 addr, u32) {
-  const Page& page = page_[addr >> 14];
-  const size_t offset = size_t(page.bank) * BankSize + (addr & 0x3FFF);
+  const Page& page = page_[addr >> 13];
+  const size_t offset = size_t(page.page) * PageSize + (addr & (PageSize - 1));
   return page.ram ? ram_[offset] : rom_[offset];
 }
 
 void Machine::memWrite(u16 addr, u8 value, u32) {
-  const Page& page = page_[addr >> 14];
+  const Page& page = page_[addr >> 13];
   if (!page.ram) return;
-  ram_[size_t(page.bank) * BankSize + (addr & 0x3FFF)] = value;
+  ram_[size_t(page.page) * PageSize + (addr & (PageSize - 1))] = value;
 }
 
 // ===========================================================================
@@ -299,6 +301,11 @@ void Machine::memWrite(u16 addr, u8 value, u32) {
 // ===========================================================================
 
 u8 Machine::ioRead(u16 port, u32) {
+  if (isNext()) {
+    if (port == 0x243B) return next_.selected();
+    if (port == 0x253B) return readNextReg(next_.selected());
+  }
+
   if ((port & 0x0001) == 0) {
     if ((port & 0x00FF) == 0xFE) {
       u8 value = ula_.read(port, keyboard_);
@@ -323,6 +330,17 @@ u8 Machine::ioRead(u16 port, u32) {
 }
 
 void Machine::ioWrite(u16 port, u8 value, u32) {
+  if (isNext()) {
+    if (port == 0x243B) {
+      next_.select(value);
+      return;
+    }
+    if (port == 0x253B) {
+      writeNextReg(next_.selected(), value);
+      return;
+    }
+  }
+
   if ((port & 0x0001) == 0) {
     ula_.write(port, value);
     beeper_.setLevel(ula_.beeper());
@@ -373,6 +391,12 @@ void Machine::writePort7ffd(u8 value) {
   if (pagingLocked_) return;
   port7ffd_ = value;
   pagingLocked_ = (value & 0x20) != 0;
+  // On the Next the classic ports are a shorthand for MMU writes.
+  if (isNext() && !pagingLocked_) {
+    const u8 bank = u8(value & 0x07);
+    next_.setMmuSlot(6, u8(bank * 2));
+    next_.setMmuSlot(7, u8(bank * 2 + 1));
+  }
   updatePaging();
 }
 
@@ -388,6 +412,13 @@ void Machine::writePort1ffd(u8 value) {
 }
 
 void Machine::updatePaging() {
+  if (isNext()) {
+    // The Next keeps its map in the MMU registers, and the classic paging
+    // ports only write into those same registers.
+    updateNextMmu();
+    return;
+  }
+
   specialPaging_ = isPlus3() && (port1ffd_ & 0x01) != 0;
   // Bit 3 of 0x1FFD is the disk motor; nothing in the emulator needs it, but
   // the debugger shows it and it mirrors what the ROM asked for.
@@ -411,23 +442,73 @@ void Machine::updatePaging() {
         {4, 7, 6, 3}, // bit2=1 bit1=1
     };
     const u8 config = u8((port1ffd_ >> 1) & 0x03);
-    for (int slot = 0; slot < 4; ++slot) {
-      page_[size_t(slot)].ram = true;
-      page_[size_t(slot)].bank = Maps[config][slot];
-    }
+    for (int bank = 0; bank < 4; ++bank) mapBank(bank, Maps[config][bank], true);
     return;
   }
 
-  page_[0].ram = false;
-  page_[0].bank = romBank_;
-  page_[1].ram = true;
-  page_[1].bank = 5; // the fixed bank holding the main screen
-  page_[2].ram = true;
-  page_[2].bank = 2;
-  page_[3].ram = true;
-  page_[3].bank = ramBank_;
+  mapBank(0, romBank_, false);
+  mapBank(1, 5, true); // the fixed bank holding the main screen
+  mapBank(2, 2, true);
+  mapBank(3, ramBank_, true);
 }
 
+void Machine::mapBank(int slot, int bank, bool ram) {
+  for (int half = 0; half < 2; ++half) {
+    Page& page = page_[size_t(slot * 2 + half)];
+    page.ram = ram;
+    page.page = u16(bank * 2 + half);
+  }
+}
+
+// The Next's MMU is eight byte-wide registers, one per 8K slot. A value of 255
+// shows the ROM instead of RAM, and the ROM half follows the slot's parity.
+void Machine::updateNextMmu() {
+  for (int slot = 0; slot < 8; ++slot) {
+    const u8 value = next_.mmuSlot(slot);
+    Page& page = page_[size_t(slot)];
+    if (value == NextRegFile::RomPage) {
+      page.ram = false;
+      page.page = u16(romBank_ * 2 + (slot & 1));
+    } else {
+      page.ram = true;
+      page.page = value;
+    }
+  }
+}
+
+
+// ===========================================================================
+// Next register file
+// ===========================================================================
+
+u8 Machine::readNextReg(u8 reg) const {
+  // The raster counters are the only registers whose value lives in the
+  // machine rather than in the file itself.
+  if (reg == 0x1E || reg == 0x1F) {
+    const u32 line = u32(tstates_ % tstatesPerFrame_) / tstatesPerLine_;
+    return reg == 0x1E ? u8(line) : u8(line >> 8);
+  }
+  return next_.read(reg);
+}
+
+void Machine::writeNextReg(u8 reg, u8 value) {
+  if (reg == 0x02) { // reset
+    if ((value & 0x03) != 0) reset();
+    return;
+  }
+  next_.write(reg, value);
+
+  switch (reg) {
+    case 0x03: // machine type; the display timing bits are accepted as-is
+      break;
+    case 0x50: case 0x51: case 0x52: case 0x53:
+    case 0x54: case 0x55: case 0x56: case 0x57:
+      updatePaging();
+      break;
+    default:
+      break;
+  }
+}
 
 // ===========================================================================
 // Contention and floating bus
@@ -442,7 +523,7 @@ u8 Machine::contention(u16 addr, u32 t) {
   bool contended = false;
   if (addr >= 0x4000 && addr < 0x8000) {
     contended = true;
-  } else if (addr >= 0xC000 && !isPlus3() && (page_[3].bank & 1) != 0) {
+  } else if (addr >= 0xC000 && !isPlus3() && (page_[7].page & 2) != 0) {
     contended = true;
   }
   if (!contended) return 0;

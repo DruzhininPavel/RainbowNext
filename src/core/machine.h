@@ -8,6 +8,7 @@
 #include "core/beeper.h"
 #include "core/bus.h"
 #include "core/keyboard.h"
+#include "core/nextreg.h"
 #include "core/tape.h"
 #include "core/upd765.h"
 #include "core/types.h"
@@ -60,9 +61,15 @@ public:
   static constexpr int BorderHeight = 32;
   static constexpr int FrameWidth = ScreenWidth + 2 * BorderWidth;
   static constexpr int FrameHeight = ScreenHeight + 2 * BorderHeight;
+  // The classic machines and the snapshots speak in 16K banks; the Next maps
+  // the same memory as 8K pages through its MMU. One table of 8K slots serves
+  // both, and a 16K bank is simply two neighbouring pages.
   static constexpr int RamBanks = 8;
   static constexpr int RomBanks = 4;
   static constexpr int BankSize = 0x4000;
+  static constexpr int PageSize = 0x2000;
+  static constexpr int RamPages = 256; // 2 MB
+  static constexpr int RomPages = 8;   // 64 KB
 
   explicit Machine(MachineType type = MachineType::Spectrum48);
 
@@ -93,6 +100,7 @@ public:
   void tick(u32 cycles) override;
   u32 now() const override { return u32(tstates_ % tstatesPerFrame_); }
   u8 interruptVector() override { return 0xFF; }
+  void nextRegWrite(u8 reg, u8 value) override { writeNextReg(reg, value); }
 
   // Accessors
   MachineType type() const { return type_; }
@@ -114,6 +122,7 @@ public:
   u8 port1ffd() const { return port1ffd_; }
   bool pagingLocked() const { return pagingLocked_; }
   bool specialPaging() const { return specialPaging_; }
+  bool isNext() const { return type_ == MachineType::Next; }
   bool hasAy() const { return type_ != MachineType::Spectrum48; }
   bool hasDiskController() const { return type_ == MachineType::Plus3; }
   Upd765& fdc() { return fdc_; }
@@ -126,6 +135,9 @@ public:
   bool irqLine() const { return irqLine_; }
   bool romLoaded() const { return romLoaded_; }
   void setKempston(u8 value) { kempston_ = value; }
+  const NextRegFile& nextRegs() const { return next_; }
+  u8 readNextReg(u8 reg) const;
+  void writeNextReg(u8 reg, u8 value);
   u32 tstatesPerLineValue() const { return tstatesPerLine_; }
   u32 tstatesPerFrameValue() const { return tstatesPerFrame_; }
 
@@ -144,6 +156,9 @@ private:
   void writePort7ffd(u8 value);
   void writePort1ffd(u8 value);
   void updatePaging();
+  void updateNextMmu();
+  // Maps one 16K bank into a pair of neighbouring 8K slots.
+  void mapBank(int slot, int bank, bool ram);
   void applySnapshot(const formats::Snapshot& snapshot);
   bool applyTapeFastLoad();
 
@@ -160,6 +175,7 @@ private:
   Tape tape_;
   Upd765 fdc_;
   formats::DiskImage disk_;
+  NextRegFile next_;
 
   std::vector<u8> rom_;
   std::vector<u8> ram_;
@@ -178,10 +194,10 @@ private:
   // Resolved memory map: one entry per 16K slot, so the +2A/+3's four CP/M
   // configurations need no special cases in the read and write paths.
   struct Page {
-    u8 bank = 0;
+    u16 page = 0;
     bool ram = false;
   };
-  std::array<Page, 4> page_{};
+  std::array<Page, 8> page_{};
 
   u64 tstates_ = 0;
   u64 frames_ = 0;
