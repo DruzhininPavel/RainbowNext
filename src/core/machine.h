@@ -165,6 +165,14 @@ private:
   bool specialPaging_ = false;
   bool romLoaded_ = false;
 
+  // Resolved memory map: one entry per 16K slot, so the +2A/+3's four CP/M
+  // configurations need no special cases in the read and write paths.
+  struct Page {
+    u8 bank = 0;
+    bool ram = false;
+  };
+  std::array<Page, 4> page_{};
+
   u64 tstates_ = 0;
   u64 frames_ = 0;
   bool irqLine_ = false;

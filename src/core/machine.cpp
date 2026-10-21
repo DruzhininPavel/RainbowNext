@@ -102,6 +102,7 @@ void Machine::reset() {
   port1ffd_ = 0;
   pagingLocked_ = false;
   specialPaging_ = false;
+  updatePaging();
   ay_.reset();
   ay_.setStereo(type_ == MachineType::Plus3 ? Ay38912::Stereo::ABC : Ay38912::Stereo::Mono);
 
@@ -264,27 +265,15 @@ void Machine::runCycles(u32 cycles) {
 // which is what CP/M runs in. Every other machine keeps bank 5 at 0x4000 and
 // bank 2 at 0x8000, with 0xC000 switchable.
 u8 Machine::memRead(u16 addr, u32) {
-  if (addr < 0x4000) {
-    if (specialPaging_) return ram_[addr];
-    return rom_[size_t(romBank_) * BankSize + addr];
-  }
-  if (addr < 0x8000) return ram_[size_t(specialPaging_ ? 1 : 5) * BankSize + (addr - 0x4000)];
-  if (addr < 0xC000) return ram_[size_t(2) * BankSize + (addr - 0x8000)];
-  return ram_[size_t(specialPaging_ ? 3 : ramBank_) * BankSize + (addr - 0xC000)];
+  const Page& page = page_[addr >> 14];
+  const size_t offset = size_t(page.bank) * BankSize + (addr & 0x3FFF);
+  return page.ram ? ram_[offset] : rom_[offset];
 }
 
 void Machine::memWrite(u16 addr, u8 value, u32) {
-  if (addr < 0x4000) {
-    if (specialPaging_) ram_[addr] = value;
-    return; // otherwise ROM
-  }
-  if (addr < 0x8000) {
-    ram_[size_t(specialPaging_ ? 1 : 5) * BankSize + (addr - 0x4000)] = value;
-  } else if (addr < 0xC000) {
-    ram_[size_t(2) * BankSize + (addr - 0x8000)] = value;
-  } else {
-    ram_[size_t(specialPaging_ ? 3 : ramBank_) * BankSize + (addr - 0xC000)] = value;
-  }
+  const Page& page = page_[addr >> 14];
+  if (!page.ram) return;
+  ram_[size_t(page.bank) * BankSize + (addr & 0x3FFF)] = value;
 }
 
 // ===========================================================================
@@ -318,13 +307,20 @@ void Machine::ioWrite(u16 port, u8 value, u32) {
   }
 
   if (is128k()) {
-    // 0x1FFD must be decoded before 0x7FFD: it also satisfies the looser
-    // 0x7FFD mask, so the order decides which register a +2A/+3 write hits.
-    if (isPlus3() && (port & 0xF002) == 0x1000) { // 0x1FFD
-      writePort1ffd(value);
-      return;
-    }
-    if ((port & 0x8002) == 0x0000) { // 0x7FFD
+    // The +2A/+3 decodes both paging ports more tightly than the 128K/+2:
+    // 0x1FFD needs bit 12 set with 13-15 clear, 0x7FFD needs bit 14 set.
+    // That also keeps the two apart, whereas the 128K's loose 0x7FFD mask
+    // would swallow a 0x1FFD write.
+    if (isPlus3()) {
+      if ((port & 0xF002) == 0x1000) { // 0x1FFD
+        writePort1ffd(value);
+        return;
+      }
+      if ((port & 0xC002) == 0x4000) { // 0x7FFD
+        writePort7ffd(value);
+        return;
+      }
+    } else if ((port & 0x8002) == 0x0000) { // 0x7FFD
       writePort7ffd(value);
       return;
     }
@@ -346,12 +342,14 @@ void Machine::writePort7ffd(u8 value) {
   updatePaging();
 }
 
-// 0x1FFD exists only on the +2A/+3: bit 0 is the special (CP/M) paging mode,
-// bit 1 locks paging, bit 2 is the high ROM bit and bit 3 starts the disk motor.
+// 0x1FFD exists only on the +2A/+3: bit 0 selects the special (CP/M) paging
+// mode, bit 2 is the high ROM bit and bit 3 starts the disk motor. Bit 1 is
+// ignored in normal mode and only matters inside CP/M mode, where it picks the
+// memory map together with bit 2 -- so it is not a lock. Paging is locked
+// exclusively by bit 5 of 0x7FFD, which freezes this port too.
 void Machine::writePort1ffd(u8 value) {
   if (pagingLocked_) return;
   port1ffd_ = value;
-  pagingLocked_ = (value & 0x02) != 0;
   updatePaging();
 }
 
@@ -364,6 +362,33 @@ void Machine::updatePaging() {
   u8 rom = u8((port7ffd_ & 0x10) ? 1 : 0);
   if (isPlus3()) rom = u8(rom | ((port1ffd_ & 0x04) ? 2 : 0));
   romBank_ = u8(rom & 0x03);
+
+  if (specialPaging_) {
+    // +2A/+3 CP/M mode: bits 1 and 2 of 0x1FFD pick one of four fixed maps.
+    // Bank 2/6 stays at 0x8000 in every configuration, so only the other
+    // three slots change.
+    static constexpr u8 Maps[4][4] = {
+        {0, 1, 2, 3}, // bit2=0 bit1=0
+        {4, 5, 6, 7}, // bit2=0 bit1=1
+        {4, 5, 6, 3}, // bit2=1 bit1=0
+        {4, 7, 6, 3}, // bit2=1 bit1=1
+    };
+    const u8 config = u8((port1ffd_ >> 1) & 0x03);
+    for (int slot = 0; slot < 4; ++slot) {
+      page_[size_t(slot)].ram = true;
+      page_[size_t(slot)].bank = Maps[config][slot];
+    }
+    return;
+  }
+
+  page_[0].ram = false;
+  page_[0].bank = romBank_;
+  page_[1].ram = true;
+  page_[1].bank = 5; // the fixed bank holding the main screen
+  page_[2].ram = true;
+  page_[2].bank = 2;
+  page_[3].ram = true;
+  page_[3].bank = ramBank_;
 }
 
 // ===========================================================================
@@ -379,7 +404,7 @@ u8 Machine::contention(u16 addr, u32 t) {
   bool contended = false;
   if (addr >= 0x4000 && addr < 0x8000) {
     contended = true;
-  } else if (addr >= 0xC000 && !isPlus3() && (ramBank_ & 1) != 0) {
+  } else if (addr >= 0xC000 && !isPlus3() && (page_[3].bank & 1) != 0) {
     contended = true;
   }
   if (!contended) return 0;

@@ -31,7 +31,8 @@ a multicolour demo renders correctly; `z80test` passes.
 ## M1 — 128K / +2 / +3 / Pentagon (current)
 
 * [x] `0x7FFD` paging: RAM bank, screen bank, ROM bank, lock bit
-* [x] `0x1FFD` (+2A/+3): CP/M special paging, ROM bit 2, lock, motor
+* [x] `0x1FFD` (+2A/+3): four CP/M memory maps, ROM bit 2, motor; paging
+      is locked only by `0x7FFD` bit 5, which freezes both ports
 * [x] ROM bank sets: `128-0.rom`/`128-1.rom`, `plus2-*.rom`, `plus3-0..3.rom`
 * [x] AY-3-8912: 3 channels, 17-bit noise LFSR, 16-step envelope, volume
 * [x] Stereo output: mono / ABC / ACB mixing, DC-blocking filter
@@ -82,6 +83,8 @@ These are deliberate simplifications, tracked here so they are not forgotten:
 7. The AY is clocked from the CPU T-state counter rather than from the ULA
    frame counter, so it is deterministic but not cycle-exact against hardware.
 8. The +3 motor bit is latched but nothing consumes it yet (no µPD765).
+9. Contention uses one fixed pattern per line instead of a per-line
+   `line_times[]` table, so the 128K/+3 windows start a few T-states early.
 
 ## Open decisions
 

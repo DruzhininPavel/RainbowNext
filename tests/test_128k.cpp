@@ -4,6 +4,7 @@
 
 using mynext::Machine;
 using mynext::MachineType;
+using mynext::u16;
 using mynext::u32;
 using mynext::u8;
 using mynext::tstatesPerLine;
@@ -119,15 +120,69 @@ TEST(k128_plus3_special_paging_maps_all_four_ram_banks) {
   CHECK_EQ(m.memRead(0x0000, 0), 0x00); // ROM again
 }
 
-TEST(k128_plus3_paging_lock_covers_both_ports) {
+// The +2A/+3 CP/M mode is not a single fixed map: bits 1 and 2 of 0x1FFD
+// select one of four, and only bank 2/6 at 0x8000 is common to all of them.
+TEST(k128_plus3_cpm_paging_selects_four_fixed_maps) {
   Machine m(MachineType::Plus3);
-  m.ioWrite(0x1FFD, 0x02, 0); // lock
+
+  for (int bank = 0; bank < 8; ++bank) {
+    m.ioWrite(0x7FFD, u8(bank), 0);
+    m.memWrite(0xC000, u8(0x10 + bank), 0);
+  }
+
+  static constexpr u8 Maps[4][4] = {
+      {0, 1, 2, 3},
+      {4, 5, 6, 7},
+      {4, 5, 6, 3},
+      {4, 7, 6, 3},
+  };
+  static constexpr u16 Slot[4] = {0x0000, 0x4000, 0x8000, 0xC000};
+
+  for (int config = 0; config < 4; ++config) {
+    m.ioWrite(0x1FFD, u8(0x01 | (config << 1)), 0);
+    CHECK(m.specialPaging());
+    for (int slot = 0; slot < 4; ++slot) {
+      CHECK_EQ(m.memRead(Slot[slot], 0), 0x10 + Maps[config][slot]);
+    }
+  }
+}
+
+// The +2A/+3 only answers 0x7FFD when bit 14 is set, while the 128K/+2
+// answers whenever bits 1 and 15 are clear. Port 0x00FD tells them apart.
+TEST(k128_plus3_decodes_paging_ports_tighter_than_the_128k) {
+  Machine plus3(MachineType::Plus3);
+  plus3.ioWrite(0x00FD, 0x07, 0);
+  CHECK_EQ(plus3.ramBank(), 0);
+
+  Machine k128(MachineType::Spectrum128);
+  k128.ioWrite(0x00FD, 0x07, 0);
+  CHECK_EQ(k128.ramBank(), 7);
+}
+
+// Only bit 5 of 0x7FFD locks paging, and it freezes 0x1FFD as well.
+TEST(k128_plus3_lock_from_7ffd_freezes_both_ports) {
+  Machine m(MachineType::Plus3);
+  m.ioWrite(0x7FFD, 0x20, 0);
   CHECK(m.pagingLocked());
 
   m.ioWrite(0x7FFD, 0x07, 0);
   CHECK_EQ(m.ramBank(), 0);
   m.ioWrite(0x1FFD, 0x04, 0);
   CHECK_EQ(m.romBank(), 0);
+  m.ioWrite(0x1FFD, 0x01, 0);
+  CHECK(!m.specialPaging());
+}
+
+// Bit 1 of 0x1FFD is ignored outside CP/M mode: it is neither a lock nor a
+// ROM selector, so normal paging keeps working after it is set.
+TEST(k128_plus3_1ffd_bit_one_is_not_a_lock) {
+  Machine m(MachineType::Plus3);
+  m.ioWrite(0x1FFD, 0x02, 0);
+  CHECK(!m.pagingLocked());
+  CHECK(!m.specialPaging());
+
+  m.ioWrite(0x7FFD, 0x05, 0);
+  CHECK_EQ(m.ramBank(), 5);
 }
 
 TEST(k128_contention_follows_the_paged_bank) {
