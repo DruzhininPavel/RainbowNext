@@ -7,8 +7,8 @@ Runs on macOS and Linux (including SteamOS / Steam Deck).
 ```
 Status: M1 — 48K and 128K/+2/+3 boot with AY sound, tape loading, disk images
         and snapshots.
-        M2 in progress: the Z80N instruction set and the Next's MMU/NextREG
-        file are implemented (docs/ROADMAP.md).
+        M2 in progress: the Z80N instruction set, the Next's MMU/NextREG file,
+        its palette hardware and Layer 2 are implemented (docs/ROADMAP.md).
 ```
 
 ## Features
@@ -23,6 +23,10 @@ Status: M1 — 48K and 128K/+2/+3 boot with AY sound, tape loading, disk images
 * **Next MMU** — eight 8K slots in registers `0x50`-`0x57`, page 255 for the
   ROM, ports `0x243B`/`0x253B`, the classic `0x7FFD` shortcut, alternate ROM,
   and a CPU speed register that really does run the CPU 2×/4×/8× faster.
+* **Next palette and Layer 2** — eight 256-entry palettes of 9-bit RGB333
+  colours written through `0x40`-`0x44`, and a Layer 2 with 256×192, 320×256 and
+  640×256×4 modes, hardware scroll, a transparency index and the layer priority
+  order of register `0x15`, composited over the ULA every scanline.
 * **ULA** — port `0xFE` read/write, border, beeper, 8×5 keyboard matrix,
   Fuse-compatible memory contention, floating bus.
 * **Machines** — 48K, 128K, +2, +3 and Pentagon, each with its own timings
@@ -126,10 +130,11 @@ roms/           user-supplied ROMs (empty by design)
 ctest --test-dir build --output-on-failure
 ```
 
-149 tests cover the Z80 core (timings, flags, undocumented opcodes,
-interrupts), the Z80N extension, ULA behaviour, contention, floating bus, frame
-length, audio rate, both snapshot formats, the AY, 128K/+3 paging and timings,
-tape blocks, the µPD765 and the DSK parser, and end-to-end runs of
+162 tests cover the Z80 core (timings, flags, undocumented opcodes,
+interrupts), the Z80N extension, the Next MMU, palette and Layer 2, ULA
+behaviour, contention, floating bus, frame length, audio rate, both snapshot
+formats, the AY, 128K/+3 paging and timings, tape blocks, the µPD765 and the DSK
+parser, and end-to-end runs of
 hand-assembled programs through the machine. Golden tests also boot the real
 `roms/128-0.rom` and `roms/plus3-0.rom` sets when those files are present; they
 skip themselves on a clean checkout.

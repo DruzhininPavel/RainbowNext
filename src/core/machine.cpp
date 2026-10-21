@@ -99,6 +99,7 @@ void Machine::reset() {
   borderLines_.fill(0);
 
   next_.reset();
+  palette_.reset();
   // Bits 6:4 are the display timing and bits 2:0 the machine type; a Next in
   // Next mode presents itself as a +2A/+3.
   if (type_ == MachineType::Next) next_.write(0x03, 0x33);
@@ -494,6 +495,7 @@ void Machine::updateNextMmu() {
 u8 Machine::readNextReg(u8 reg) const {
   // The raster counters are the only registers whose value lives in the
   // machine rather than in the file itself.
+  if (reg == 0x40) return palette_.index();
   if (reg == 0x1E || reg == 0x1F) {
     const u32 line = u32(tstates_ % tstatesPerFrame_) / tstatesPerLine_;
     return reg == 0x1E ? u8(line) : u8(line >> 8);
@@ -518,6 +520,21 @@ void Machine::writeNextReg(u8 reg, u8 value) {
     case 0x8C: // alternate ROM
       next_.write(reg, value);
       updatePaging();
+      return;
+    case 0x40: // palette index
+      next_.write(reg, value);
+      palette_.setIndex(value);
+      return;
+    case 0x41: // 8-bit palette colour
+      next_.write(reg, value);
+      palette_.write8(value);
+      return;
+    case 0x43: // palette control
+      next_.write(reg, value);
+      palette_.setControl(value);
+      return;
+    case 0x44: // 9-bit palette colour
+      palette_.write9(value);
       return;
     default:
       next_.write(reg, value);
@@ -695,7 +712,7 @@ void Machine::renderFrame() {
         line = timings_.topBorder + ScreenHeight + (r - BorderHeight - ScreenHeight);
       }
       if (line < 0 || line >= int(borderLines_.size())) line = 0;
-      const u32 color = Palette[borderLines_[size_t(line)] & 0x07];
+      const u32 color = paperColour(borderLines_[size_t(line)] & 0x07);
       u32* row = framebuffer_.data() + size_t(r) * FrameWidth;
       for (int x = 0; x < FrameWidth; ++x) row[x] = color;
     } else {
@@ -704,19 +721,91 @@ void Machine::renderFrame() {
   }
 }
 
+int Machine::ulaPalette() const {
+  // 0x43 bits 6:4 select which palette the ULA reads from; only 100 is ULA2.
+  return ((palette_.control() >> 4) & 0x07) == 4 ? NextPalette::Ula1
+                                                 : NextPalette::Ula0;
+}
+
+u32 Machine::ulaColour(u8 index) const {
+  if (!isNext()) return Palette[index & 0x0F];
+  return palette_.colour(ulaPalette(), u8(index & 0x0F));
+}
+
+u32 Machine::paperColour(u8 index) const {
+  if (!isNext()) return Palette[index & 0x0F];
+  return palette_.colour(ulaPalette(), u8(16 + (index & 0x0F)));
+}
+
+Machine::Layer2View Machine::layer2View() const {
+  Layer2View view;
+  if (!isNext() || (next_.read(0x69) & 0x80) == 0) return view;
+
+  const u8 control = next_.read(0x70);
+  const int mode = (control >> 4) & 0x03;
+  if (mode == 3) return view;
+
+  view.active = true;
+  view.fourBit = mode == 2;
+  view.width = view.fourBit ? 640 : (mode == 1 ? 320 : 256);
+  view.height = mode == 0 ? 192 : 256;
+  view.palette = NextPalette::Layer2First;
+  view.transparency = next_.read(0x14);
+  view.scrollX = next_.read(0x16) | ((next_.read(0x71) & 0x01) << 8);
+  view.scrollY = next_.read(0x17);
+  view.base = size_t(next_.read(0x12)) * size_t(BankSize);
+
+  // The 320 and 640 wide modes are centred on the ULA's 256 pixel viewport.
+  if (view.width != 256) view.scrollX += (view.width - ScreenWidth) / 2;
+  if (view.height != 192) view.scrollY += (view.height - ScreenHeight) / 2;
+  return view;
+}
+
+u32 Machine::layer2Pixel(const Layer2View& view, int x, int y) const {
+  if (!view.active) return Transparent;
+
+  const int stride = view.width * (view.fourBit ? 1 : 2) / 2;
+  const int column = view.fourBit ? x * 2 : x;
+  const int lx = (column + view.scrollX) % view.width;
+  const int ly = (y + view.scrollY) % view.height;
+  const size_t offset = view.base + size_t(ly) * size_t(stride) +
+                        size_t(view.fourBit ? lx / 2 : lx);
+  if (offset >= ram_.size()) return Transparent;
+
+  const u8 packed = ram_[offset];
+  const u8 pixel = view.fourBit ? u8((lx & 1) ? (packed & 0x0F) : (packed >> 4))
+                                : packed;
+  if (pixel == (view.fourBit ? u8(view.transparency & 0x0F) : view.transparency))
+    return Transparent;
+
+  const int entry = view.fourBit ? (((next_.read(0x70) & 0x0F) << 4) | pixel)
+                                 : pixel;
+  return palette_.colour(view.palette, u8(entry & 0xFF));
+}
+
+bool Machine::layer2AboveUla() const {
+  // 0x15 bits 4:2 hold the layer priority order; Layer 2 sits above the ULA
+  // for the first two and the two blending modes.
+  const int priority = (next_.read(0x15) >> 2) & 0x07;
+  return priority <= 1 || priority >= 6;
+}
+
 void Machine::renderScreenRow(int y) {
   const int outY = BorderHeight + y;
   const u8 borderColor = borderLines_[size_t(timings_.topBorder + y)] & 0x07;
   u32* row = framebuffer_.data() + size_t(outY) * FrameWidth;
 
-  for (int x = 0; x < BorderWidth; ++x) row[x] = Palette[borderColor];
-  for (int x = FrameWidth - BorderWidth; x < FrameWidth; ++x) row[x] = Palette[borderColor];
+  const u32 border = paperColour(borderColor);
+  for (int x = 0; x < BorderWidth; ++x) row[x] = border;
+  for (int x = FrameWidth - BorderWidth; x < FrameWidth; ++x) row[x] = border;
 
   const size_t bankBase = size_t(screenBank_) * BankSize;
   const size_t pixelBase = bankBase + ((size_t(y) & 0xC0) << 5) +
                            ((size_t(y) & 0x07) << 8) + ((size_t(y) & 0x38) << 2);
   const size_t attrBase = bankBase + 0x1800 + size_t(y >> 3) * 32;
   const bool flashOn = ((frames_ >> 4) & 1) != 0;
+  const Layer2View layer2 = (isNext() && layer2AboveUla()) ? layer2View()
+                                                           : Layer2View{};
 
   for (int col = 0; col < 32; ++col) {
     const u8 pixels = ram_[pixelBase + size_t(col)];
@@ -729,8 +818,15 @@ void Machine::renderScreenRow(int y) {
     const u8 paperColor = flash ? ink : paper;
 
     u32* dest = row + BorderWidth + col * 8;
+    const u32 inkRgb = ulaColour(inkColor);
+    const u32 paperRgb = paperColour(paperColor);
     for (int b = 0; b < 8; ++b) {
-      dest[b] = Palette[(pixels & (0x80u >> b)) ? inkColor : paperColor];
+      u32 rgb = (pixels & (0x80u >> b)) ? inkRgb : paperRgb;
+      if (layer2.active) {
+        const u32 overlay = layer2Pixel(layer2, col * 8 + b, y);
+        if (overlay != Transparent) rgb = overlay;
+      }
+      dest[b] = rgb;
     }
   }
 }

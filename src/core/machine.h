@@ -9,6 +9,7 @@
 #include "core/bus.h"
 #include "core/keyboard.h"
 #include "core/nextreg.h"
+#include "core/palette.h"
 #include "core/tape.h"
 #include "core/upd765.h"
 #include "core/types.h"
@@ -136,6 +137,7 @@ public:
   bool romLoaded() const { return romLoaded_; }
   void setKempston(u8 value) { kempston_ = value; }
   const NextRegFile& nextRegs() const { return next_; }
+  const NextPalette& palette() const { return palette_; }
   u8 readNextReg(u8 reg) const;
   void writeNextReg(u8 reg, u8 value);
   u32 tstatesPerLineValue() const { return tstatesPerLine_; }
@@ -145,6 +147,7 @@ public:
   const std::vector<float>& audioBuffer() const { return audio_; }
   void clearAudio() { audio_.clear(); }
 
+  static constexpr u32 Transparent = 0x00000000;
   static constexpr int PaletteSize = 16;
   static const u32 Palette[PaletteSize];
 
@@ -158,6 +161,26 @@ private:
   void updatePaging();
   void updateNextMmu();
   u32 turboMultiplier() const;
+  // Layer 2 state, resolved once per scanline because the fetch runs per pixel.
+  struct Layer2View {
+    bool active = false;
+    bool fourBit = false;
+    int width = 0;
+    int height = 0;
+    int scrollX = 0;
+    int scrollY = 0;
+    int palette = 0;
+    u8 transparency = 0;
+    size_t base = 0;
+  };
+  Layer2View layer2View() const;
+  // One framebuffer pixel of Layer 2, or Transparent when nothing is drawn.
+  u32 layer2Pixel(const Layer2View& view, int x, int y) const;
+  bool layer2AboveUla() const;
+  // The colour the ULA draws with, honouring the Next palette when present.
+  u32 ulaColour(u8 index) const;
+  u32 paperColour(u8 index) const;
+  int ulaPalette() const;
   // Maps one 16K bank into a pair of neighbouring 8K slots.
   void mapBank(int slot, int bank, bool ram);
   void applySnapshot(const formats::Snapshot& snapshot);
@@ -177,6 +200,7 @@ private:
   Upd765 fdc_;
   formats::DiskImage disk_;
   NextRegFile next_;
+  NextPalette palette_;
 
   std::vector<u8> rom_;
   std::vector<u8> ram_;

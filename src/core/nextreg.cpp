@@ -10,7 +10,8 @@ void NextRegFile::reset() {
   values_[0x06] = 0xA0; // the F3 and F8 hotkeys are enabled after a soft reset
   values_[0x12] = 0x00; // Layer 2 active bank
   values_[0x13] = 0x00; // Layer 2 shadow bank
-  values_[0x14] = 0x00; // Layer 2 RAM page
+  values_[0x14] = 0xE3; // global transparency index
+  values_[0x4A] = 0xE3; // fallback colour
   values_[0x4B] = 0xE3; // sprite transparency index
   values_[0x4C] = 0x0F; // tilemap transparency index
 

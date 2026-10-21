@@ -60,11 +60,23 @@ a multicolour demo renders correctly; `z80test` passes.
       (`0x8C`), machine type (`0x03`) and the CPU speed register (`0x07`).
       Turbo runs the CPU 2×/4×/8× faster than the ULA instead of speeding up
       the frame.
-* [ ] Layer 2 (256×192 and 320×256), ULA+ palettes, Radastan mode
+* [x] Palette hardware — eight 256-entry palettes of 9-bit RGB333 colours
+      (`0x40`-`0x44`), 8-bit and two-byte 9-bit write protocols, auto-increment,
+      the classic Spectrum colours as the soft-reset defaults. The ULA, the
+      border and the paper half of the palette now read through it, so changing
+      entry `16+n` recolours the border.
+* [x] Layer 2 — `0x69` bit 7 and the `0x123B` port, the 256×192, 320×256 and
+      640×256×4 resolutions of `0x70`, the active bank (`0x12`), the 9-bit X and
+      8-bit Y scroll (`0x16`, `0x17`, `0x71`), the global transparency index
+      (`0x14`) and the layer priority order of `0x15`. Layer 2 is composited
+      over the ULA per pixel while the ULA still owns the border.
+* [ ] Layer 2 clip window (`0x18`), the second palette and its priority bit,
+      ULA+ palettes, Radastan mode
 * [ ] 128 sprites (4B/5B), tilemap, Copper, DMA
 * [ ] 3× AY with stereo, specdrum, `.nex` snapshot format
 * [ ] SD card image access for NextZXOS
 * [ ] Video pipeline: ULA/Timex → Layer 2 → sprites → tilemap → compositor → palette
+      (the ULA → Layer 2 → palette path is in place)
 
 ## M3 — Tooling and shipping
 
