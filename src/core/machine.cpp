@@ -99,6 +99,9 @@ void Machine::reset() {
   borderLines_.fill(0);
 
   next_.reset();
+  // Bits 6:4 are the display timing and bits 2:0 the machine type; a Next in
+  // Next mode presents itself as a +2A/+3.
+  if (type_ == MachineType::Next) next_.write(0x03, 0x33);
   ramBank_ = 0;
   screenBank_ = 5;
   romBank_ = 0;
@@ -113,6 +116,8 @@ void Machine::reset() {
   fdc_.setDisk(hasDiskController() && !disk_.empty() ? &disk_ : nullptr);
 
   tstates_ = 0;
+  cpuTstates_ = 0;
+  turboAccum_ = 0;
   frames_ = 0;
   irqLine_ = false;
   irqEnd_ = 0;
@@ -273,8 +278,8 @@ void Machine::runFrame() {
 }
 
 void Machine::runCycles(u32 cycles) {
-  const u64 target = tstates_ + cycles;
-  while (tstates_ < target) stepInstruction();
+  const u64 target = cpuTstates_ + cycles;
+  while (cpuTstates_ < target) stepInstruction();
 }
 
 // ===========================================================================
@@ -352,7 +357,7 @@ void Machine::ioWrite(u16 port, u8 value, u32) {
     // 0x1FFD needs bit 12 set with 13-15 clear, 0x7FFD needs bit 14 set.
     // That also keeps the two apart, whereas the 128K's loose 0x7FFD mask
     // would swallow a 0x1FFD write.
-    if (isPlus3()) {
+    if (isPlus3() || isNext()) {
       if ((port & 0xF002) == 0x1000) { // 0x1FFD
         writePort1ffd(value);
         return;
@@ -412,6 +417,10 @@ void Machine::writePort1ffd(u8 value) {
 }
 
 void Machine::updatePaging() {
+  u8 rom = u8((port7ffd_ & 0x10) ? 1 : 0);
+  if (isPlus3() || isNext()) rom = u8(rom | ((port1ffd_ & 0x04) ? 2 : 0));
+  romBank_ = u8(rom & 0x03);
+
   if (isNext()) {
     // The Next keeps its map in the MMU registers, and the classic paging
     // ports only write into those same registers.
@@ -426,10 +435,6 @@ void Machine::updatePaging() {
 
   ramBank_ = u8(port7ffd_ & 0x07);
   screenBank_ = (port7ffd_ & 0x08) ? 7 : 5;
-
-  u8 rom = u8((port7ffd_ & 0x10) ? 1 : 0);
-  if (isPlus3()) rom = u8(rom | ((port1ffd_ & 0x04) ? 2 : 0));
-  romBank_ = u8(rom & 0x03);
 
   if (specialPaging_) {
     // +2A/+3 CP/M mode: bits 1 and 2 of 0x1FFD pick one of four fixed maps.
@@ -463,12 +468,17 @@ void Machine::mapBank(int slot, int bank, bool ram) {
 // The Next's MMU is eight byte-wide registers, one per 8K slot. A value of 255
 // shows the ROM instead of RAM, and the ROM half follows the slot's parity.
 void Machine::updateNextMmu() {
+  // Register 0x8C swaps the two low ROM banks, which is how NextZXOS brings
+  // in the 48K ROM; bit 6 keeps the swap to the write half of the bus.
+  u8 rom = romBank_;
+  if ((next_.read(0x8C) & 0x80) != 0) rom = u8(rom ^ 0x01);
+
   for (int slot = 0; slot < 8; ++slot) {
     const u8 value = next_.mmuSlot(slot);
     Page& page = page_[size_t(slot)];
     if (value == NextRegFile::RomPage) {
       page.ram = false;
-      page.page = u16(romBank_ * 2 + (slot & 1));
+      page.page = u16(rom * 2 + (slot & 1));
     } else {
       page.ram = true;
       page.page = value;
@@ -492,22 +502,37 @@ u8 Machine::readNextReg(u8 reg) const {
 }
 
 void Machine::writeNextReg(u8 reg, u8 value) {
-  if (reg == 0x02) { // reset
-    if ((value & 0x03) != 0) reset();
-    return;
-  }
-  next_.write(reg, value);
-
   switch (reg) {
-    case 0x03: // machine type; the display timing bits are accepted as-is
-      break;
+    case 0x02: // soft or hard reset
+      if ((value & 0x03) != 0) reset();
+      return;
+    case 0x03: {
+      // The display timing bits are locked unless bit 7 unlocks them.
+      u8 type = next_.read(0x03);
+      if ((value & 0x80) != 0) type = u8((type & 0x8F) | (value & 0x70));
+      next_.write(0x03, type);
+      return;
+    }
     case 0x50: case 0x51: case 0x52: case 0x53:
     case 0x54: case 0x55: case 0x56: case 0x57:
+    case 0x8C: // alternate ROM
+      next_.write(reg, value);
       updatePaging();
-      break;
+      return;
     default:
-      break;
+      next_.write(reg, value);
+      return;
   }
+}
+
+// The Next runs its CPU faster than the ULA: at 28 MHz the same frame holds
+// eight times the instructions. The ULA clock is therefore advanced by only
+// 1/N of the CPU T-states, which keeps the raster, contention and audio on
+// real time while the CPU gets the extra throughput.
+u32 Machine::turboMultiplier() const {
+  if (!isNext()) return 1;
+  static constexpr u32 Multipliers[4] = {1, 2, 4, 8};
+  return Multipliers[next_.turbo()];
 }
 
 // ===========================================================================
@@ -590,7 +615,15 @@ void Machine::setSampleRate(int hz) {
 }
 
 void Machine::tick(u32 cycles) {
+  cpuTstates_ += cycles;
+
+  // See turboMultiplier(): the ULA sees only a fraction of the CPU cycles.
   u32 remaining = cycles;
+  if (const u32 mult = turboMultiplier(); mult != 1) {
+    turboAccum_ += cycles;
+    remaining = turboAccum_ / mult;
+    turboAccum_ %= mult;
+  }
   while (remaining > 0) {
     const u32 frameT = u32(tstates_ % tstatesPerFrame_);
     const u32 hc = frameT % tstatesPerLine_;

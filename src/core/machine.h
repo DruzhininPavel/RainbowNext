@@ -157,6 +157,7 @@ private:
   void writePort1ffd(u8 value);
   void updatePaging();
   void updateNextMmu();
+  u32 turboMultiplier() const;
   // Maps one 16K bank into a pair of neighbouring 8K slots.
   void mapBank(int slot, int bank, bool ram);
   void applySnapshot(const formats::Snapshot& snapshot);
@@ -199,7 +200,11 @@ private:
   };
   std::array<Page, 8> page_{};
 
+  // tstates_ is the ULA clock and cpuTstates_ the CPU clock; they diverge on
+  // the Next, where the CPU can run several times faster than the ULA.
   u64 tstates_ = 0;
+  u64 cpuTstates_ = 0;
+  u32 turboAccum_ = 0;
   u64 frames_ = 0;
   bool irqLine_ = false;
   u32 irqEnd_ = 0;

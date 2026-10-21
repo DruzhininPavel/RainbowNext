@@ -1,3 +1,7 @@
+#include <cstdio>
+#include <string>
+#include <vector>
+
 #include "test_framework.h"
 
 #include "core/machine.h"
@@ -15,6 +19,19 @@ namespace {
 
 // The ROM is all zeros unless it is loaded, which makes "is this the ROM or
 // RAM?" invisible. A distinct pattern per byte makes both halves testable.
+std::vector<u8> readFile(const std::string& path) {
+  std::vector<u8> data;
+  std::FILE* file = std::fopen(path.c_str(), "rb");
+  if (file == nullptr) return data;
+  u8 buffer[0x4000];
+  size_t got;
+  while ((got = std::fread(buffer, 1, sizeof buffer, file)) > 0) {
+    data.insert(data.end(), buffer, buffer + got);
+  }
+  std::fclose(file);
+  return data;
+}
+
 void loadPatternRom(Machine& m) {
   u8 bank[0x4000];
   for (size_t i = 0; i < sizeof bank; ++i) bank[i] = u8(i * 7 + 3);
@@ -178,4 +195,83 @@ TEST(nextreg_classic_machines_have_no_next_registers) {
   CHECK_EQ(m.nextRegs().selected(), 0x00);
   CHECK_EQ(m.ioRead(0x243B, 0), 0xFF);
   CHECK_EQ(m.ioRead(0x253B, 0), 0xFF);
+}
+
+TEST(nextreg_alternate_rom_swaps_the_low_rom_bank) {
+  Machine m(MachineType::Next);
+  loadPatternRom(m); // bank 0
+  u8 bank1[0x4000];
+  for (size_t i = 0; i < sizeof bank1; ++i) bank1[i] = u8(i * 11 + 5);
+  m.loadRomData(bank1, sizeof bank1, 1);
+
+  CHECK_EQ(m.memRead(0x0000, 0), 0x03);
+  CHECK_EQ(m.memRead(0x0001, 0), 0x0A);
+
+  m.writeNextReg(0x8C, 0x80);
+  CHECK_EQ(m.memRead(0x0000, 0), 0x05);
+  CHECK_EQ(m.memRead(0x0001, 0), 0x10);
+
+  m.writeNextReg(0x8C, 0x00);
+  CHECK_EQ(m.memRead(0x0000, 0), 0x03);
+}
+
+TEST(nextreg_machine_type_needs_the_unlock_bit) {
+  Machine m(MachineType::Next);
+
+  CHECK_EQ(m.readNextReg(0x03), 0x33); // +2A/+3 timing, +2A/+3 type
+  m.writeNextReg(0x03, 0x60);
+  CHECK_EQ(m.readNextReg(0x03), 0x33);
+
+  m.writeNextReg(0x03, 0xE0); // unlock, then ask for 110 timing
+  CHECK_EQ(m.readNextReg(0x03), 0x63);
+}
+
+TEST(nextreg_turbo_gives_the_cpu_more_work_per_frame) {
+  // LD HL,0 / INC HL / JR -3, an 18 T-state loop whose count is readable
+  // straight from HL when the frame ends.
+  auto runOneFrame = [](u8 speed) {
+    Machine m(MachineType::Next);
+    m.writeNextReg(0x07, speed);
+    m.writeNextReg(0x50, 0x00);
+    m.writeNextReg(0x51, 0x01);
+    m.memWrite(0x0000, 0x21, 0);
+    m.memWrite(0x0001, 0x00, 0);
+    m.memWrite(0x0002, 0x00, 0);
+    m.memWrite(0x0003, 0x23, 0);
+    m.memWrite(0x0004, 0x18, 0);
+    m.memWrite(0x0005, 0xFD, 0);
+    m.cpu().regs().pc = 0x0000;
+    m.runFrame();
+    CHECK_EQ(m.frames(), 1); // the ULA still shows exactly one frame
+    return u32(m.cpu().hl());
+  };
+
+  const u32 base = runOneFrame(0);
+  CHECK(base > 3000);
+  const u32 fast = runOneFrame(1);
+  CHECK(fast > base * 19 / 10);
+  CHECK(fast < base * 21 / 10);
+  const u32 fastest = runOneFrame(3);
+  CHECK(fastest > base * 7);
+}
+
+// The Next keeps the 128K ROM in the bottom slots, so the 128K menu is the
+// quickest proof that the MMU, the ROM paging and the 0x7FFD shortcut agree.
+TEST(next_boots_the_128k_rom_through_the_mmu) {
+  Machine m(MachineType::Next);
+  std::vector<u8> image;
+  for (const char* name : {"128-0.rom", "128-1.rom"}) {
+    const std::vector<u8> bank = readFile(std::string(MYNEXT_SOURCE_DIR) + "/roms/" + name);
+    if (bank.size() != 0x4000) return; // no ROM set available
+    image.insert(image.end(), bank.begin(), bank.end());
+  }
+  if (!m.loadRomImageData(image.data(), image.size())) return;
+
+  for (int i = 0; i < 300; ++i) m.runFrame();
+
+  int lit = 0;
+  for (u32 addr = 0x4000; addr < 0x5B00; ++addr) {
+    if (m.memRead(u16(addr), 0) != 0) ++lit;
+  }
+  CHECK(lit > 100); // the menu has been drawn
 }

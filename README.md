@@ -7,8 +7,8 @@ Runs on macOS and Linux (including SteamOS / Steam Deck).
 ```
 Status: M1 — 48K and 128K/+2/+3 boot with AY sound, tape loading, disk images
         and snapshots.
-        M2 in progress: the Z80N instruction set of the ZX Spectrum Next is
-        implemented (docs/ROADMAP.md).
+        M2 in progress: the Z80N instruction set and the Next's MMU/NextREG
+        file are implemented (docs/ROADMAP.md).
 ```
 
 ## Features
@@ -20,6 +20,9 @@ Status: M1 — 48K and 128K/+2/+3 boot with AY sound, tape loading, disk images
   shifts, `MUL`, `ADD` to the wide registers, `PUSH nn`, `OUTINB`, `NEXTREG`,
   `PIXELDN`/`PIXELAD`/`SETAE`, `JP (C)`, `LDIX`/`LDDX`/`LDIRX`/`LDDRX`,
   `LDWS`, `LDPIRX`. Off on the classic machines, where the opcodes stay NOPs.
+* **Next MMU** — eight 8K slots in registers `0x50`-`0x57`, page 255 for the
+  ROM, ports `0x243B`/`0x253B`, the classic `0x7FFD` shortcut, alternate ROM,
+  and a CPU speed register that really does run the CPU 2×/4×/8× faster.
 * **ULA** — port `0xFE` read/write, border, beeper, 8×5 keyboard matrix,
   Fuse-compatible memory contention, floating bus.
 * **Machines** — 48K, 128K, +2, +3 and Pentagon, each with its own timings
@@ -123,7 +126,7 @@ roms/           user-supplied ROMs (empty by design)
 ctest --test-dir build --output-on-failure
 ```
 
-134 tests cover the Z80 core (timings, flags, undocumented opcodes,
+149 tests cover the Z80 core (timings, flags, undocumented opcodes,
 interrupts), the Z80N extension, ULA behaviour, contention, floating bus, frame
 length, audio rate, both snapshot formats, the AY, 128K/+3 paging and timings,
 tape blocks, the µPD765 and the DSK parser, and end-to-end runs of
