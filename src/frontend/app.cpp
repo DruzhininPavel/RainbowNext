@@ -157,6 +157,7 @@ bool App::init(const Options& options) {
 
   if (!options.snapshot.empty()) loadSnapshot(options.snapshot);
   if (!options.tape.empty()) loadTape(options.tape);
+  if (!options.disk.empty()) loadDisk(options.disk);
 
   input_.openGamepads();
 
@@ -216,6 +217,7 @@ void App::run() {
       switch (dialogKind_) {
         case DialogKind::Snapshot: loadSnapshot(path); break;
         case DialogKind::Tape: loadTape(path); break;
+        case DialogKind::Disk: loadDisk(path); break;
         case DialogKind::Rom: loadRom(path); break;
       }
     }
@@ -318,6 +320,8 @@ void App::handleEvent(const SDL_Event& event) {
         loadRom(path);
       } else if (extension == ".tap" || extension == ".tzx") {
         loadTape(path);
+      } else if (extension == ".dsk" || extension == ".edsk") {
+        loadDisk(path);
       } else {
         loadSnapshot(path);
       }
@@ -385,6 +389,23 @@ bool App::loadTape(const std::string& path) {
   return true;
 }
 
+bool App::loadDisk(const std::string& path) {
+  if (!machine_->hasDiskController()) {
+    // Only the +3 is wired to the µPD765, so switch to it instead of refusing
+    // the image the user just dropped on the window.
+    setMachine(MachineType::Plus3);
+  }
+  std::string error;
+  if (!machine_->loadDisk(path, error)) {
+    status_ = "Disk failed: " + error;
+    return false;
+  }
+  const formats::DiskImage& disk = machine_->disk();
+  status_ = "Disk inserted: " + path + " (" + std::to_string(disk.tracks) + " tracks, " +
+            std::to_string(disk.sides) + " side" + (disk.sides > 1 ? "s)" : ")");
+  return true;
+}
+
 void App::openFileDialog(DialogKind kind) {
   if (dialogOpen_) return;
   static const SDL_DialogFileFilter romFilters[] = {{"Spectrum ROM", "rom"}, {"All files", "*"}};
@@ -392,12 +413,15 @@ void App::openFileDialog(DialogKind kind) {
       {"Snapshots", "sna;z80"}, {"All files", "*"}};
   static const SDL_DialogFileFilter tapeFilters[] = {
       {"Tape images", "tap;tzx"}, {"All files", "*"}};
+  static const SDL_DialogFileFilter diskFilters[] = {
+      {"Disk images", "dsk;edsk"}, {"All files", "*"}};
 
   dialogKind_ = kind;
   dialogOpen_ = true;
   const SDL_DialogFileFilter* filters = romFilters;
   if (kind == DialogKind::Snapshot) filters = snapshotFilters;
   if (kind == DialogKind::Tape) filters = tapeFilters;
+  if (kind == DialogKind::Disk) filters = diskFilters;
   SDL_ShowOpenFileDialog(onFileDialog, this, window_, filters, 2, nullptr, false);
 }
 
@@ -474,6 +498,7 @@ void App::drawToolbar() {
     if (ImGui::MenuItem("Open ROM...")) openFileDialog(DialogKind::Rom);
     if (ImGui::MenuItem("Open Snapshot...")) openFileDialog(DialogKind::Snapshot);
     if (ImGui::MenuItem("Open Tape...")) openFileDialog(DialogKind::Tape);
+    if (ImGui::MenuItem("Insert Disk...")) openFileDialog(DialogKind::Disk);
     ImGui::Separator();
     if (ImGui::MenuItem("Reset", "F5")) reset();
     ImGui::Separator();
@@ -493,6 +518,29 @@ void App::drawToolbar() {
     bool fastLoad = tape.fastLoad();
     if (ImGui::MenuItem("Instant load", nullptr, &fastLoad)) tape.setFastLoad(fastLoad);
     if (ImGui::MenuItem("Eject", nullptr, false, loaded)) tape.eject();
+  });
+
+  menu("Disk", [this] {
+    if (ImGui::MenuItem("Insert Disk...")) openFileDialog(DialogKind::Disk);
+    ImGui::Separator();
+    const bool inserted = !machine_->disk().empty();
+    if (ImGui::MenuItem("Eject", nullptr, false, inserted)) {
+      machine_->ejectDisk();
+      status_ = "Disk ejected";
+    }
+    const bool motor = machine_->fdc().motor();
+    if (ImGui::MenuItem("Motor", nullptr, motor, inserted)) {
+      machine_->fdc().setMotor(!motor);
+    }
+    ImGui::Separator();
+    if (!machine_->hasDiskController()) {
+      ImGui::TextDisabled("Select the +2A or +3 machine");
+    } else if (!inserted) {
+      ImGui::TextDisabled("No disk inserted");
+    } else {
+      ImGui::TextDisabled("Cylinder %d  head %d", machine_->fdc().cylinder(),
+                          machine_->fdc().head());
+    }
   });
 
   menu("Machine", [this] {
@@ -643,6 +691,14 @@ void App::drawStatusOverlay() {
       ImGui::Text("Tape %zu/%zu %s  %s", tape.blockIndex() + 1, tape.blockCount(),
                   tape.playing() ? "PLAY" : (tape.atEnd() ? "END" : "STOP"),
                   tape.currentBlockName().c_str());
+    }
+    const formats::DiskImage& disk = machine_->disk();
+    if (!disk.empty()) {
+      const char* name = disk.path.empty() ? "image" : disk.path.c_str();
+      const size_t slash = disk.path.find_last_of("/\\");
+      if (slash != std::string::npos) name = disk.path.c_str() + slash + 1;
+      ImGui::Text("Disk %s  %d tracks  %s", name, disk.tracks,
+                  machine_->fdc().motor() ? "MOTOR" : "idle");
     }
     ImGui::End();
     ImGui::PopFont();

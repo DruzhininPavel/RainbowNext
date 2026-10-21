@@ -9,6 +9,7 @@
 #include "core/bus.h"
 #include "core/keyboard.h"
 #include "core/tape.h"
+#include "core/upd765.h"
 #include "core/types.h"
 #include "core/ula.h"
 #include "core/z80.h"
@@ -75,6 +76,9 @@ public:
   bool loadRomData(const u8* data, size_t size, int bank);
   bool loadSnapshot(const std::string& path, std::string& error);
   bool loadTape(const std::string& path, std::string& error);
+  // +2A/+3 only: inserts a .dsk/.edsk image into the disk controller.
+  bool loadDisk(const std::string& path, std::string& error);
+  void ejectDisk() { disk_ = formats::DiskImage{}; fdc_.eject(); }
 
   void runFrame();
   void runCycles(u32 cycles);
@@ -111,6 +115,10 @@ public:
   bool pagingLocked() const { return pagingLocked_; }
   bool specialPaging() const { return specialPaging_; }
   bool hasAy() const { return type_ != MachineType::Spectrum48; }
+  bool hasDiskController() const { return type_ == MachineType::Plus3; }
+  Upd765& fdc() { return fdc_; }
+  const Upd765& fdc() const { return fdc_; }
+  const formats::DiskImage& disk() const { return disk_; }
   Ay38912& ay() { return ay_; }
   const Ay38912& ay() const { return ay_; }
   bool is128k() const { return type_ != MachineType::Spectrum48; }
@@ -150,6 +158,8 @@ private:
   Beeper beeper_;
   Ay38912 ay_;
   Tape tape_;
+  Upd765 fdc_;
+  formats::DiskImage disk_;
 
   std::vector<u8> rom_;
   std::vector<u8> ram_;

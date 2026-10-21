@@ -5,7 +5,9 @@
 #include <cstring>
 #include <fstream>
 #include <iterator>
+#include <utility>
 
+#include "formats/dsk.h"
 #include "formats/sna.h"
 #include "formats/snapshot.h"
 #include "formats/z80file.h"
@@ -105,6 +107,8 @@ void Machine::reset() {
   updatePaging();
   ay_.reset();
   ay_.setStereo(type_ == MachineType::Plus3 ? Ay38912::Stereo::ABC : Ay38912::Stereo::Mono);
+  fdc_.reset();
+  fdc_.setDisk(hasDiskController() && !disk_.empty() ? &disk_ : nullptr);
 
   tstates_ = 0;
   frames_ = 0;
@@ -132,6 +136,19 @@ bool Machine::loadRomData(const u8* data, size_t size, int bank) {
 
 bool Machine::loadTape(const std::string& path, std::string& error) {
   return tape_.load(path, error);
+}
+
+bool Machine::loadDisk(const std::string& path, std::string& error) {
+  if (!hasDiskController()) {
+    error = "only the +3 has a disk controller";
+    return false;
+  }
+  formats::DiskImage image;
+  if (!formats::loadDskFile(path, image, error)) return false;
+  disk_ = std::move(image);
+  fdc_.reset();
+  fdc_.setDisk(&disk_);
+  return true;
 }
 
 // Serves the ROM's LD-BYTES routine (0x0556) from the loaded image instead of
@@ -295,6 +312,11 @@ u8 Machine::ioRead(u16 port, u32) {
     if ((port & 0xC002) == 0xC000) return 0xFF;       // 0xFFFD status
   }
 
+  if (hasDiskController()) {
+    if ((port & 0xF002) == 0x2000) return fdc_.readStatus(); // 0x2FFD
+    if ((port & 0xF002) == 0x3000) return fdc_.readData();   // 0x3FFD
+  }
+
   if ((port & 0x00E0) == 0x0000) return kempston_;      // 0x1F
   return 0xFF;
 }
@@ -333,6 +355,17 @@ void Machine::ioWrite(u16 port, u8 value, u32) {
       return;
     }
   }
+
+  if (hasDiskController()) {
+    if ((port & 0xF002) == 0x2000) { // 0x2FFD, command register
+      fdc_.writeCommand(value);
+      return;
+    }
+    if ((port & 0xF002) == 0x3000) { // 0x3FFD, data register
+      fdc_.writeData(value);
+      return;
+    }
+  }
 }
 
 void Machine::writePort7ffd(u8 value) {
@@ -355,6 +388,9 @@ void Machine::writePort1ffd(u8 value) {
 
 void Machine::updatePaging() {
   specialPaging_ = isPlus3() && (port1ffd_ & 0x01) != 0;
+  // Bit 3 of 0x1FFD is the disk motor; nothing in the emulator needs it, but
+  // the debugger shows it and it mirrors what the ROM asked for.
+  fdc_.setMotor(isPlus3() && (port1ffd_ & 0x08) != 0);
 
   ramBank_ = u8(port7ffd_ & 0x07);
   screenBank_ = (port7ffd_ & 0x08) ? 7 : 5;
@@ -390,6 +426,7 @@ void Machine::updatePaging() {
   page_[3].ram = true;
   page_[3].bank = ramBank_;
 }
+
 
 // ===========================================================================
 // Contention and floating bus

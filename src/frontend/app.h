@@ -26,6 +26,7 @@ public:
     std::string rom;
     std::string tape;
     std::string snapshot;
+    std::string disk;
   };
 
   bool init(const Options& options);
@@ -44,11 +45,12 @@ private:
   void pushAudio();
 
   void setMachine(MachineType type);
-  enum class DialogKind { Rom, Snapshot, Tape };
+  enum class DialogKind { Rom, Snapshot, Tape, Disk };
 
   bool loadRom(const std::string& path);
   bool loadSnapshot(const std::string& path);
   bool loadTape(const std::string& path);
+  bool loadDisk(const std::string& path);
   void openFileDialog(DialogKind kind);
   void reset();
 

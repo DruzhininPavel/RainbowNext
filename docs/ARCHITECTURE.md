@@ -13,7 +13,9 @@ flowchart TD
         KBD["Keyboard matrix 8x5"]
         BEEP["Beeper"]
         MACH["Machine<br/>memory map, paging, IRQ,<br/>framebuffer, audio accumulator"]
-        FMT["Formats<br/>SNA, Z80 v1/v2/v3"]
+        AY["AY-3-8912<br/>tone, noise, envelope, stereo"]
+        FDC["µPD765<br/>+3 disk controller,<br/>two ports, non-DMA"]
+        FMT["Formats<br/>SNA, Z80, TAP, TZX, DSK"]
     end
 
     subgraph host["Frontend (SDL3 + Dear ImGui)"]
@@ -28,6 +30,8 @@ flowchart TD
     MACH --> ULA
     MACH --> KBD
     MACH --> BEEP
+    MACH --> AY
+    MACH --> FDC
     MACH --> FMT
     APP --> MACH
     APP --> AUD
@@ -100,6 +104,25 @@ runFrame()
 0x8000-0xBFFF  RAM bank 2
 0xC000-0xFFFF  RAM bank 0-7 (bits 0-2 of port 0x7FFD)
 ```
+
+## Disk
+
+The +3's µPD765 lives in `src/core/upd765.*` and talks to the CPU through the
+two ports the real machine uses: `0x2FFD` (main status on read, command on
+write) and `0x3FFD` (data). It is a four-phase state machine — idle, command,
+execution, result — and the ROM drives it byte by byte, polling `RQM`/`DIO`
+between transfers, so no timing model is needed to satisfy it.
+
+The image is a plain `formats::DiskImage` decoded from a CPCEMU `.dsk` or an
+extended `.edsk` by `src/formats/dsk.cpp`. Both containers carry a Track-Info
+block per track with an eight-byte entry per sector (C, H, R, N, ST1, ST2,
+length), which is exactly the CHRN tuple the controller reports in READ ID and
+searches for in READ/WRITE DATA. Sectors are stored with `128 << n` bytes so a
+read can hand out a fixed-size block regardless of how the image was written.
+
+`Upd765` borrows the image instead of owning it: `Machine` holds the
+`DiskImage` and re-points the controller after a load or a reset, which keeps
+the controller free of I/O and lets tests construct one on the stack.
 
 ## Frame buffer
 

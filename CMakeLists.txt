@@ -81,6 +81,8 @@ add_library(mynext_core STATIC
   src/core/ay.cpp
   src/core/beeper.cpp
   src/core/tape.cpp
+  src/core/upd765.cpp
+  src/formats/dsk.cpp
   src/formats/sna.cpp
   src/formats/tape.cpp
   src/formats/z80file.cpp
@@ -123,6 +125,7 @@ if(MYNEXT_BUILD_TESTS)
   tests/test_ay.cpp
   tests/test_128k.cpp
   tests/test_128k_boot.cpp
+    tests/test_dsk.cpp
     tests/test_boot.cpp
   )
   target_link_libraries(mynext_tests PRIVATE mynext_core)

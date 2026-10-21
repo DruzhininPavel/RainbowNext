@@ -20,10 +20,11 @@ void printUsage() {
   std::printf(
       "usage: mynext [options] [file]\n"
       "\n"
-      "  file              .rom, .tap, .tzx, .sna or .z80, picked by extension\n"
+      "  file              .rom, .tap, .tzx, .sna, .z80, .dsk or .edsk, picked by extension\n"
       "  --rom FILE        Spectrum ROM image\n"
       "  --tape FILE       TAP or TZX image to insert into the tape deck\n"
       "  --snapshot FILE   SNA or Z80 snapshot to restore at startup\n"
+      "  --disk FILE       DSK or EDSK image to insert into the +3 disk drive\n"
       "  -h, --help        this message\n");
 }
 
@@ -40,11 +41,14 @@ int main(int argc, char** argv) {
       printUsage();
       return 0;
     }
-    if ((argument == "--rom" || argument == "--tape" || argument == "--snapshot") && hasValue) {
+    if ((argument == "--rom" || argument == "--tape" || argument == "--snapshot" ||
+         argument == "--disk") &&
+        hasValue) {
       const std::string value = argv[++i];
       if (argument == "--rom") options.rom = value;
       if (argument == "--tape") options.tape = value;
       if (argument == "--snapshot") options.snapshot = value;
+      if (argument == "--disk") options.disk = value;
       continue;
     }
 
@@ -56,6 +60,8 @@ int main(int argc, char** argv) {
       options.tape = argument;
     } else if (extension == ".sna" || extension == ".z80") {
       options.snapshot = argument;
+    } else if (extension == ".dsk" || extension == ".edsk") {
+      options.disk = argument;
     } else {
       std::fprintf(stderr, "mynext: unsupported argument '%s'\n", argument.c_str());
       printUsage();

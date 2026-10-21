@@ -40,7 +40,9 @@ a multicolour demo renders correctly; `z80test` passes.
 * [x] Contention per paged bank; Pentagon reports no contention
 * [x] Real ROM boot verified: 128K menu, ROM paging into 48 BASIC, +3 Amstrad menu
 * [ ] Exact 128K contention (`offset` 1 vs 4, `line_times[]`)
-* [ ] +3 disk controller (µPD765) and `.dsk`/`.edsk`
+* [x] +3 disk controller (µPD765) and `.dsk`/`.edsk`: SPECIFY, SENSE DRIVE,
+      SENSE INTERRUPT, RECALIBRATE, SEEK, READ ID, READ DATA/DELETED/TRACK,
+      WRITE DATA/DELETED, FORMAT TRACK; standard CPCEMU and extended images
 * [ ] Pentagon ULA+ attributes and `0xDFFD`/`0xEFF7` magic ports
 * [ ] Real-time tape playback tuning for protected loaders (turbo blocks, custom pilots)
 
@@ -82,7 +84,10 @@ These are deliberate simplifications, tracked here so they are not forgotten:
 6. No Kempston mouse, no Kempston joystick.
 7. The AY is clocked from the CPU T-state counter rather than from the ULA
    frame counter, so it is deterministic but not cycle-exact against hardware.
-8. The +3 motor bit is latched but nothing consumes it yet (no µPD765).
+8. The µPD765 answers instantly instead of modelling head movement, so a SEEK
+   completes in the same frame; the +3 ROM only polls the interrupt line, which
+   this satisfies. Writes go straight into the in-memory image and are not
+   flushed back to the `.dsk` file.
 9. Contention uses one fixed pattern per line instead of a per-line
    `line_times[]` table, so the 128K/+3 windows start a few T-states early.
 

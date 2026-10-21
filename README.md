@@ -5,7 +5,8 @@ around a deterministic headless core and a thin SDL3 + Dear ImGui frontend.
 Runs on macOS and Linux (including SteamOS / Steam Deck).
 
 ```
-Status: M1 — 48K and 128K/+2/+3 boot with AY sound, tape loading and snapshots.
+Status: M1 — 48K and 128K/+2/+3 boot with AY sound, tape loading, disk images
+        and snapshots.
         ZX Spectrum Next is next (docs/ROADMAP.md).
 ```
 
@@ -28,6 +29,9 @@ Status: M1 — 48K and 128K/+2/+3 boot with AY sound, tape loading and snapshots
   the ROM loader trap at `0x0556`.
 * **ROM sets** — banked ROM images (`128-0.rom`…, `plus3-0.rom`…) are assembled
   into a single image, so the machine can page through all four banks.
+* **Disk** — +3 µPD765 on ports `0x2FFD`/`0x3FFD` with standard CPCEMU `.dsk`
+  and extended `.edsk` images (SPECIFY, SEEK, READ ID, READ/WRITE DATA, FORMAT
+  TRACK), driven by the real +3 ROM.
 * **Snapshots** — `.sna` (48K/128K) and `.z80` (v1, v2, v3 with RLE).
 * **Frontend** — resizable window, integer scaling, speed 1×/2×/4×/8×,
   drag & drop loading, Dear ImGui menus and a debugger overlay.
@@ -71,10 +75,11 @@ ROM images are not bundled — see [`roms/README.md`](roms/README.md).
 ./build/mynext roms/48.rom          # explicit ROM
 ./build/mynext game.tap             # ROM from roms/, tape inserted
 ./build/mynext --rom 48.rom --tape game.tzx --snapshot save.z80
+./build/mynext --rom roms/plus3-0.rom --disk game.dsk
 ```
 
-A bare path is routed by extension: `.rom`, `.tap`/`.tzx`, `.sna`/`.z80`.
-The same files can be dropped onto the window.
+A bare path is routed by extension: `.rom`, `.tap`/`.tzx`, `.sna`/`.z80`,
+`.dsk`/`.edsk`. The same files can be dropped onto the window.
 
 Tape playback is real-time through the EAR bit, so `LOAD ""` works as on real
 hardware. `Tape > Instant load` (on by default) short-circuits the ROM loader for
@@ -99,8 +104,8 @@ instant loading; turn it off to hear and debug the actual tape signal.
 ## Layout
 
 ```
-src/core/       Z80, ULA, keyboard, beeper, Machine — no OS dependencies
-src/formats/    SNA / Z80 snapshot loaders, TAP / TZX tape parsers
+src/core/       Z80, ULA, keyboard, beeper, AY, µPD765, Machine — no OS deps
+src/formats/    SNA / Z80 snapshots, TAP / TZX tapes, DSK / EDSK disk images
 src/frontend/   SDL3 + Dear ImGui host: app, audio, input, debugger
 tests/          unit tests, incl. an end-to-end boot test (no ROM required)
 docs/           ARCHITECTURE.md, REFERENCES.md, ROADMAP.md
@@ -113,10 +118,11 @@ roms/           user-supplied ROMs (empty by design)
 ctest --test-dir build --output-on-failure
 ```
 
-88 tests cover the Z80 core (timings, flags, undocumented opcodes, interrupts),
-ULA behaviour, contention, floating bus, frame length, audio rate, both snapshot
-formats, the AY, 128K/+3 paging and timings, tape blocks, and end-to-end runs of
-hand-assembled programs through the machine. Golden tests also boot the real
+110 tests cover the Z80 core (timings, flags, undocumented opcodes,
+interrupts), ULA behaviour, contention, floating bus, frame length, audio rate,
+both snapshot formats, the AY, 128K/+3 paging and timings, tape blocks, the
+µPD765 and the DSK parser, and end-to-end runs of hand-assembled programs
+through the machine. Golden tests also boot the real
 `roms/128-0.rom` and `roms/plus3-0.rom` sets when those files are present; they
 skip themselves on a clean checkout.
 
