@@ -70,8 +70,10 @@ a multicolour demo renders correctly; `z80test` passes.
       8-bit Y scroll (`0x16`, `0x17`, `0x71`), the global transparency index
       (`0x14`) and the layer priority order of `0x15`. Layer 2 is composited
       over the ULA per pixel while the ULA still owns the border.
-* [ ] Layer 2 clip window (`0x18`), the second palette and its priority bit,
-      ULA+ palettes, Radastan mode
+* [x] Layer 2 clip window (`0x18`, four writes: X1, X2, Y1, Y2, applied to the
+      layer coordinates before compositing).
+* [ ] The second Layer 2 palette and its priority bit, ULA+ palettes, Radastan
+      mode
 * [ ] 128 sprites (4B/5B), tilemap, Copper, DMA
 * [ ] 3× AY with stereo, specdrum, `.nex` snapshot format
 * [ ] SD card image access for NextZXOS

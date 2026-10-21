@@ -100,6 +100,8 @@ void Machine::reset() {
 
   next_.reset();
   palette_.reset();
+  layer2Clip_ = {0, 255, 0, 191};
+  layer2ClipIndex_ = 0;
   // Bits 6:4 are the display timing and bits 2:0 the machine type; a Next in
   // Next mode presents itself as a +2A/+3.
   if (type_ == MachineType::Next) next_.write(0x03, 0x33);
@@ -536,6 +538,11 @@ void Machine::writeNextReg(u8 reg, u8 value) {
     case 0x44: // 9-bit palette colour
       palette_.write9(value);
       return;
+    case 0x18: // Layer 2 clip window, four writes: X1, X2, Y1, Y2
+      next_.write(reg, value);
+      layer2Clip_[layer2ClipIndex_ & 0x03] = value;
+      ++layer2ClipIndex_;
+      return;
     default:
       next_.write(reg, value);
       return;
@@ -754,6 +761,10 @@ Machine::Layer2View Machine::layer2View() const {
   view.scrollX = next_.read(0x16) | ((next_.read(0x71) & 0x01) << 8);
   view.scrollY = next_.read(0x17);
   view.base = size_t(next_.read(0x12)) * size_t(BankSize);
+  view.clipX1 = layer2Clip_[0];
+  view.clipX2 = layer2Clip_[1];
+  view.clipY1 = layer2Clip_[2];
+  view.clipY2 = layer2Clip_[3];
 
   // The 320 and 640 wide modes are centred on the ULA's 256 pixel viewport.
   if (view.width != 256) view.scrollX += (view.width - ScreenWidth) / 2;
@@ -768,6 +779,8 @@ u32 Machine::layer2Pixel(const Layer2View& view, int x, int y) const {
   const int column = view.fourBit ? x * 2 : x;
   const int lx = (column + view.scrollX) % view.width;
   const int ly = (y + view.scrollY) % view.height;
+  if (lx < view.clipX1 || lx > view.clipX2) return Transparent;
+  if (ly < view.clipY1 || ly > view.clipY2) return Transparent;
   const size_t offset = view.base + size_t(ly) * size_t(stride) +
                         size_t(view.fourBit ? lx / 2 : lx);
   if (offset >= ram_.size()) return Transparent;

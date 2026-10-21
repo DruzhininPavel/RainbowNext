@@ -171,6 +171,10 @@ private:
     int scrollY = 0;
     int palette = 0;
     u8 transparency = 0;
+    int clipX1 = 0;
+    int clipX2 = 255;
+    int clipY1 = 0;
+    int clipY2 = 191;
     size_t base = 0;
   };
   Layer2View layer2View() const;
@@ -201,6 +205,9 @@ private:
   formats::DiskImage disk_;
   NextRegFile next_;
   NextPalette palette_;
+  // Register 0x18 takes four writes in a row, so the position needs a counter.
+  std::array<u8, 4> layer2Clip_ = {0, 255, 0, 191};
+  u8 layer2ClipIndex_ = 0;
 
   std::vector<u8> rom_;
   std::vector<u8> ram_;

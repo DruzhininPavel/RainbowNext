@@ -230,3 +230,42 @@ TEST(palette_reset_restores_the_defaults) {
   CHECK_EQ(m.palette().colour(NextPalette::Ula0, 0x01), 0xFF0000DAu);
   CHECK_EQ(m.palette().index(), 0);
 }
+
+TEST(layer2_clip_window_hides_pixels_outside_it) {
+  Machine m(MachineType::Next);
+  clearUlaScreen(m);
+  for (u16 x = 0; x < 8; ++x) m.memWrite(u16(0xC000 + x), 0x05, 0);
+
+  m.writeNextReg(0x12, 0x00);
+  m.writeNextReg(0x69, 0x80);
+  m.writeNextReg(0x43, 0x10);
+  writePalette8(m, 0x05, 0x1C);
+  // Four writes: X1, X2, Y1, Y2. Only columns 2 to 4 stay visible.
+  m.writeNextReg(0x18, 2);
+  m.writeNextReg(0x18, 4);
+  m.writeNextReg(0x18, 0);
+  m.writeNextReg(0x18, 191);
+
+  renderOneFrame(m);
+  CHECK_EQ(pixelAt(m, 1, 0), 0xFF000000u);
+  CHECK_EQ(pixelAt(m, 2, 0), 0xFF00FF00u);
+  CHECK_EQ(pixelAt(m, 4, 0), 0xFF00FF00u);
+  CHECK_EQ(pixelAt(m, 5, 0), 0xFF000000u);
+}
+
+TEST(layer2_clip_window_resets_to_the_full_screen) {
+  Machine m(MachineType::Next);
+  m.writeNextReg(0x18, 10);
+  m.reset();
+
+  Machine reference(MachineType::Next);
+  clearUlaScreen(reference);
+  m.memWrite(0xC000, 0x05, 0);
+  m.writeNextReg(0x12, 0x00);
+  m.writeNextReg(0x69, 0x80);
+  m.writeNextReg(0x43, 0x10);
+  writePalette8(m, 0x05, 0x1C);
+
+  renderOneFrame(m);
+  CHECK_EQ(pixelAt(m, 0, 0), 0xFF00FF00u);
+}

@@ -25,8 +25,9 @@ Status: M1 — 48K and 128K/+2/+3 boot with AY sound, tape loading, disk images
   and a CPU speed register that really does run the CPU 2×/4×/8× faster.
 * **Next palette and Layer 2** — eight 256-entry palettes of 9-bit RGB333
   colours written through `0x40`-`0x44`, and a Layer 2 with 256×192, 320×256 and
-  640×256×4 modes, hardware scroll, a transparency index and the layer priority
-  order of register `0x15`, composited over the ULA every scanline.
+  640×256×4 modes, hardware scroll, a clip window, a transparency index and the
+  layer priority order of register `0x15`, composited over the ULA every
+  scanline.
 * **ULA** — port `0xFE` read/write, border, beeper, 8×5 keyboard matrix,
   Fuse-compatible memory contention, floating bus.
 * **Machines** — 48K, 128K, +2, +3 and Pentagon, each with its own timings
@@ -130,7 +131,7 @@ roms/           user-supplied ROMs (empty by design)
 ctest --test-dir build --output-on-failure
 ```
 
-162 tests cover the Z80 core (timings, flags, undocumented opcodes,
+164 tests cover the Z80 core (timings, flags, undocumented opcodes,
 interrupts), the Z80N extension, the Next MMU, palette and Layer 2, ULA
 behaviour, contention, floating bus, frame length, audio rate, both snapshot
 formats, the AY, 128K/+3 paging and timings, tape blocks, the µPD765 and the DSK
