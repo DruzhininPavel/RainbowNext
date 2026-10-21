@@ -249,6 +249,8 @@ private:
   u8 tilemapClipIndex_ = 0;
   // Bit per pixel: the layers that hide a sprite at that position.
   std::vector<u8> occluders_;
+  // Bit per pixel: a sprite has already drawn there, which is a collision.
+  std::vector<u8> spriteDrawn_;
 
   std::vector<u8> rom_;
   std::vector<u8> ram_;

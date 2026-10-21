@@ -12,6 +12,11 @@ void Sprites::reset() {
   attributeIndex_ = 0;
   clipIndex_ = 0;
   patternAddress_ = 0;
+  // Register 0x09 goes back to its default on reset, so the sprite number
+  // stops following port 0x303B as well.
+  lockstep_ = false;
+  collision_ = false;
+  overflow_ = false;
 }
 
 void Sprites::selectPort(u8 value) {
@@ -59,19 +64,107 @@ void Sprites::writeClip(u8 value) {
   clipIndex_ = u8((clipIndex_ + 1) & 0x03);
 }
 
-int Sprites::pixel(int sprite, int column, int row, u8 transparency) const {
-  const bool four = fourBit(sprite);
+SpriteState Sprites::anchorState(int sprite) const {
+  SpriteState state;
+  state.visible = visible(sprite);
+  state.x = x(sprite);
+  state.y = y(sprite);
+  state.pattern = pattern(sprite);
+  state.paletteOffset = paletteOffset(sprite);
+  state.fourBit = fourBit(sprite);
+  state.mirrorX = mirrorX(sprite);
+  state.mirrorY = mirrorY(sprite);
+  state.rotate = rotate(sprite);
+  state.scaleX = scaleX(sprite);
+  state.scaleY = scaleY(sprite);
+  return state;
+}
+
+SpriteState Sprites::relativeState(int sprite, const SpriteState& anchor,
+                                   bool unified) const {
+  SpriteState state;
+  // An invisible anchor hides the whole group.
+  state.visible = anchor.visible && visible(sprite);
+  state.fourBit = anchor.fourBit;
+  state.pattern =
+      (pattern(sprite) + ((attribute(sprite, 4) & 0x01) ? anchor.pattern : 0)) &
+      0x7F;
+  // Bit 0 of byte 2 is the relative palette offset bit on a relative sprite.
+  state.paletteOffset = (paletteOffset(sprite) +
+                         ((attribute(sprite, 2) & 0x01) ? anchor.paletteOffset : 0)) &
+                        0x0F;
+
+  // Bytes 0 and 1 hold signed offsets from the anchor's origin.
+  int offsetX = int(i8(attribute(sprite, 0)));
+  int offsetY = int(i8(attribute(sprite, 1)));
+
+  if (unified) {
+    // A big sprite behaves as one 16x16 image: the offsets scale with the
+    // anchor and swing round it, and every part copies the anchor's flags.
+    // The rotation turns the offset a quarter clockwise, matching the cell
+    // mapping in pixel().
+    offsetX *= anchor.scaleX;
+    offsetY *= anchor.scaleY;
+    if (anchor.rotate) {
+      const int turned = offsetX;
+      offsetX = -offsetY;
+      offsetY = turned;
+    }
+    if (anchor.mirrorX) offsetX = -offsetX;
+    if (anchor.mirrorY) offsetY = -offsetY;
+    state.mirrorX = anchor.mirrorX;
+    state.mirrorY = anchor.mirrorY;
+    state.rotate = anchor.rotate;
+    state.scaleX = anchor.scaleX;
+    state.scaleY = anchor.scaleY;
+  } else {
+    state.mirrorX = mirrorX(sprite);
+    state.mirrorY = mirrorY(sprite);
+    state.rotate = rotate(sprite);
+    state.scaleX = scaleX(sprite);
+    state.scaleY = scaleY(sprite);
+  }
+
+  // The mask keeps a negative offset wrapping round the 512 pixel surface.
+  state.x = (anchor.x + offsetX) & 0x1FF;
+  state.y = (anchor.y + offsetY) & 0x1FF;
+  return state;
+}
+
+std::array<SpriteState, Sprites::Count> Sprites::resolve() const {
+  std::array<SpriteState, Count> states{};
+  // The hardware walks the list upwards and remembers the last anchor, so a
+  // relative sprite cannot see anything later in the list.
+  SpriteState anchor;
+  bool haveAnchor = false;
+  bool anchorUnified = false;
+  for (int n = 0; n < Count; ++n) {
+    if (relative(n)) {
+      states[size_t(n)] = relativeState(n, anchor, haveAnchor && anchorUnified);
+      continue;
+    }
+    anchor = anchorState(n);
+    anchorUnified = unified(n);
+    haveAnchor = true;
+    states[size_t(n)] = anchor;
+  }
+  return states;
+}
+
+int Sprites::pixel(const SpriteState& state, int column, int row,
+                   u8 transparency) const {
+  const bool four = state.fourBit;
   // Rotation happens before mirroring, so a mirrored rotation reads the
   // source cell from the already mirrored destination.
-  int cx = mirrorX(sprite) ? Size - 1 - column : column;
-  int cy = mirrorY(sprite) ? Size - 1 - row : row;
-  if (rotate(sprite)) {
+  int cx = state.mirrorX ? Size - 1 - column : column;
+  int cy = state.mirrorY ? Size - 1 - row : row;
+  if (state.rotate) {
     const int rotatedX = cy;
     cy = Size - 1 - cx;
     cx = rotatedX;
   }
 
-  const int address = pattern(sprite) * PatternStride;
+  const int address = state.pattern * PatternStride;
   const u8 packed =
       pattern_[size_t((address + (four ? cy * 8 + cx / 2 : cy * Size + cx)) &
                       0x3FFF)];

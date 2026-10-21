@@ -106,6 +106,7 @@ void Machine::reset() {
   tilemapClip_ = {0, 159, 0, 255};
   tilemapClipIndex_ = 0;
   occluders_.assign(FrameWidth * FrameHeight, 0);
+  spriteDrawn_.assign(FrameWidth * FrameHeight, 0);
   // Bits 6:4 are the display timing and bits 2:0 the machine type; a Next in
   // Next mode presents itself as a +2A/+3.
   if (type_ == MachineType::Next) next_.write(0x03, 0x33);
@@ -316,7 +317,12 @@ u8 Machine::ioRead(u16 port, u32) {
   if (isNext()) {
     if (port == 0x243B) return next_.selected();
     if (port == 0x253B) return readNextReg(next_.selected());
-    if (port == 0x303B) return 0x00; // collision bits are not modelled yet
+    if (port == 0x303B) {
+      // The sprite status flags clear themselves as they are read.
+      const u8 status = sprites_.readStatus();
+      sprites_.clearStatus();
+      return status;
+    }
   }
 
   if ((port & 0x0001) == 0) {
@@ -1073,6 +1079,7 @@ void Machine::renderUlaRow(int y, std::array<u32, ScreenWidth>& row) const {
 
 
 void Machine::renderSprites() {
+  sprites_.clearStatus();
   if (!isNext()) return;
   const u8 control = next_.read(0x15);
   if ((control & 0x01) == 0) return; // sprites disabled
@@ -1084,18 +1091,49 @@ void Machine::renderSprites() {
   const int palette = (palette_.control() & 0x08) != 0 ? NextPalette::SpritesSecond
                                                        : NextPalette::SpritesFirst;
   const auto& clip = sprites_.clip();
+  const auto states = sprites_.resolve();
+  std::fill(spriteDrawn_.begin(), spriteDrawn_.end(), 0);
+
+  // The hardware prepares sprites in list order and can only manage about a
+  // hundred unscaled ones per scanline. Whatever it never reached is left out
+  // of the frame, and port 0x303B reports that the line ran over.
+  constexpr int SpritesPerLine = 100;
+  std::array<u8, FrameHeight> lineSprites{};
+  std::array<bool, Sprites::Count> dropped{};
+  for (int sprite = 0; sprite < Sprites::Count; ++sprite) {
+    const SpriteState& state = states[size_t(sprite)];
+    if (!state.visible) continue;
+    const int height = Sprites::Size * state.scaleY;
+    bool fits = true;
+    for (int dy = 0; dy < height && fits; ++dy) {
+      const int surfaceY = (state.y + dy) & 0x1FF;
+      if (surfaceY >= FrameHeight) continue;
+      fits = lineSprites[size_t(surfaceY)] < SpritesPerLine;
+    }
+    if (!fits) {
+      dropped[size_t(sprite)] = true;
+      sprites_.noteOverflow();
+      continue;
+    }
+    for (int dy = 0; dy < height; ++dy) {
+      const int surfaceY = (state.y + dy) & 0x1FF;
+      if (surfaceY < FrameHeight) ++lineSprites[size_t(surfaceY)];
+    }
+  }
 
   for (int n = 0; n < Sprites::Count; ++n) {
     const int sprite = zeroOnTop ? Sprites::Count - 1 - n : n;
-    if (!sprites_.visible(sprite)) continue;
+    if (dropped[size_t(sprite)]) continue;
+    const SpriteState& state = states[size_t(sprite)];
+    if (!state.visible) continue;
 
-    const int scaleX = sprites_.scaleX(sprite);
-    const int scaleY = sprites_.scaleY(sprite);
+    const int scaleX = state.scaleX;
+    const int scaleY = state.scaleY;
     const int width = Sprites::Size * scaleX;
     const int height = Sprites::Size * scaleY;
-    const int originX = sprites_.x(sprite);
-    const int originY = sprites_.y(sprite);
-    const int offset = sprites_.paletteOffset(sprite) << 4;
+    const int originX = state.x;
+    const int originY = state.y;
+    const int offset = state.paletteOffset << 4;
 
     for (int dy = 0; dy < height; ++dy) {
       // Sprite coordinates wrap at 512, so a sprite hanging off the top or
@@ -1131,9 +1169,16 @@ void Machine::renderSprites() {
           if (clipY < clip[2] || clipY > clip[3]) continue;
         }
 
-        const int index = sprites_.pixel(sprite, dx / scaleX, dy / scaleY,
-                                         transparency);
+        const int index =
+            sprites_.pixel(state, dx / scaleX, dy / scaleY, transparency);
         if (index < 0) continue;
+
+        // Two sprites over the same pixel are what the collision flag is for.
+        if (spriteDrawn_[rowBase + size_t(surfaceX)] != 0) {
+          sprites_.noteCollision();
+        } else {
+          spriteDrawn_[rowBase + size_t(surfaceX)] = 1;
+        }
 
         row[surfaceX] = palette_.colour(palette, u8((offset + index) & 0xFF));
       }

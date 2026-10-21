@@ -33,6 +33,8 @@ Status: M1 — 48K and 128K/+2/+3 boot with AY sound, tape loading, disk images
   a separate 16K pattern RAM, palette offsets, mirror, rotate, 1×-8× scaling,
   per-sprite transparency, a clip window, over-border drawing and the full
   layer priority order — including sprite 0 on top when the program asks for it.
+  Relative and unified (big) sprites work off an anchor sprite, and the status
+  port `0x303B` reports collisions and a scanline that ran out of sprite budget.
 * **Next tilemap** — the layer 3 of `0x6B`, with 40- and 80-column maps, 4-bit
   tiles or monochrome text tiles, 512-tile mode, a default attribute, mirror,
   rotate, hardware scroll, a clip window, a transparency index, and per-tile
@@ -140,8 +142,9 @@ roms/           user-supplied ROMs (empty by design)
 ctest --test-dir build --output-on-failure
 ```
 
-202 tests cover the Z80 core (timings, flags, undocumented opcodes,
-interrupts), the Z80N extension, the Next MMU, palette, Layer 2, sprites and the
+222 tests cover the Z80 core (timings, flags, undocumented opcodes,
+interrupts), the Z80N extension, the Next MMU, palette, Layer 2, sprites
+(including relative and unified sprites and the collision flags) and the
 tilemap, ULA
 behaviour, contention, floating bus, frame length, audio rate, both snapshot
 formats, the AY, 128K/+3 paging and timings, tape blocks, the µPD765 and the DSK

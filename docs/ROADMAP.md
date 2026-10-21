@@ -86,7 +86,14 @@ a multicolour demo renders correctly; `z80test` passes.
       `0x6C`, mirror/rotate, the 9-bit X and 8-bit Y scroll (`0x2F`-`0x31`), the
       clip window of `0x1B` and the transparency index of `0x4C`. The layer
       reaches into the border and mixes with the ULA per pixel.
-* [ ] Relative and unified sprites, sprite collision detection
+* [x] Relative and unified (big) sprites — byte 4 of `0x39`/`0x79` with its top
+      two bits at `01` makes a sprite hang off the last anchor above it in the
+      list: the anchor's position, pattern size, and optionally its pattern
+      (`PO`) and palette offset (`PR`). Bit 5 of an anchor's byte 4 groups its
+      relatives into a single big sprite that follows the anchor's mirror,
+      rotate and scale. The status port `0x303B` reports a collision between
+      two sprites (bit 0) and the per-scanline sprite budget running out
+      (bit 1), and clears both as it is read.
 * [ ] The second Layer 2 palette and its priority bit, ULA+ palettes, Radastan
       mode
 * [ ] Copper, DMA

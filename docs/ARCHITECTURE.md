@@ -154,6 +154,29 @@ second one), Layer 2 reads one of its two palettes (bit 2), the sprites read
 theirs (bit 3) and the tilemap picks its palette with bit 4 of `0x6B`. Bits 6:4
 of `0x43` only choose where palette *writes* land.
 
+## Sprite resolution
+
+`Sprites::resolve()` walks the sprite list once, from sprite 0 upwards, and
+turns the raw attribute bytes into a `SpriteState` per sprite: position,
+pattern number, palette offset, pattern size, mirror, rotate and scale. A
+sprite whose byte 4 has its top two bits at `01` is *relative*: instead of
+carrying a position it carries signed offsets from the anchor that precedes it,
+and it borrows the anchor's pattern size and optionally adds the anchor's
+pattern (`PO`) and palette offset (`PR`). An anchor whose byte 4 has bit 5 set
+is *unified*: its relatives are parts of one big sprite, so they also copy the
+anchor's mirror, rotate and scale, and their offsets are scaled and turned with
+the anchor. Rendering then works purely from the resolved states, which keeps
+the relative logic in one place.
+
+`renderSprites()` also maintains the two flags of the status port `0x303B`.
+Collisions come from a bit-per-pixel `spriteDrawn_` map: a sprite that writes
+over a pixel another sprite already drew raises the collision flag. The budget
+check is a pre-pass that counts how many sprites cover each of the 256
+scanlines; the hundredth sprite on a line is the last one that fits, and
+anything past it is dropped from the frame and raises the overflow flag. Both
+flags clear themselves when the port is read, so a program can poll them per
+frame without a separate reset.
+
 ## Frame buffer
 
 `Machine::framebuffer()` is `320x256` ARGB8888: a 32-pixel border around a

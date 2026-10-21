@@ -117,10 +117,10 @@ TEST(sprite_pattern_number_puts_n6_last) {
   Machine m(MachineType::Next);
   m.writeNextReg(0x34, 0);
   m.writeNextReg(0x38, 0xC0 | 0x05); // extended, N5..N0 = 000101
-  m.writeNextReg(0x39, 0x40);        // N6 = 1
+  m.writeNextReg(0x39, 0xC0);        // H = 1, N6 = 1
 
   CHECK_EQ(m.sprites().pattern(0), 11);
-  CHECK_EQ(m.sprites().fourBit(0), 0); // bit 7 of attribute 4 selects 4-bit
+  CHECK_EQ(m.sprites().fourBit(0), 1); // bit 7 of attribute 4 selects 4-bit
 }
 
 TEST(sprite_uses_the_palette_offset) {
