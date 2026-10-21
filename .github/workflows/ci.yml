@@ -27,9 +27,10 @@ jobs:
               sudo apt-get install -y libsdl3-dev || echo "no system SDL3, building from source"
               sudo apt-get install -y \
                 libasound2-dev libpulse-dev libdbus-1-dev libudev-dev \
+                libdrm-dev libgbm-dev libegl1-mesa-dev libgles2-mesa-dev \
                 libx11-dev libxext-dev libxrandr-dev libxcursor-dev libxi-dev \
-                libxfixes-dev libxss-dev libxkbcommon-dev \
-                libwayland-dev libdecor-0-dev libegl1-mesa-dev libgbm-dev
+                libxfixes-dev libxss-dev libxtst-dev libxkbcommon-dev \
+                libwayland-dev libdecor-0-dev libibus-1.0-dev
 
     steps:
       - uses: actions/checkout@v5
