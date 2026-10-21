@@ -119,5 +119,8 @@ if(MYNEXT_BUILD_TESTS)
   )
   target_link_libraries(mynext_tests PRIVATE mynext_core)
   target_compile_options(mynext_tests PRIVATE -Wall -Wextra -Wpedantic)
+  # Lets the golden ROM test look for roms/48.rom in the source tree.
+  target_compile_definitions(mynext_tests PRIVATE
+    MYNEXT_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
   add_test(NAME mynext_tests COMMAND mynext_tests)
 endif()

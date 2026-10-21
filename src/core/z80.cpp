@@ -772,7 +772,8 @@ void Z80::execute(u8 op, int idx) {
     // --- 0x20-0x2F ------------------------------------------------------
     case 0x20: case 0x28: case 0x30: case 0x38: {                  // JR cc,d
       const i8 d = i8(fetchImm());
-      if (condition((op >> 3) & 7)) {
+      // JR only encodes NZ/Z/NC/C, i.e. condition codes 0-3.
+      if (condition((op >> 3) & 3)) {
         tick(5);
         regs_.pc = u16(regs_.pc + u16(i16(d)));
       }

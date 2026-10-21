@@ -15,13 +15,16 @@ done by loading a ROM or a snapshot.
 * [x] Audio sample accumulator (beeper → float samples)
 * [x] SNA and Z80 v1/v2/v3 snapshot loading (plain + RLE)
 * [x] SDL3 + Dear ImGui frontend: window, pacing, menus, drag & drop, debugger overlay
-* [x] 47 unit tests including an end-to-end "boot a hand-assembled program" test
+* [x] 51 unit tests including an end-to-end "boot a hand-assembled program" test
+      and golden tests that boot the real `roms/48.rom`
+* [x] `48.rom` boots to the BASIC prompt: the copyright message is printed and
+      `PRINT 42` evaluates to `42` with the `0 OK, 0:1` report
 * [ ] `z80test` / `zexall` conformance runs in CI
 * [ ] TAP/TZX tape loading
 * [ ] Golden-frame image hashes
 
-**Exit criteria:** `48.rom` boots to the BASIC prompt; a multicolour demo
-renders correctly; `z80test` passes.
+**Exit criteria:** `48.rom` boots to the BASIC prompt and executes BASIC (done);
+a multicolour demo renders correctly; `z80test` passes.
 
 ## M1 — 128K / +2 / +3 / Pentagon
 

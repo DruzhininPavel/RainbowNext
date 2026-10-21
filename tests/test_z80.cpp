@@ -365,6 +365,67 @@ TEST(z80_conditional_jump) {
   CHECK_EQ(cpu.regs().pc, 0x8000);
 }
 
+TEST(z80_jr_conditions) {
+  // JR encodes only NZ/Z/NC/C, so the condition must be masked with 3 rather
+  // than 7. Getting this wrong makes every JR behave like PO/PE/P/M.
+  struct Case {
+    mynext::u8 op;
+    mynext::u8 flags;
+    bool taken;
+  };
+  const Case cases[] = {
+      {0x20, 0x00, true},  // JR NZ taken when Z=0
+      {0x20, 0x40, false}, // JR NZ not taken when Z=1
+      {0x28, 0x40, true},  // JR Z taken when Z=1
+      {0x28, 0x00, false}, // JR Z not taken when Z=0
+      {0x30, 0x00, true},  // JR NC taken when C=0
+      {0x30, 0x01, false}, // JR NC not taken when C=1
+      {0x38, 0x01, true},  // JR C taken when C=1
+      {0x38, 0x00, false}, // JR C not taken when C=0
+  };
+  for (const Case& c : cases) {
+    FlatBus bus;
+    load(bus, {c.op, 0x02, 0x00}); // JR cc,+2 : NOP
+    mynext::Z80 cpu(bus);
+    cpu.regs().f = c.flags;
+    const mynext::u32 t = cpu.step();
+    CHECK_EQ(t, c.taken ? 12u : 7u);
+    CHECK_EQ(cpu.regs().pc, c.taken ? 0x0004 : 0x0002);
+  }
+}
+
+TEST(z80_jp_conditions) {
+  // JP cc uses the full three-bit condition code, including PO/PE/P/M.
+  struct Case {
+    mynext::u8 op;
+    mynext::u8 flags;
+    bool taken;
+  };
+  const Case cases[] = {
+      {0xC2, 0x00, true},  // JP NZ
+      {0xC2, 0x40, false}, // JP NZ
+      {0xCA, 0x40, true},  // JP Z
+      {0xD2, 0x00, true},  // JP NC
+      {0xD2, 0x01, false}, // JP NC
+      {0xDA, 0x01, true},  // JP C
+      {0xE2, 0x00, true},  // JP PO (P/V=0)
+      {0xE2, 0x04, false}, // JP PO (P/V=1)
+      {0xEA, 0x04, true},  // JP PE
+      {0xF2, 0x00, true},  // JP P  (S=0)
+      {0xF2, 0x80, false}, // JP P  (S=1)
+      {0xFA, 0x80, true},  // JP M
+  };
+  for (const Case& c : cases) {
+    FlatBus bus;
+    load(bus, {c.op, 0x00, 0x80, 0x00}); // JP cc,8000h : NOP
+    mynext::Z80 cpu(bus);
+    cpu.regs().f = c.flags;
+    const mynext::u32 t = cpu.step();
+    CHECK_EQ(t, 10u);
+    CHECK_EQ(cpu.regs().pc, c.taken ? 0x8000 : 0x0003);
+  }
+}
+
 TEST(z80_memory_operand_hl) {
   FlatBus bus;
   bus.mem[0x8000] = 0x42;
