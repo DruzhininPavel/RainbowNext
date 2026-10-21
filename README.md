@@ -8,7 +8,8 @@ Runs on macOS and Linux (including SteamOS / Steam Deck).
 Status: M1 — 48K and 128K/+2/+3 boot with AY sound, tape loading, disk images
         and snapshots.
         M2 in progress: the Z80N instruction set, the Next's MMU/NextREG file,
-        its palette hardware and Layer 2 are implemented (docs/ROADMAP.md).
+        its palette hardware, Layer 2, sprites and the tilemap are implemented
+        (docs/ROADMAP.md).
 ```
 
 ## Features
@@ -32,6 +33,10 @@ Status: M1 — 48K and 128K/+2/+3 boot with AY sound, tape loading, disk images
   a separate 16K pattern RAM, palette offsets, mirror, rotate, 1×-8× scaling,
   per-sprite transparency, a clip window, over-border drawing and the full
   layer priority order — including sprite 0 on top when the program asks for it.
+* **Next tilemap** — the layer 3 of `0x6B`, with 40- and 80-column maps, 4-bit
+  tiles or monochrome text tiles, 512-tile mode, a default attribute, mirror,
+  rotate, hardware scroll, a clip window, a transparency index, and per-tile
+  control over whether it sits over or under the ULA.
 * **ULA** — port `0xFE` read/write, border, beeper, 8×5 keyboard matrix,
   Fuse-compatible memory contention, floating bus.
 * **Machines** — 48K, 128K, +2, +3 and Pentagon, each with its own timings
@@ -135,8 +140,9 @@ roms/           user-supplied ROMs (empty by design)
 ctest --test-dir build --output-on-failure
 ```
 
-183 tests cover the Z80 core (timings, flags, undocumented opcodes,
-interrupts), the Z80N extension, the Next MMU, palette, Layer 2 and sprites, ULA
+202 tests cover the Z80 core (timings, flags, undocumented opcodes,
+interrupts), the Z80N extension, the Next MMU, palette, Layer 2, sprites and the
+tilemap, ULA
 behaviour, contention, floating bus, frame length, audio rate, both snapshot
 formats, the AY, 128K/+3 paging and timings, tape blocks, the µPD765 and the DSK
 parser, and end-to-end runs of

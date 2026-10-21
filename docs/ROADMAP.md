@@ -79,14 +79,22 @@ a multicolour demo renders correctly; `z80test` passes.
       window (`0x19`, reset through `0x1C`) and the whole `0x15` control byte:
       enable, over-border, clipping in over-border mode, sprite-0-on-top and
       the layer priority order.
+* [x] Tilemap (layer 3) — `0x6B` control byte (enable, 40/80 columns,
+      no-attributes, second palette, text mode, 512 tiles, force over the ULA),
+      the 2-byte map entries of `0x6E`/`0x6F` in bank 5 or 8K bank 7, 4-bit
+      tiles of 32 bytes or monochrome text tiles of 8, the default attribute of
+      `0x6C`, mirror/rotate, the 9-bit X and 8-bit Y scroll (`0x2F`-`0x31`), the
+      clip window of `0x1B` and the transparency index of `0x4C`. The layer
+      reaches into the border and mixes with the ULA per pixel.
 * [ ] Relative and unified sprites, sprite collision detection
 * [ ] The second Layer 2 palette and its priority bit, ULA+ palettes, Radastan
       mode
-* [ ] Tilemap, Copper, DMA
+* [ ] Copper, DMA
 * [ ] 3× AY with stereo, specdrum, `.nex` snapshot format
 * [ ] SD card image access for NextZXOS
-* [ ] Video pipeline: ULA/Timex → Layer 2 → sprites → tilemap → compositor → palette
-      (the ULA → Layer 2 → sprites → palette path is in place)
+* [ ] Video pipeline: Timex modes, ULA+ palettes, blending modes 6 and 7 of the
+      `0x15` priority byte (the ULA → tilemap → Layer 2 → sprite compositor and
+      the palette path are in place)
 
 ## M3 — Tooling and shipping
 

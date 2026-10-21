@@ -103,6 +103,9 @@ void Machine::reset() {
   sprites_.reset();
   layer2Clip_ = {0, 255, 0, 191};
   layer2ClipIndex_ = 0;
+  tilemapClip_ = {0, 159, 0, 255};
+  tilemapClipIndex_ = 0;
+  occluders_.assign(FrameWidth * FrameHeight, 0);
   // Bits 6:4 are the display timing and bits 2:0 the machine type; a Next in
   // Next mode presents itself as a +2A/+3.
   if (type_ == MachineType::Next) next_.write(0x03, 0x33);
@@ -562,6 +565,7 @@ void Machine::writeNextReg(u8 reg, u8 value) {
       return;
     case 0x1C: // reset the clip window write positions
       next_.write(reg, value);
+      if (value & 0x08) tilemapClipIndex_ = 0;
       if (value & 0x02) sprites_.resetClipIndex();
       if (value & 0x01) layer2ClipIndex_ = 0;
       return;
@@ -582,6 +586,11 @@ void Machine::writeNextReg(u8 reg, u8 value) {
       next_.write(reg, value);
       layer2Clip_[layer2ClipIndex_ & 0x03] = value;
       ++layer2ClipIndex_;
+      return;
+    case 0x1B: // tilemap clip window, four writes: X1, X2, Y1, Y2
+      next_.write(reg, value);
+      tilemapClip_[tilemapClipIndex_ & 0x03] = value;
+      ++tilemapClipIndex_;
       return;
     default:
       next_.write(reg, value);
@@ -749,25 +758,111 @@ void Machine::frameStart() {
   irqEnd_ = timings_.interruptLength;
 }
 
+namespace {
+// Identifiers for the layer priority table in register 0x15.
+constexpr int LayerSprites = 0;
+constexpr int LayerLayer2 = 1;
+constexpr int LayerUla = 2;
+} // namespace
+
+std::array<int, 3> Machine::layerOrder() const {
+  // 0x15 bits 4:2 list the layers from top to bottom. The two blending modes
+  // (110 and 111) mix Layer 2 into the ULA instead of ordering them, so they
+  // are treated as S L U for now.
+  static constexpr std::array<std::array<int, 3>, 6> Table = {{
+      {{LayerSprites, LayerLayer2, LayerUla}}, // S L U
+      {{LayerLayer2, LayerSprites, LayerUla}}, // L S U
+      {{LayerSprites, LayerUla, LayerLayer2}}, // S U L
+      {{LayerLayer2, LayerUla, LayerSprites}}, // L U S
+      {{LayerUla, LayerSprites, LayerLayer2}}, // U S L
+      {{LayerUla, LayerLayer2, LayerSprites}}, // U L S
+  }};
+  const int priority = (next_.read(0x15) >> 2) & 0x07;
+  return Table[size_t(priority < 6 ? priority : 0)];
+}
+
+int Machine::layerDepth(const std::array<int, 3>& order, int layer) {
+  for (int depth = 0; depth < 3; ++depth) {
+    if (order[size_t(depth)] == layer) return depth;
+  }
+  return 3;
+}
+
 void Machine::renderFrame() {
+  const std::array<int, 3> order = layerOrder();
+  const int spriteDepth = layerDepth(order, LayerSprites);
+  // 0x68 bit 7 blanks the ULA without touching the tilemap it shares a layer
+  // with, so it has to be handled per pixel rather than by skipping the row.
+  const bool ulaOn = !isNext() || (next_.read(0x68) & 0x80) == 0;
+  const TilemapView tilemap = tilemapView();
+  const Layer2View layer2 = layer2View();
+
+  std::array<u32, ScreenWidth> ulaRow{};
   for (int r = 0; r < FrameHeight; ++r) {
-    if (r < BorderHeight || r >= BorderHeight + ScreenHeight) {
-      int line = 0;
-      if (r < BorderHeight) {
-        line = r;
-      } else {
-        line = timings_.topBorder + ScreenHeight + (r - BorderHeight - ScreenHeight);
-      }
-      if (line < 0 || line >= int(borderLines_.size())) line = 0;
-      const u32 color = paperColour(borderLines_[size_t(line)] & 0x07);
-      u32* row = framebuffer_.data() + size_t(r) * FrameWidth;
-      for (int x = 0; x < FrameWidth; ++x) row[x] = color;
+    int line = 0;
+    if (r < BorderHeight) {
+      line = r;
+    } else if (r >= BorderHeight + ScreenHeight) {
+      line = timings_.topBorder + ScreenHeight + (r - BorderHeight - ScreenHeight);
     } else {
-      renderScreenRow(r - BorderHeight);
+      line = timings_.topBorder + (r - BorderHeight);
+    }
+    if (line < 0 || line >= int(borderLines_.size())) line = 0;
+    const u32 border = paperColour(borderLines_[size_t(line)] & 0x07);
+
+    const int y = r - BorderHeight;
+    const bool screenRow = y >= 0 && y < ScreenHeight;
+    if (screenRow && ulaOn) renderUlaRow(y, ulaRow);
+
+    u32* row = framebuffer_.data() + size_t(r) * FrameWidth;
+    u8* occluders = occluders_.data() + size_t(r) * FrameWidth;
+
+    for (int x = 0; x < FrameWidth; ++x) {
+      const bool inWindow =
+          screenRow && x >= BorderWidth && x < BorderWidth + ScreenWidth;
+      const int ux = x - BorderWidth;
+
+      const u32 ulaRgb = (ulaOn && inWindow) ? ulaRow[size_t(ux)] : Transparent;
+      bool ulaOver = false;
+      const u32 tileRgb = tilemapPixel(tilemap, x, r, ulaOver);
+
+      // The tilemap is part of the ULA's display layer. The tile's own bit
+      // says which of the two wins, unless the tilemap is forced on top or
+      // the two are combined in stencil mode.
+      u32 uRgb = ulaRgb;
+      if (tileRgb != Transparent) {
+        if (ulaRgb == Transparent) {
+          uRgb = tileRgb;
+        } else if (tilemap.stencil) {
+          uRgb = ulaRgb & tileRgb;
+        } else if (tilemap.tilemapOverUla) {
+          uRgb = tileRgb;
+        } else {
+          uRgb = ulaOver ? ulaRgb : tileRgb;
+        }
+      }
+
+      const u32 l2Rgb = inWindow ? layer2Pixel(layer2, ux, y) : Transparent;
+
+      u32 rgb = border;
+      u8 occluder = 0;
+      for (int depth = 0; depth < 3; ++depth) {
+        const int layer = order[size_t(depth)];
+        if (layer == LayerSprites) continue; // sprites are a second pass
+        const u32 colour = layer == LayerLayer2 ? l2Rgb : uRgb;
+        if (colour == Transparent) continue;
+        if (depth < spriteDepth) occluder = 1;
+        rgb = colour;
+        break;
+      }
+      row[x] = rgb;
+      occluders[x] = occluder;
     }
   }
+
   renderSprites();
 }
+
 
 int Machine::ulaPalette() const {
   // 0x43 bit 1 picks the second ULA palette for rendering; bits 6:4 only
@@ -839,36 +934,126 @@ u32 Machine::layer2Pixel(const Layer2View& view, int x, int y) const {
   return palette_.colour(view.palette, u8(entry & 0xFF));
 }
 
-bool Machine::layer2AboveUla() const {
-  // 0x15 bits 4:2 name the layers from top to bottom. Layer 2 is listed before
-  // the ULA in S L U, L S U and L U S; the two blending modes (110 and 111)
-  // merge the layers instead of ordering them, so Layer 2 stays on top.
-  const int priority = (next_.read(0x15) >> 2) & 0x07;
-  return priority == 0 || priority == 1 || priority == 3 || priority >= 6;
+u32 Machine::tilemapPixel(const TilemapView& view, int x, int y,
+                          bool& ulaOver) const {
+  ulaOver = false;
+  if (!view.active) return Transparent;
+
+  // Register 0x1B clips in pairs of pixels across the 320 pixel surface.
+  if (x < int(view.clip[0]) * 2 || x > int(view.clip[1]) * 2 + 1) return Transparent;
+  if (y < int(view.clip[2]) || y > int(view.clip[3])) return Transparent;
+
+  // 80 column tiles are half a pixel wide, so the 320 pixel surface keeps
+  // every second one.
+  const int nativeX = view.columns == 80 ? x * 2 : x;
+  const int mapWidth = view.columns * 8;
+  const int sx = (nativeX + view.scrollX) % mapWidth;
+  const int sy = (y + view.scrollY) & 0xFF;
+
+  const int column = sx >> 3;
+  const int row = sy >> 3;
+  const size_t entrySize = view.noAttributes ? 1 : 2;
+  const size_t entry =
+      (size_t(row) * size_t(view.columns) + size_t(column)) * entrySize;
+  const size_t mapAddress = view.mapBank + ((view.mapOffset + entry) & view.mapMask);
+  if (mapAddress >= ram_.size()) return Transparent;
+
+  u16 tile = ram_[mapAddress];
+  u8 attribute = view.defaultAttribute;
+  if (!view.noAttributes) {
+    const size_t attrAddress =
+        view.mapBank + ((view.mapOffset + entry + 1) & view.mapMask);
+    if (attrAddress >= ram_.size()) return Transparent;
+    attribute = ram_[attrAddress];
+  }
+  // In 512 tile mode the "ULA on top" bit becomes the ninth tile number bit
+  // and the ULA always covers the tilemap unless it is forced on top.
+  if (view.fiveTwelve) {
+    tile = u16(tile | ((attribute & 0x01) << 8));
+    ulaOver = true;
+  } else {
+    ulaOver = (attribute & 0x01) != 0;
+  }
+
+  const int paletteOffset =
+      view.textMode ? (int(attribute) >> 1) & 0x7F : (int(attribute) >> 4) & 0x0F;
+
+  int cx = sx & 7;
+  int cy = sy & 7;
+  if (!view.textMode) {
+    if (attribute & 0x08) cx = 7 - cx;
+    if (attribute & 0x04) cy = 7 - cy;
+    if (attribute & 0x02) {
+      const int rotated = cx;
+      cx = cy;
+      cy = 7 - rotated;
+    }
+  }
+
+  const size_t tileSize = view.textMode ? 8 : 32;
+  const size_t defAddress =
+      view.defBank + ((view.defOffset + size_t(tile) * tileSize) & view.defMask);
+  const size_t defEnd = defAddress + (view.textMode ? size_t(cy) + 1
+                                                    : size_t(cy) * 4 + 2);
+  if (defEnd > ram_.size()) return Transparent;
+
+  u8 pixel = 0;
+  int index = 0;
+  if (view.textMode) {
+    // Text mode trades mirror and rotate for a seven bit palette offset: the
+    // pair index picks the paper and ink colours.
+    pixel = u8((ram_[defAddress + size_t(cy)] >> (7 - cx)) & 0x01);
+    index = (paletteOffset << 1) | pixel;
+  } else {
+    const u8 packed = ram_[defAddress + size_t(cy) * 4 + size_t(cx >> 1)];
+    pixel = (cx & 1) ? u8(packed & 0x0F) : u8(packed >> 4);
+    index = (paletteOffset << 4) | pixel;
+  }
+  if (pixel == view.transparency) return Transparent;
+  return palette_.colour(view.palette, u8(index & 0xFF));
 }
 
-bool Machine::spriteAboveUla() const {
-  // Sprites come first in S L U, S U L and L S U.
-  const int priority = (next_.read(0x15) >> 2) & 0x07;
-  return priority <= 2 || priority >= 6;
+Machine::TilemapView Machine::tilemapView() const {
+  TilemapView view;
+  if (!isNext()) return view;
+
+  const u8 control = next_.read(0x6B);
+  if ((control & 0x80) == 0) return view;
+
+  view.active = true;
+  view.textMode = (control & 0x08) != 0;
+  view.noAttributes = (control & 0x20) != 0;
+  view.fiveTwelve = (control & 0x02) != 0;
+  view.tilemapOverUla = (control & 0x01) != 0;
+  view.columns = (control & 0x40) ? 80 : 40;
+  view.palette = (control & 0x10) ? NextPalette::TilemapSecond
+                                  : NextPalette::TilemapFirst;
+  view.scrollX = int(next_.read(0x30)) | ((next_.read(0x2F) & 0x03) << 8);
+  view.scrollY = next_.read(0x31);
+  view.transparency = u8(next_.read(0x4C) & 0x0F);
+  view.defaultAttribute = next_.read(0x6C);
+  view.stencil = (next_.read(0x68) & 0x01) != 0;
+
+  // 0x6E and 0x6F hold the MSB of an address in bank 5 or, when bit 7 is set,
+  // in the 8K bank 7, which wraps at its own end.
+  const u8 map = next_.read(0x6E);
+  view.mapBank = size_t((map & 0x80) ? 7 : 5) * BankSize;
+  view.mapMask = (map & 0x80) ? 0x1FFF : 0x3FFF;
+  view.mapOffset = size_t(map & 0x3F) * 256;
+  const u8 def = next_.read(0x6F);
+  view.defBank = size_t((def & 0x80) ? 7 : 5) * BankSize;
+  view.defMask = (def & 0x80) ? 0x1FFF : 0x3FFF;
+  view.defOffset = size_t(def & 0x3F) * 256;
+  view.clip = tilemapClip_;
+  return view;
 }
 
-void Machine::renderScreenRow(int y) {
-  const int outY = BorderHeight + y;
-  const u8 borderColor = borderLines_[size_t(timings_.topBorder + y)] & 0x07;
-  u32* row = framebuffer_.data() + size_t(outY) * FrameWidth;
-
-  const u32 border = paperColour(borderColor);
-  for (int x = 0; x < BorderWidth; ++x) row[x] = border;
-  for (int x = FrameWidth - BorderWidth; x < FrameWidth; ++x) row[x] = border;
-
+void Machine::renderUlaRow(int y, std::array<u32, ScreenWidth>& row) const {
   const size_t bankBase = size_t(screenBank_) * BankSize;
   const size_t pixelBase = bankBase + ((size_t(y) & 0xC0) << 5) +
                            ((size_t(y) & 0x07) << 8) + ((size_t(y) & 0x38) << 2);
   const size_t attrBase = bankBase + 0x1800 + size_t(y >> 3) * 32;
   const bool flashOn = ((frames_ >> 4) & 1) != 0;
-  const Layer2View layer2 = (isNext() && layer2AboveUla()) ? layer2View()
-                                                           : Layer2View{};
 
   for (int col = 0; col < 32; ++col) {
     const u8 pixels = ram_[pixelBase + size_t(col)];
@@ -877,22 +1062,14 @@ void Machine::renderScreenRow(int y) {
     const u8 ink = u8((attr & 0x07) | bright);
     const u8 paper = u8(((attr >> 3) & 0x07) | bright);
     const bool flash = (attr & 0x80) != 0 && flashOn;
-    const u8 inkColor = flash ? paper : ink;
-    const u8 paperColor = flash ? ink : paper;
-
-    u32* dest = row + BorderWidth + col * 8;
-    const u32 inkRgb = ulaColour(inkColor);
-    const u32 paperRgb = paperColour(paperColor);
+    const u32 inkRgb = ulaColour(flash ? paper : ink);
+    const u32 paperRgb = paperColour(flash ? ink : paper);
     for (int b = 0; b < 8; ++b) {
-      u32 rgb = (pixels & (0x80u >> b)) ? inkRgb : paperRgb;
-      if (layer2.active) {
-        const u32 overlay = layer2Pixel(layer2, col * 8 + b, y);
-        if (overlay != Transparent) rgb = overlay;
-      }
-      dest[b] = rgb;
+      row[size_t(col * 8 + b)] = (pixels & (0x80u >> b)) ? inkRgb : paperRgb;
     }
   }
 }
+
 
 
 void Machine::renderSprites() {
@@ -900,14 +1077,9 @@ void Machine::renderSprites() {
   const u8 control = next_.read(0x15);
   if ((control & 0x01) == 0) return; // sprites disabled
 
-  const int priority = (control >> 2) & 0x07;
   const bool overBorder = (control & 0x02) != 0;
   const bool clipOverBorder = (control & 0x20) != 0;
   const bool zeroOnTop = (control & 0x40) != 0;
-  const bool aboveUla = spriteAboveUla();
-  // In L S U the sprites sit between Layer 2 and the ULA, so an opaque Layer 2
-  // pixel hides them.
-  const Layer2View layer2 = (priority == 1) ? layer2View() : Layer2View{};
   const u8 transparency = next_.read(0x4B);
   const int palette = (palette_.control() & 0x08) != 0 ? NextPalette::SpritesSecond
                                                        : NextPalette::SpritesFirst;
@@ -932,19 +1104,21 @@ void Machine::renderSprites() {
       if (surfaceY >= FrameHeight) continue;
       const bool rowInScreen =
           surfaceY >= BorderHeight && surfaceY < BorderHeight + ScreenHeight;
-      u32* row = framebuffer_.data() + size_t(surfaceY) * FrameWidth;
+      const size_t rowBase = size_t(surfaceY) * FrameWidth;
+      u32* row = framebuffer_.data() + rowBase;
 
       for (int dx = 0; dx < width; ++dx) {
         const int surfaceX = (originX + dx) & 0x1FF;
         if (surfaceX >= FrameWidth) continue;
 
+        // Sprites only reach into the border when over-border drawing is on.
         const bool inScreen = rowInScreen && surfaceX >= BorderWidth &&
                               surfaceX < BorderWidth + ScreenWidth;
-        if (inScreen) {
-          if (!aboveUla) continue;
-        } else if (!overBorder) {
-          continue;
-        }
+        if (!inScreen && !overBorder) continue;
+
+        // The compositor recorded the layers that sit above the sprites, so a
+        // pixel of any of them hides the sprite.
+        if (occluders_[rowBase + size_t(surfaceX)] != 0) continue;
 
         // The clip window is measured from the ULA origin unless the sprites
         // reach into the border, where it moves to the sprite origin and its
@@ -960,12 +1134,6 @@ void Machine::renderSprites() {
         const int index = sprites_.pixel(sprite, dx / scaleX, dy / scaleY,
                                          transparency);
         if (index < 0) continue;
-
-        if (layer2.active && inScreen &&
-            layer2Pixel(layer2, surfaceX - BorderWidth,
-                        surfaceY - BorderHeight) != Transparent) {
-          continue;
-        }
 
         row[surfaceX] = palette_.colour(palette, u8((offset + index) & 0xFF));
       }

@@ -14,6 +14,8 @@ void NextRegFile::reset() {
   values_[0x4A] = 0xE3; // fallback colour
   values_[0x4B] = 0xE3; // sprite transparency index
   values_[0x4C] = 0x0F; // tilemap transparency index
+  values_[0x6E] = 0x6C; // tilemap at 0x6C00 in bank 5
+  values_[0x6F] = 0x4C; // tile definitions at 0x4C00 in bank 5
 
   // The boot mapping: ROM at 0x0000, the two halves of bank 5 at 0x4000 (that
   // is the ULA screen), bank 2 at 0x8000 and banks 0/1 at 0xC000.

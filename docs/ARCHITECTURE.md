@@ -126,18 +126,33 @@ the controller free of I/O and lets tests construct one on the stack.
 
 ## Video pipeline
 
-One frame is composed in two passes. `renderFrame()` walks the 320x256
-framebuffer row by row: the border rows take their colour from the ULA's
-recorded border byte and the screen rows come from `renderScreenRow()`, which
-decodes the bitmap, picks ink and paper through the palette and lets Layer 2
-overwrite individual pixels. `renderSprites()` then makes a second pass over
-the whole surface, because sprites may reach into the border and may sit above
-or below the other layers.
+One frame is composed pixel by pixel, with sprites in a second pass.
+`renderFrame()` walks the 320x256 framebuffer row by row. For each row it takes
+the border colour from the ULA's recorded border byte, decodes the 256x192
+bitmap into `renderUlaRow()` when the row is a screen row, and then resolves
+each of the 320 columns: the ULA pixel, the tilemap pixel and the Layer 2 pixel
+are all looked up for that coordinate and stacked by `layerOrder()`, which
+decodes the priority table of register `0x15`.
+
+The tilemap shares the ULA's display layer. When both cover the same pixel, the
+tile's own "ULA on top" bit picks the winner; a force bit in `0x6B` overrides
+it, and `0x68` bit 0 combines the two with a bitwise AND instead. Register
+`0x68` bit 7 blanks the ULA without touching the tilemap, so it is applied per
+pixel rather than by skipping the row.
+
+While stacking, the composer records an `occluders_` mask: a pixel is set when
+an opaque layer sits above the sprites in the priority order. `renderSprites()`
+then makes a second pass over the whole surface -- sprites may reach into the
+border and may sit above or below the other layers -- and skips the pixels the
+mask marks as hidden. This keeps the expensive sprite scan out of the layer
+loop and gives sprite-0-on-top, over-border drawing and the priority table for
+free.
 
 Every colour goes through `NextPalette`, which maps a palette index to ARGB.
 The ULA and the border read the ULA palettes (register `0x43` bit 1 selects the
-second one), Layer 2 reads one of its two palettes (bit 2) and the sprites read
-theirs (bit 3). Bits 6:4 of `0x43` only choose where palette *writes* land.
+second one), Layer 2 reads one of its two palettes (bit 2), the sprites read
+theirs (bit 3) and the tilemap picks its palette with bit 4 of `0x6B`. Bits 6:4
+of `0x43` only choose where palette *writes* land.
 
 ## Frame buffer
 

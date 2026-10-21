@@ -182,11 +182,40 @@ private:
   Layer2View layer2View() const;
   // One framebuffer pixel of Layer 2, or Transparent when nothing is drawn.
   u32 layer2Pixel(const Layer2View& view, int x, int y) const;
-  bool layer2AboveUla() const;
+  // The tilemap shares the ULA's display layer and covers the whole surface,
+  // border included, so it is resolved per pixel next to the ULA.
+  struct TilemapView {
+    bool active = false;
+    bool textMode = false;
+    bool noAttributes = false;
+    bool fiveTwelve = false;
+    bool tilemapOverUla = false;
+    bool stencil = false;
+    int columns = 40;
+    int scrollX = 0;
+    int scrollY = 0;
+    int palette = 0;
+    u8 transparency = 0x0F;
+    u8 defaultAttribute = 0;
+    size_t mapBank = 0;
+    size_t mapOffset = 0;
+    size_t mapMask = 0x3FFF;
+    size_t defBank = 0;
+    size_t defOffset = 0;
+    size_t defMask = 0x3FFF;
+    std::array<u8, 4> clip = {0, 159, 0, 255};
+  };
+  TilemapView tilemapView() const;
+  // One tilemap pixel, or Transparent. ulaOver reports the tile's own
+  // "ULA on top" attribute, which the ULA needs to combine with the tilemap.
+  u32 tilemapPixel(const TilemapView& view, int x, int y, bool& ulaOver) const;
+  void renderUlaRow(int y, std::array<u32, ScreenWidth>& row) const;
+  // Register 0x15 orders sprites, Layer 2 and the ULA from top to bottom.
+  std::array<int, 3> layerOrder() const;
+  static int layerDepth(const std::array<int, 3>& order, int layer);
   // Sprites are a separate pass over the finished frame: they may sit above
   // or below the other layers and may reach into the border.
   void renderSprites();
-  bool spriteAboveUla() const;
   // The colour the ULA draws with, honouring the Next palette when present.
   u32 ulaColour(u8 index) const;
   u32 paperColour(u8 index) const;
@@ -215,6 +244,11 @@ private:
   // Register 0x18 takes four writes in a row, so the position needs a counter.
   std::array<u8, 4> layer2Clip_ = {0, 255, 0, 191};
   u8 layer2ClipIndex_ = 0;
+  // Register 0x1B does the same for the tilemap.
+  std::array<u8, 4> tilemapClip_ = {0, 159, 0, 255};
+  u8 tilemapClipIndex_ = 0;
+  // Bit per pixel: the layers that hide a sprite at that position.
+  std::vector<u8> occluders_;
 
   std::vector<u8> rom_;
   std::vector<u8> ram_;
