@@ -77,7 +77,7 @@ Machine::Machine(MachineType type)
     : type_(type), timings_(timingsFor(type)), cpu_(*this) {
   tstatesPerLine_ = tstatesPerLine(timings_);
   tstatesPerFrame_ = tstatesPerFrame(timings_);
-  rom_.assign(0x8000, 0);
+  rom_.assign(RomBanks * BankSize, 0);
   ram_.assign(RamBanks * BankSize, 0);
   framebuffer_.assign(FrameWidth * FrameHeight, Palette[0]);
   borderLines_.fill(0);
@@ -99,7 +99,11 @@ void Machine::reset() {
   screenBank_ = 5;
   romBank_ = 0;
   port7ffd_ = 0;
+  port1ffd_ = 0;
   pagingLocked_ = false;
+  specialPaging_ = false;
+  ay_.reset();
+  ay_.setStereo(type_ == MachineType::Plus3 ? Ay38912::Stereo::ABC : Ay38912::Stereo::Mono);
 
   tstates_ = 0;
   frames_ = 0;
@@ -108,8 +112,7 @@ void Machine::reset() {
 
   audio_.clear();
   audioAccum_ = 0;
-  ayRegs_.fill(0);
-  aySelected_ = 0;
+  dcInL_ = dcOutL_ = dcInR_ = dcOutR_ = 0.0f;
   kempston_ = 0;
 }
 
@@ -118,7 +121,7 @@ void Machine::reset() {
 // ===========================================================================
 
 bool Machine::loadRomData(const u8* data, size_t size, int bank) {
-  if (data == nullptr || bank < 0 || bank > 1) return false;
+  if (data == nullptr || bank < 0 || bank >= RomBanks) return false;
   const size_t copy = std::min(size, size_t(BankSize));
   if (copy == 0) return false;
   std::memcpy(rom_.data() + size_t(bank) * BankSize, data, copy);
@@ -161,20 +164,33 @@ bool Machine::applyTapeFastLoad() {
 }
 
 bool Machine::loadRom(const std::string& path) {
+  return loadRomImage(path);
+}
+
+// A ROM set is one file per 16K bank: 16K (48K BASIC), 32K (128K: editor +
+// 48K BASIC), 48K or 64K (+2A/+3: 128K editor, 48K BASIC, 128K syntax, 48K
+// syntax). Any multiple of 16K up to 64K is accepted.
+bool Machine::loadRomImage(const std::string& path) {
   std::ifstream in(path, std::ios::binary);
   if (!in) return false;
   std::vector<u8> data((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
-  return loadRomData(data.data(), data.size(), 0);
+  if (data.empty()) return false;
+  return loadRomImageData(data.data(), data.size());
 }
 
-bool Machine::loadRoms(const std::string& rom0, const std::string& rom1) {
-  bool ok = loadRom(rom0);
-  std::ifstream in(rom1, std::ios::binary);
-  if (in) {
-    std::vector<u8> data((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
-    ok = loadRomData(data.data(), data.size(), 1) && ok;
+// Splits a ROM image into 16 KiB banks: a 16 KiB file fills bank 0, a 64 KiB
+// file fills all four.
+bool Machine::loadRomImageData(const u8* data, size_t size) {
+  if (data == nullptr || size == 0) return false;
+
+  const int banks = int(std::min<size_t>(size / BankSize, size_t(RomBanks)));
+  if (banks == 0) {
+    return loadRomData(data, size, 0);
   }
-  return ok;
+  for (int bank = 0; bank < banks; ++bank) {
+    loadRomData(data + size_t(bank) * BankSize, BankSize, bank);
+  }
+  return true;
 }
 
 bool Machine::loadSnapshot(const std::string& path, std::string& error) {
@@ -211,11 +227,10 @@ void Machine::applySnapshot(const formats::Snapshot& snapshot) {
   ram_ = snapshot.ram;
   if (ram_.size() != size_t(RamBanks * BankSize)) ram_.resize(RamBanks * BankSize, 0);
 
-  pagingLocked_ = false;
   port7ffd_ = snapshot.port7ffd;
-  ramBank_ = u8(snapshot.port7ffd & 0x07);
-  screenBank_ = (snapshot.port7ffd & 0x08) ? 7 : 5;
-  romBank_ = (snapshot.port7ffd & 0x10) ? 1 : 0;
+  port1ffd_ = 0;
+  pagingLocked_ = false;
+  updatePaging();
 
   ula_.write(0xFE, u8(snapshot.border & 0x07));
   beeper_.setLevel(ula_.beeper());
@@ -245,21 +260,30 @@ void Machine::runCycles(u32 cycles) {
 // Memory
 // ===========================================================================
 
+// The +2A/+3 "special" paging mode replaces the whole 64K with RAM banks 0-3,
+// which is what CP/M runs in. Every other machine keeps bank 5 at 0x4000 and
+// bank 2 at 0x8000, with 0xC000 switchable.
 u8 Machine::memRead(u16 addr, u32) {
-  if (addr < 0x4000) return rom_[size_t(romBank_) * BankSize + addr];
-  if (addr < 0x8000) return ram_[size_t(5) * BankSize + (addr - 0x4000)];
+  if (addr < 0x4000) {
+    if (specialPaging_) return ram_[addr];
+    return rom_[size_t(romBank_) * BankSize + addr];
+  }
+  if (addr < 0x8000) return ram_[size_t(specialPaging_ ? 1 : 5) * BankSize + (addr - 0x4000)];
   if (addr < 0xC000) return ram_[size_t(2) * BankSize + (addr - 0x8000)];
-  return ram_[size_t(ramBank_) * BankSize + (addr - 0xC000)];
+  return ram_[size_t(specialPaging_ ? 3 : ramBank_) * BankSize + (addr - 0xC000)];
 }
 
 void Machine::memWrite(u16 addr, u8 value, u32) {
-  if (addr < 0x4000) return; // ROM
+  if (addr < 0x4000) {
+    if (specialPaging_) ram_[addr] = value;
+    return; // otherwise ROM
+  }
   if (addr < 0x8000) {
-    ram_[size_t(5) * BankSize + (addr - 0x4000)] = value;
+    ram_[size_t(specialPaging_ ? 1 : 5) * BankSize + (addr - 0x4000)] = value;
   } else if (addr < 0xC000) {
     ram_[size_t(2) * BankSize + (addr - 0x8000)] = value;
   } else {
-    ram_[size_t(ramBank_) * BankSize + (addr - 0xC000)] = value;
+    ram_[size_t(specialPaging_ ? 3 : ramBank_) * BankSize + (addr - 0xC000)] = value;
   }
 }
 
@@ -277,9 +301,9 @@ u8 Machine::ioRead(u16 port, u32) {
     return floatingBus();
   }
 
-  if (type_ != MachineType::Spectrum48) {
-    if ((port & 0xC002) == 0x8000) return readAy(port); // 0xBFFD data
-    if ((port & 0xC002) == 0xC000) return 0xFF;         // 0xFFFD status
+  if (hasAy()) {
+    if ((port & 0xC002) == 0x8000) return ay_.read(); // 0xBFFD data
+    if ((port & 0xC002) == 0xC000) return 0xFF;       // 0xFFFD status
   }
 
   if ((port & 0x00E0) == 0x0000) return kempston_;      // 0x1F
@@ -293,17 +317,23 @@ void Machine::ioWrite(u16 port, u8 value, u32) {
     return;
   }
 
-  if (type_ != MachineType::Spectrum48) {
+  if (is128k()) {
+    // 0x1FFD must be decoded before 0x7FFD: it also satisfies the looser
+    // 0x7FFD mask, so the order decides which register a +2A/+3 write hits.
+    if (isPlus3() && (port & 0xF002) == 0x1000) { // 0x1FFD
+      writePort1ffd(value);
+      return;
+    }
     if ((port & 0x8002) == 0x0000) { // 0x7FFD
       writePort7ffd(value);
       return;
     }
-    if ((port & 0xC002) == 0xC000) { // 0xFFFD
-      aySelected_ = u8(value & 0x0F);
+    if ((port & 0xC002) == 0xC000) { // 0xFFFD, and 0xFFFF on the +2A/+3
+      ay_.select(value);
       return;
     }
     if ((port & 0xC002) == 0x8000) { // 0xBFFD
-      writeAy(port, value);
+      ay_.write(value);
       return;
     }
   }
@@ -312,18 +342,28 @@ void Machine::ioWrite(u16 port, u8 value, u32) {
 void Machine::writePort7ffd(u8 value) {
   if (pagingLocked_) return;
   port7ffd_ = value;
-  ramBank_ = u8(value & 0x07);
-  screenBank_ = (value & 0x08) ? 7 : 5;
-  romBank_ = (value & 0x10) ? 1 : 0;
   pagingLocked_ = (value & 0x20) != 0;
+  updatePaging();
 }
 
-u8 Machine::readAy(u16) const {
-  return ayRegs_[size_t(aySelected_ & 0x0F)];
+// 0x1FFD exists only on the +2A/+3: bit 0 is the special (CP/M) paging mode,
+// bit 1 locks paging, bit 2 is the high ROM bit and bit 3 starts the disk motor.
+void Machine::writePort1ffd(u8 value) {
+  if (pagingLocked_) return;
+  port1ffd_ = value;
+  pagingLocked_ = (value & 0x02) != 0;
+  updatePaging();
 }
 
-void Machine::writeAy(u16, u8 value) {
-  ayRegs_[size_t(aySelected_ & 0x0F)] = value;
+void Machine::updatePaging() {
+  specialPaging_ = isPlus3() && (port1ffd_ & 0x01) != 0;
+
+  ramBank_ = u8(port7ffd_ & 0x07);
+  screenBank_ = (port7ffd_ & 0x08) ? 7 : 5;
+
+  u8 rom = u8((port7ffd_ & 0x10) ? 1 : 0);
+  if (isPlus3()) rom = u8(rom | ((port1ffd_ & 0x04) ? 2 : 0));
+  romBank_ = u8(rom & 0x03);
 }
 
 // ===========================================================================
@@ -333,9 +373,16 @@ void Machine::writeAy(u16, u8 value) {
 u8 Machine::contention(u16 addr, u32 t) {
   if (!timings_.contended) return 0;
 
-  const bool inScreenBank = (addr >= 0x4000 && addr < 0x8000);
-  const bool inPagedScreen = (addr >= 0xC000 && ramBank_ == screenBank_);
-  if (!inScreenBank && !inPagedScreen) return 0;
+  // Every machine with a ULA contends on bank 5 at 0x4000. The 128K also
+  // contends on 0xC000 when an odd bank is paged there; the +2A/+3 does not,
+  // and the Pentagon has no contention at all (`contended` is false there).
+  bool contended = false;
+  if (addr >= 0x4000 && addr < 0x8000) {
+    contended = true;
+  } else if (addr >= 0xC000 && !isPlus3() && (ramBank_ & 1) != 0) {
+    contended = true;
+  }
+  if (!contended) return 0;
 
   const u32 line = t / tstatesPerLine_;
   const u32 hc = t % tstatesPerLine_;
@@ -408,14 +455,34 @@ void Machine::tick(u32 cycles) {
     tstates_ += step;
     remaining -= step;
     tape_.advance(step);
+    if (hasAy()) ay_.tick(step);
 
     audioAccum_ += u64(step) * u64(sampleRate_);
     while (audioAccum_ >= u64(timings_.cpuHz)) {
       audioAccum_ -= timings_.cpuHz;
-      audio_.push_back(beeper_.sample());
+
+      float left = beeper_.sample();
+      float right = left;
+      if (hasAy()) {
+        left += ay_.sampleLeft() * 0.5f;
+        right += ay_.sampleRight() * 0.5f;
+      }
+      // The speaker is AC coupled, so remove the standing level; without this
+      // a silent AY would push the output hard against the rails.
+      const float outL = left - dcInL_ + 0.998f * dcOutL_;
+      const float outR = right - dcInR_ + 0.998f * dcOutR_;
+      dcInL_ = left;
+      dcOutL_ = outL;
+      dcInR_ = right;
+      dcOutR_ = outR;
+
+      audio_.push_back(std::clamp(outL, -1.0f, 1.0f));
+      audio_.push_back(std::clamp(outR, -1.0f, 1.0f));
     }
-    if (audio_.size() > size_t(sampleRate_) * 2) {
-      audio_.erase(audio_.begin(), audio_.begin() + long(audio_.size() - size_t(sampleRate_)));
+    // Two seconds of interleaved stereo.
+    const size_t limit = size_t(sampleRate_) * 4;
+    if (audio_.size() > limit) {
+      audio_.erase(audio_.begin(), audio_.begin() + long(audio_.size() - limit));
     }
 
     const u32 newFrameT = u32(tstates_ % tstatesPerFrame_);

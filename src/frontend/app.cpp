@@ -21,6 +21,64 @@ constexpr MachineType AllMachines[] = {
     MachineType::Plus3,      MachineType::Pentagon,    MachineType::Next,
 };
 
+// ROM sets are user supplied (see roms/README.md); these are the base names the
+// emulator looks for, in order, when a machine is selected.
+std::vector<std::string> romCandidates(MachineType type) {
+  switch (type) {
+    case MachineType::Spectrum48: return {"48"};
+    case MachineType::Spectrum128: return {"128", "128k"};
+    case MachineType::Plus2: return {"plus2", "plus2a", "128"};
+    case MachineType::Plus3: return {"plus3", "plus2a"};
+    case MachineType::Pentagon: return {"pentagon", "128"};
+    case MachineType::Next: return {"next", "128"};
+  }
+  return {"48"};
+}
+
+// A ROM set is either a single image (`128.rom`) or one file per 16K bank
+// (`128-0.rom`, `128-1.rom`, ...). Both layouts are accepted, and a bank file
+// must be exactly 16K so a half-written dump is rejected instead of silently
+// shifting every following bank.
+bool loadRomSet(Machine& machine, const std::string& base) {
+  std::vector<u8> image;
+  for (int bank = 0; bank < Machine::RomBanks; ++bank) {
+    const std::string path = base + "-" + std::to_string(bank) + ".rom";
+    std::FILE* file = std::fopen(path.c_str(), "rb");
+    if (file == nullptr) break;
+    u8 page[Machine::BankSize];
+    const size_t got = std::fread(page, 1, sizeof page, file);
+    std::fclose(file);
+    if (got != sizeof page) {
+      image.clear();
+      break;
+    }
+    image.insert(image.end(), page, page + sizeof page);
+  }
+  if (!image.empty()) return machine.loadRomImageData(image.data(), image.size());
+  return machine.loadRomImage(base + ".rom");
+}
+
+// Looks for a ROM set in `dir` for every candidate base name of `type`.
+bool loadRomFor(Machine& machine, MachineType type, const std::string& dir, std::string* used) {
+  for (const std::string& base : romCandidates(type)) {
+    const std::string stem = dir + base;
+    if (loadRomSet(machine, stem)) {
+      if (used != nullptr) {
+        // Report the file that was actually opened, not the base name.
+        *used = stem + "-0.rom";
+        std::FILE* probe = std::fopen(used->c_str(), "rb");
+        if (probe != nullptr) {
+          std::fclose(probe);
+        } else {
+          *used = stem + ".rom";
+        }
+      }
+      return true;
+    }
+  }
+  return false;
+}
+
 float chipWidth(const char* text) { return ImGui::CalcTextSize(text).x + ui::kChipPadX * 2.0f; }
 
 void drawChip(ImDrawList* drawList, ImVec2 pos, const char* text, ImU32 background, ImU32 foreground,
@@ -83,17 +141,15 @@ bool App::init(const Options& options) {
   audio_.init(44100);
   machine_->setSampleRate(audio_.sampleRate() > 0 ? audio_.sampleRate() : 44100);
 
-  std::vector<std::string> candidates;
-  if (!options.rom.empty()) candidates.push_back(options.rom);
-  candidates.emplace_back("roms/48.rom");
-  candidates.emplace_back("roms/48.ROM");
-  candidates.emplace_back("48.rom");
-  for (const std::string& candidate : candidates) {
-    if (machine_->loadRom(candidate)) {
-      romPath_ = candidate;
-      status_ = "ROM loaded: " + candidate;
-      break;
-    }
+  bool loaded = false;
+  if (!options.rom.empty() && machine_->loadRomImage(options.rom)) {
+    romPath_ = options.rom;
+    loaded = true;
+  }
+  if (!loaded) loaded = loadRomFor(*machine_, machine_->type(), "roms/", &romPath_);
+  if (!loaded) loaded = loadRomFor(*machine_, machine_->type(), "", &romPath_);
+  if (loaded) {
+    status_ = "ROM loaded: " + romPath_;
   }
   if (!machine_->romLoaded()) {
     status_ = "No ROM loaded - put 48.rom into roms/ or use File > Open ROM";
@@ -290,8 +346,13 @@ void App::reset() {
 void App::setMachine(MachineType type) {
   machine_ = std::make_unique<Machine>(type);
   machine_->setSampleRate(audio_.sampleRate() > 0 ? audio_.sampleRate() : 44100);
-  if (!romPath_.empty()) machine_->loadRom(romPath_);
-  status_ = std::string("Machine: ") + machineName(type);
+
+  // A 48K ROM is not a valid 128K ROM and vice versa, so pick the matching set
+  // instead of reusing whatever happened to be loaded before.
+  bool loaded = loadRomFor(*machine_, type, "roms/", &romPath_);
+  if (!loaded) loaded = loadRomFor(*machine_, type, "", &romPath_);
+  status_ = std::string("Machine: ") + machineName(type) +
+            (loaded ? "  ROM: " + romPath_ : "  (no ROM found)");
 }
 
 bool App::loadRom(const std::string& path) {
@@ -452,6 +513,20 @@ void App::drawToolbar() {
         char label[8];
         std::snprintf(label, sizeof label, "%dx", speed);
         if (ImGui::MenuItem(label, nullptr, speedMultiplier_ == speed)) speedMultiplier_ = speed;
+      }
+      ImGui::EndMenu();
+    }
+    if (ImGui::BeginMenu("Sound")) {
+      const Ay38912::Stereo mode = machine_->ay().stereo();
+      const bool ay = machine_->hasAy();
+      if (ImGui::MenuItem("Mono", nullptr, mode == Ay38912::Stereo::Mono, ay)) {
+        machine_->ay().setStereo(Ay38912::Stereo::Mono);
+      }
+      if (ImGui::MenuItem("Stereo ABC", nullptr, mode == Ay38912::Stereo::ABC, ay)) {
+        machine_->ay().setStereo(Ay38912::Stereo::ABC);
+      }
+      if (ImGui::MenuItem("Stereo ACB", nullptr, mode == Ay38912::Stereo::ACB, ay)) {
+        machine_->ay().setStereo(Ay38912::Stereo::ACB);
       }
       ImGui::EndMenu();
     }

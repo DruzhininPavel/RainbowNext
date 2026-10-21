@@ -6,8 +6,8 @@
 
 namespace mynext::frontend {
 
-// Thin wrapper around an SDL3 audio stream. The core produces mono float
-// samples; SDL handles device format conversion and buffering.
+// Thin wrapper around an SDL3 audio stream. The core produces interleaved
+// stereo float samples; SDL handles device format conversion and buffering.
 class Audio {
 public:
   bool init(int sampleRate);

@@ -78,6 +78,7 @@ add_library(mynext_core STATIC
   src/core/machine.cpp
   src/core/ula.cpp
   src/core/keyboard.cpp
+  src/core/ay.cpp
   src/core/beeper.cpp
   src/core/tape.cpp
   src/formats/sna.cpp
@@ -119,6 +120,9 @@ if(MYNEXT_BUILD_TESTS)
     tests/test_ula.cpp
     tests/test_formats.cpp
     tests/test_tape.cpp
+  tests/test_ay.cpp
+  tests/test_128k.cpp
+  tests/test_128k_boot.cpp
     tests/test_boot.cpp
   )
   target_link_libraries(mynext_tests PRIVATE mynext_core)

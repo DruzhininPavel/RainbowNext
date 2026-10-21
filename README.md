@@ -5,22 +5,29 @@ around a deterministic headless core and a thin SDL3 + Dear ImGui frontend.
 Runs on macOS and Linux (including SteamOS / Steam Deck).
 
 ```
-Status: M0 — 48K Spectrum boots, renders and beeps.
-        128K / Next / tape / AY are on the roadmap (docs/ROADMAP.md).
+Status: M1 — 48K and 128K/+2/+3 boot with AY sound, tape loading and snapshots.
+        ZX Spectrum Next is next (docs/ROADMAP.md).
 ```
 
-## Features (M0)
+## Features
 
 * **Z80** — full documented and undocumented instruction set: `IXH/IXL/IYH/IYL`,
   `DDCB`, `SLL`, `MEMPTR` (`WZ`), `IM 0/1/2`, `NMI`, `HALT`, EI delay,
   interruptible block instructions.
 * **ULA** — port `0xFE` read/write, border, beeper, 8×5 keyboard matrix,
   Fuse-compatible memory contention, floating bus.
-* **Timing** — 69 888 T-states per frame at 3.5 MHz, exact frame length asserted
-  by tests.
+* **Machines** — 48K, 128K, +2, +3 and Pentagon, each with its own timings
+  (69 888 / 70 908 / 71 680 T-states per frame at 3.5 MHz).
+* **Paging** — `0x7FFD` RAM/screen/ROM bank + lock, `0x1FFD` CP/M special paging
+  and the +3 ROM bit, contention following the paged bank.
 * **Video** — 256×192 screen with correct Spectrum addressing and flashing,
   rendered into a 320×256 ARGB8888 framebuffer with border.
-* **Audio** — beeper mixed at 44.1 kHz through an `SDL_AudioStream`.
+* **Audio** — beeper plus AY-3-8912 (3 tone channels, noise, envelope, stereo
+  mono/ABC/ACB) mixed at 44.1 kHz through an `SDL_AudioStream`.
+* **Tape** — TAP and TZX with a block model, EAR playback and instant load via
+  the ROM loader trap at `0x0556`.
+* **ROM sets** — banked ROM images (`128-0.rom`…, `plus3-0.rom`…) are assembled
+  into a single image, so the machine can page through all four banks.
 * **Snapshots** — `.sna` (48K/128K) and `.z80` (v1, v2, v3 with RLE).
 * **Frontend** — resizable window, integer scaling, speed 1×/2×/4×/8×,
   drag & drop loading, Dear ImGui menus and a debugger overlay.
@@ -106,9 +113,12 @@ roms/           user-supplied ROMs (empty by design)
 ctest --test-dir build --output-on-failure
 ```
 
-47 tests cover the Z80 core (timings, flags, undocumented opcodes, interrupts),
+88 tests cover the Z80 core (timings, flags, undocumented opcodes, interrupts),
 ULA behaviour, contention, floating bus, frame length, audio rate, both snapshot
-formats, and an end-to-end run of a hand-assembled program through the machine.
+formats, the AY, 128K/+3 paging and timings, tape blocks, and end-to-end runs of
+hand-assembled programs through the machine. Golden tests also boot the real
+`roms/128-0.rom` and `roms/plus3-0.rom` sets when those files are present; they
+skip themselves on a clean checkout.
 
 ## License
 

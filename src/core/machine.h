@@ -4,6 +4,7 @@
 #include <string>
 #include <vector>
 
+#include "core/ay.h"
 #include "core/beeper.h"
 #include "core/bus.h"
 #include "core/keyboard.h"
@@ -59,6 +60,7 @@ public:
   static constexpr int FrameWidth = ScreenWidth + 2 * BorderWidth;
   static constexpr int FrameHeight = ScreenHeight + 2 * BorderHeight;
   static constexpr int RamBanks = 8;
+  static constexpr int RomBanks = 4;
   static constexpr int BankSize = 0x4000;
 
   explicit Machine(MachineType type = MachineType::Spectrum48);
@@ -66,7 +68,10 @@ public:
   void reset();
 
   bool loadRom(const std::string& path);
-  bool loadRoms(const std::string& rom0, const std::string& rom1);
+  // Loads a multi-bank ROM image (128K, +2, +2A, +3). A 16K file fills one
+  // bank, a 32K file fills the first two, a 64K file fills all four.
+  bool loadRomImage(const std::string& path);
+  bool loadRomImageData(const u8* data, size_t size);
   bool loadRomData(const u8* data, size_t size, int bank);
   bool loadSnapshot(const std::string& path, std::string& error);
   bool loadTape(const std::string& path, std::string& error);
@@ -102,6 +107,14 @@ public:
   u8 screenBank() const { return screenBank_; }
   u8 romBank() const { return romBank_; }
   u8 port7ffd() const { return port7ffd_; }
+  u8 port1ffd() const { return port1ffd_; }
+  bool pagingLocked() const { return pagingLocked_; }
+  bool specialPaging() const { return specialPaging_; }
+  bool hasAy() const { return type_ != MachineType::Spectrum48; }
+  Ay38912& ay() { return ay_; }
+  const Ay38912& ay() const { return ay_; }
+  bool is128k() const { return type_ != MachineType::Spectrum48; }
+  bool isPlus3() const { return type_ == MachineType::Plus3; }
   bool irqLine() const { return irqLine_; }
   bool romLoaded() const { return romLoaded_; }
   void setKempston(u8 value) { kempston_ = value; }
@@ -121,8 +134,8 @@ private:
   void frameStart();
   u8 floatingBus() const;
   void writePort7ffd(u8 value);
-  u8 readAy(u16 port) const;
-  void writeAy(u16 port, u8 value);
+  void writePort1ffd(u8 value);
+  void updatePaging();
   void applySnapshot(const formats::Snapshot& snapshot);
   bool applyTapeFastLoad();
 
@@ -135,6 +148,7 @@ private:
   Ula ula_;
   Keyboard keyboard_;
   Beeper beeper_;
+  Ay38912 ay_;
   Tape tape_;
 
   std::vector<u8> rom_;
@@ -146,7 +160,9 @@ private:
   u8 screenBank_ = 5;
   u8 romBank_ = 0;
   u8 port7ffd_ = 0;
+  u8 port1ffd_ = 0;
   bool pagingLocked_ = false;
+  bool specialPaging_ = false;
   bool romLoaded_ = false;
 
   u64 tstates_ = 0;
@@ -156,10 +172,13 @@ private:
 
   int sampleRate_ = 44100;
   u64 audioAccum_ = 0;
+  // Interleaved stereo, so the +2A/+3's ABC wiring is audible.
   std::vector<float> audio_;
+  float dcInL_ = 0.0f;
+  float dcOutL_ = 0.0f;
+  float dcInR_ = 0.0f;
+  float dcOutR_ = 0.0f;
 
-  std::array<u8, 16> ayRegs_{};
-  u8 aySelected_ = 0;
   u8 kempston_ = 0;
 };
 

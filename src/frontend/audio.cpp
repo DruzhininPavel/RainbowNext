@@ -6,7 +6,7 @@ namespace mynext::frontend {
 
 bool Audio::init(int sampleRate) {
   spec_.format = SDL_AUDIO_F32;
-  spec_.channels = 1;
+  spec_.channels = 2;
   spec_.freq = sampleRate;
 
   stream_ = SDL_OpenAudioDeviceStream(SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK, &spec_, nullptr, nullptr);
@@ -28,8 +28,8 @@ void Audio::shutdown() {
 void Audio::push(const std::vector<float>& samples) {
   if (stream_ == nullptr || samples.empty()) return;
 
-  // Keep latency bounded: one second of mono float audio is `freq * 4` bytes.
-  const int limit = spec_.freq * 4;
+  // Keep latency bounded: one second of stereo float audio is `freq * 8` bytes.
+  const int limit = spec_.freq * 8;
   if (SDL_GetAudioStreamQueued(stream_) > limit) return;
 
   SDL_PutAudioStreamData(stream_, samples.data(), int(samples.size() * sizeof(float)));

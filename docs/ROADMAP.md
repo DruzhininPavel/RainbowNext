@@ -4,7 +4,7 @@ Milestones are ordered so that each one is independently testable and leaves the
 emulator in a usable state. Everything is validated by `ctest`; visual checks are
 done by loading a ROM or a snapshot.
 
-## M0 — 48K Spectrum (current)
+## M0 — 48K Spectrum
 
 * [x] Z80 interpreter: documented + undocumented opcodes, `IXH/IXL/IYH/IYL`,
       `DDCB`, `SLL`, `MEMPTR` (`WZ`), IM 0/1/2, NMI, HALT, EI delay
@@ -28,14 +28,23 @@ done by loading a ROM or a snapshot.
 **Exit criteria:** `48.rom` boots to the BASIC prompt and executes BASIC (done);
 a multicolour demo renders correctly; `z80test` passes.
 
-## M1 — 128K / +2 / +3 / Pentagon
+## M1 — 128K / +2 / +3 / Pentagon (current)
 
-* [ ] `0x7FFD` paging lock semantics end to end (partly done)
-* [ ] AY-3-8912: 3 channels, envelope, noise, stereo ABC/ACB
+* [x] `0x7FFD` paging: RAM bank, screen bank, ROM bank, lock bit
+* [x] `0x1FFD` (+2A/+3): CP/M special paging, ROM bit 2, lock, motor
+* [x] ROM bank sets: `128-0.rom`/`128-1.rom`, `plus2-*.rom`, `plus3-0..3.rom`
+* [x] AY-3-8912: 3 channels, 17-bit noise LFSR, 16-step envelope, volume
+* [x] Stereo output: mono / ABC / ACB mixing, DC-blocking filter
+* [x] Frame timings: 69 888 (128K), 70 908 (+2A/+3), 71 680 (Pentagon)
+* [x] Contention per paged bank; Pentagon reports no contention
+* [x] Real ROM boot verified: 128K menu, ROM paging into 48 BASIC, +3 Amstrad menu
 * [ ] Exact 128K contention (`offset` 1 vs 4, `line_times[]`)
 * [ ] +3 disk controller (µPD765) and `.dsk`/`.edsk`
-* [ ] Pentagon timings and 71680/70908 T-state frames
+* [ ] Pentagon ULA+ attributes and `0xDFFD`/`0xEFF7` magic ports
 * [ ] Real-time tape playback tuning for protected loaders (turbo blocks, custom pilots)
+
+**Exit criteria:** `128-0.rom` boots the menu, ROM paging reaches 48 BASIC, the
++3 ROM set boots its menu, and the AY plays a note through a TAP/TZX loader.
 
 ## M2 — ZX Spectrum Next
 
@@ -56,7 +65,7 @@ a multicolour demo renders correctly; `z80test` passes.
 * [ ] CI releases: macOS universal + SteamOS/Linux AppImage
 * [ ] Steam Deck controller profiles, 1280×800 default scaling
 
-## Known gaps in M0
+## Known gaps
 
 These are deliberate simplifications, tracked here so they are not forgotten:
 
@@ -69,7 +78,10 @@ These are deliberate simplifications, tracked here so they are not forgotten:
    `0xFF` = `RST 38h`).
 5. Tape playback is real-time only through the EAR bit; protected loaders that
    depend on exact pilot lengths are best run with instant load enabled.
-6. No AY output, no Kempston mouse.
+6. No Kempston mouse, no Kempston joystick.
+7. The AY is clocked from the CPU T-state counter rather than from the ULA
+   frame counter, so it is deterministic but not cycle-exact against hardware.
+8. The +3 motor bit is latched but nothing consumes it yet (no µPD765).
 
 ## Open decisions
 

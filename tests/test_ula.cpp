@@ -113,8 +113,9 @@ TEST(machine_audio_rate) {
   Machine m(MachineType::Spectrum48);
   m.setSampleRate(44100);
   m.runFrame();
-  const size_t samples = m.audioBuffer().size();
-  // One 50.08 Hz frame is ~880 samples at 44.1 kHz.
+  // The buffer is interleaved stereo, so a 50.08 Hz frame at 44.1 kHz is
+  // ~880 frames of two samples each.
+  const size_t samples = m.audioBuffer().size() / 2;
   CHECK(samples > 820);
   CHECK(samples < 940);
   for (float s : m.audioBuffer()) CHECK(s >= -0.5f && s <= 0.5f);
