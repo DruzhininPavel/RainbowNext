@@ -19,15 +19,20 @@ jobs:
             install: brew install sdl3
           - name: Linux (x86_64)
             os: ubuntu-24.04
-            # SDL3 is fetched and built from source when the distro package is
-            # missing, so a failure here is not fatal.
             install: |
               sudo apt-get update
-              sudo apt-get install -y cmake build-essential ninja-build || true
-              sudo apt-get install -y libsdl3-dev || echo "no system SDL3, will fetch"
+              sudo apt-get install -y cmake build-essential ninja-build
+              # SDL3 is fetched and built from source when the distro package is
+              # missing, so the X11/Wayland/audio headers below are needed too.
+              sudo apt-get install -y libsdl3-dev || echo "no system SDL3, building from source"
+              sudo apt-get install -y \
+                libasound2-dev libpulse-dev libdbus-1-dev libudev-dev \
+                libx11-dev libxext-dev libxrandr-dev libxcursor-dev libxi-dev \
+                libxfixes-dev libxss-dev libxkbcommon-dev \
+                libwayland-dev libdecor-0-dev libegl1-mesa-dev libgbm-dev
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Install dependencies
         run: ${{ matrix.install }}
