@@ -7,7 +7,8 @@ Runs on macOS and Linux (including SteamOS / Steam Deck).
 ```
 Status: M1 — 48K and 128K/+2/+3 boot with AY sound, tape loading, disk images
         and snapshots.
-        ZX Spectrum Next is next (docs/ROADMAP.md).
+        M2 in progress: the Z80N instruction set of the ZX Spectrum Next is
+        implemented (docs/ROADMAP.md).
 ```
 
 ## Features
@@ -15,6 +16,10 @@ Status: M1 — 48K and 128K/+2/+3 boot with AY sound, tape loading, disk images
 * **Z80** — full documented and undocumented instruction set: `IXH/IXL/IYH/IYL`,
   `DDCB`, `SLL`, `MEMPTR` (`WZ`), `IM 0/1/2`, `NMI`, `HALT`, EI delay,
   interruptible block instructions.
+* **Z80N** — the Next extension: `SWAPNIB`, `MIRROR`, `TEST`, the `DE` barrel
+  shifts, `MUL`, `ADD` to the wide registers, `PUSH nn`, `OUTINB`, `NEXTREG`,
+  `PIXELDN`/`PIXELAD`/`SETAE`, `JP (C)`, `LDIX`/`LDDX`/`LDIRX`/`LDDRX`,
+  `LDWS`, `LDPIRX`. Off on the classic machines, where the opcodes stay NOPs.
 * **ULA** — port `0xFE` read/write, border, beeper, 8×5 keyboard matrix,
   Fuse-compatible memory contention, floating bus.
 * **Machines** — 48K, 128K, +2, +3 and Pentagon, each with its own timings
@@ -118,11 +123,11 @@ roms/           user-supplied ROMs (empty by design)
 ctest --test-dir build --output-on-failure
 ```
 
-110 tests cover the Z80 core (timings, flags, undocumented opcodes,
-interrupts), ULA behaviour, contention, floating bus, frame length, audio rate,
-both snapshot formats, the AY, 128K/+3 paging and timings, tape blocks, the
-µPD765 and the DSK parser, and end-to-end runs of hand-assembled programs
-through the machine. Golden tests also boot the real
+134 tests cover the Z80 core (timings, flags, undocumented opcodes,
+interrupts), the Z80N extension, ULA behaviour, contention, floating bus, frame
+length, audio rate, both snapshot formats, the AY, 128K/+3 paging and timings,
+tape blocks, the µPD765 and the DSK parser, and end-to-end runs of
+hand-assembled programs through the machine. Golden tests also boot the real
 `roms/128-0.rom` and `roms/plus3-0.rom` sets when those files are present; they
 skip themselves on a clean checkout.
 

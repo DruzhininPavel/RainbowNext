@@ -88,6 +88,7 @@ Machine::Machine(MachineType type)
 
 void Machine::reset() {
   cpu_.reset();
+  cpu_.setExtendedInstructions(type_ == MachineType::Next);
   ula_.reset(type_ != MachineType::Spectrum48);
   keyboard_.reset();
   beeper_.reset();

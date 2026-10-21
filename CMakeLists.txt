@@ -119,12 +119,13 @@ if(MYNEXT_BUILD_TESTS)
   add_executable(mynext_tests
     tests/test_main.cpp
     tests/test_z80.cpp
+    tests/test_z80n.cpp
     tests/test_ula.cpp
     tests/test_formats.cpp
     tests/test_tape.cpp
-  tests/test_ay.cpp
-  tests/test_128k.cpp
-  tests/test_128k_boot.cpp
+    tests/test_ay.cpp
+    tests/test_128k.cpp
+    tests/test_128k_boot.cpp
     tests/test_dsk.cpp
     tests/test_boot.cpp
   )

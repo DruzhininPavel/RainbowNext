@@ -497,6 +497,10 @@ void Z80::executeEd() {
     return;
   }
 
+  // Next-only opcodes. They reuse encodings that the stock Z80 treats as NOPs,
+  // so the check comes first and the machine decides whether it applies.
+  if (z80n_ && executeZ80n(op)) return;
+
   // NEG (ED 44 and its seven undocumented duplicates)
   if ((op & 0xC7) == 0x44) {
     const u8 v = regs_.a;
@@ -629,6 +633,192 @@ void Z80::executeEd() {
 
   // Undocumented ED opcodes behave as NOP (8 T-states total).
   tick(0);
+}
+
+// ===========================================================================
+// Z80N — the ZX Spectrum Next extension of the instruction set
+// ===========================================================================
+
+// Returns false for everything that is not a Next-only opcode, so the stock
+// decoder can carry on. Timings follow the published table; the ED prefix and
+// this opcode byte (8 T-states) have already been fetched by the caller.
+bool Z80::executeZ80n(u8 op) {
+  switch (op) {
+    case 0x23: // SWAPNIB
+      regs_.a = u8(regs_.a << 4 | regs_.a >> 4);
+      return true;
+
+    case 0x24: { // MIRROR A
+      u8 v = regs_.a;
+      v = u8((v & 0xF0) >> 4 | (v & 0x0F) << 4);
+      v = u8((v & 0xCC) >> 2 | (v & 0x33) << 2);
+      regs_.a = u8((v & 0xAA) >> 1 | (v & 0x55) << 1);
+      return true;
+    }
+
+    case 0x27: { // TEST n — flags as AND n, A untouched
+      const u8 a = regs_.a;
+      and8(fetchImm());
+      regs_.a = a;
+      return true;
+    }
+
+    // BSLA/BSRA/BSRL/BSRF/BRLC DE,B — DE shifted by B, never more than 16 bits.
+    case 0x28: case 0x29: case 0x2A: case 0x2B: case 0x2C: {
+      const unsigned count = regs_.b;
+      const u16 de = this->de();
+      u16 result = de;
+      if (count == 0) {
+        result = de;
+      } else if (count >= 16) {
+        switch (op) {
+          case 0x28: result = 0; break;                              // BSLA
+          case 0x29: result = (de & 0x8000) ? u16(0xFFFF) : u16(0); break; // BSRA
+          case 0x2A: result = 0; break;                              // BSRL
+          case 0x2B: result = u16(0xFFFF); break;                    // BSRF
+          default:                                                   // BRLC
+            if ((count & 15) != 0) {
+              const unsigned shift = count & 15;
+              result = u16((de << shift) | (de >> (16 - shift)));
+            }
+            break;
+        }
+      } else {
+        switch (op) {
+          case 0x28: result = u16(de << count); break;
+          case 0x29: result = u16(i16(de) >> count); break;
+          case 0x2A: result = u16(de >> count); break;
+          case 0x2B: result = u16((de >> count) | (0xFFFFu << (16 - count))); break;
+          default: result = u16((de << count) | (de >> (16 - count))); break;
+        }
+      }
+      setDe(result);
+      return true;
+    }
+
+    case 0x30: // MUL D,E — HL = D * E, no flags
+      setHl(u16(u16(regs_.d) * u16(regs_.e)));
+      return true;
+
+    case 0x31: setHl(u16(hl() + regs_.a)); return true; // ADD HL,A
+    case 0x32: setDe(u16(de() + regs_.a)); return true; // ADD DE,A
+    case 0x33: setBc(u16(bc() + regs_.a)); return true; // ADD BC,A
+
+    case 0x34: case 0x35: case 0x36: { // ADD HL/DE/BC,nn
+      const u16 v = fetchImm16();
+      tick(2);
+      if (op == 0x34) setHl(u16(hl() + v));
+      else if (op == 0x35) setDe(u16(de() + v));
+      else setBc(u16(bc() + v));
+      return true;
+    }
+
+    case 0x8A: { // PUSH nn — the only big-endian operand in the set
+      const u8 hi = fetchImm();
+      const u8 lo = fetchImm();
+      push16(u16(u16(hi) << 8 | lo));
+      tick(3);
+      return true;
+    }
+
+    case 0x90: { // OUTINB — OUTI without touching B
+      out8(bc(), read8(hl()));
+      setHl(u16(hl() + 1));
+      tick(1);
+      return true;
+    }
+
+    case 0x91: { // NEXTREG n,v
+      const u8 reg = fetchImm();
+      const u8 value = fetchImm();
+      tick(6);
+      bus_.nextRegWrite(reg, value);
+      return true;
+    }
+
+    case 0x92: { // NEXTREG n,A
+      const u8 reg = fetchImm();
+      tick(6);
+      bus_.nextRegWrite(reg, regs_.a);
+      return true;
+    }
+
+    case 0x93: { // PIXELDN — HL down one pixel row inside the ULA bitmap
+      u16 addr = u16(hl() + 0x0100);
+      if ((addr & 0x0700) == 0) {
+        const u16 l = u16((addr & 0x00FF) + 0x20);
+        addr = u16((addr & 0xFF00) | (l & 0x00FF));
+        if (l < 0x100) addr = u16(addr - 0x0800); // no carry: move a third
+      }
+      setHl(addr);
+      return true;
+    }
+
+    case 0x94: { // PIXELAD — HL = ULA address of pixel (E, D)
+      const u16 y = regs_.d;
+      const u16 x = regs_.e;
+      setHl(u16(0x4000 | ((y & 0xC0) << 5) | ((y & 0x07) << 8) | ((y & 0x38) << 2) |
+                (x >> 3)));
+      return true;
+    }
+
+    case 0x95: // SETAE — A = mask for the pixel column in E
+      regs_.a = u8(0x80 >> (regs_.e & 0x07));
+      return true;
+
+    case 0x98: { // JP (C) — IN A,(C) then jump inside the current page
+      const u8 v = in8(bc());
+      tick(1);
+      regs_.pc = u16((regs_.pc & 0xFF00) | v);
+      return true;
+    }
+
+    // LDIX/LDDX/LDIRX/LDDRX: copy unless the byte equals A, no flags at all.
+    case 0xA4: case 0xAC: case 0xB4: case 0xBC: {
+      const bool decrement = (op == 0xAC || op == 0xBC);
+      const bool repeat = (op == 0xB4 || op == 0xBC);
+      const u8 v = read8(hl());
+      if (v != regs_.a) write8(de(), v);
+      setDe(u16(de() + 1));
+      setHl(u16(hl() + (decrement ? -1 : 1)));
+      setBc(u16(bc() - 1));
+      tick(2);
+      // A repeated block transfer also stops as soon as the byte matched A.
+      if (repeat && bc() != 0 && v != regs_.a) {
+        regs_.pc = u16(regs_.pc - 2);
+        tick(5);
+      }
+      return true;
+    }
+
+    case 0xA5: { // LDWS — vertical byte copy for Layer 2
+      const u8 v = read8(hl());
+      write8(de(), v);
+      regs_.l = u8(regs_.l + 1);
+      const u8 d = u8(regs_.d + 1);
+      regs_.d = d;
+      regs_.f = u8((regs_.f & CF) | (d & (SF | YF | XF)) | (d == 0 ? ZF : 0) |
+                   ((d & 0x0F) == 0 ? HF : 0) | (d == 0x80 ? PF : 0));
+      return true;
+    }
+
+    case 0xB7: { // LDPIRX — pattern fill from a 8-byte aligned source
+      const u16 src = u16((hl() & 0xFFF8) | (regs_.e & 0x07));
+      const u8 v = read8(src);
+      if (v != regs_.a) write8(de(), v);
+      setDe(u16(de() + 1));
+      setBc(u16(bc() - 1));
+      tick(2);
+      if (bc() != 0) {
+        regs_.pc = u16(regs_.pc - 2);
+        tick(5);
+      }
+      return true;
+    }
+
+    default:
+      return false;
+  }
 }
 
 // ===========================================================================

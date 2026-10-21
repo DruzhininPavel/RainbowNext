@@ -51,8 +51,12 @@ a multicolour demo renders correctly; `z80test` passes.
 
 ## M2 — ZX Spectrum Next
 
-* [ ] Z80N instruction set
-* [ ] MMU / NextREG file
+* [x] Z80N instruction set — SWAPNIB, MIRROR A, TEST n, the five DE shifts,
+      MUL D,E, ADD reg,A / ADD reg,nn, PUSH nn, OUTINB, NEXTREG, PIXELDN,
+      PIXELAD, SETAE, JP (C), LDIX/LDDX/LDIRX/LDDRX, LDWS and LDPIRX. Enabled
+      only on `MachineType::Next`, so the classic machines still see NOPs.
+* [ ] MMU / NextREG file — the CPU half is in place: `NEXTREG` reaches the
+      machine through `Bus::nextRegWrite()`
 * [ ] Layer 2 (256×192 and 320×256), ULA+ palettes, Radastan mode
 * [ ] 128 sprites (4B/5B), tilemap, Copper, DMA
 * [ ] 3× AY with stereo, specdrum, `.nex` snapshot format

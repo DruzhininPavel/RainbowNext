@@ -28,6 +28,14 @@ public:
   virtual void tick(u32 cycles) = 0;
   virtual u32 now() const = 0;
 
+  // Z80N only: the extended instruction set can write the Next register file
+  // directly. A plain Spectrum has no such file, so the default is a no-op and
+  // the same CPU core serves both machines.
+  virtual void nextRegWrite(u8 reg, u8 value) {
+    (void)reg;
+    (void)value;
+  }
+
   // Byte placed on the data bus during an interrupt acknowledge cycle.
   // The Spectrum ULA leaves 0xFF there, which is why IM 2 vectors on the
   // Spectrum always resolve to (I << 8) | 0xFF.

@@ -52,6 +52,12 @@ public:
   u64 cycles() const { return cycles_; }
   u16 wz() const { return wz_; }
 
+  // Z80N is the Next's extension of the instruction set. On the classic
+  // machines the same opcodes decode as NOPs, so the core enables them only
+  // when the machine says so.
+  void setExtendedInstructions(bool on) { z80n_ = on; }
+  bool extendedInstructions() const { return z80n_; }
+
 private:
   // --- clock and memory ---------------------------------------------------
   void tick(u32 n) { bus_.tick(n); cycles_ += n; }
@@ -110,6 +116,7 @@ private:
   void execute(u8 op, int idx);
   void executeCb();
   void executeEd();
+  bool executeZ80n(u8 op);
   void executeDdcb(int idx);
   void executeAlu(int group, u8 value);
   void executeRot(int group, u8& r);      // CB rotates/shifts
@@ -121,6 +128,7 @@ private:
   u16 wz_ = 0;
   u64 cycles_ = 0;
   int eiDelay_ = 0;
+  bool z80n_ = false;
 };
 
 } // namespace mynext
