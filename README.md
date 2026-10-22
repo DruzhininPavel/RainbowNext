@@ -57,8 +57,10 @@ Status: M1 — 48K and 128K/+2/+3 boot with AY sound, tape loading, disk images
   and the +3 ROM bit, contention following the paged bank.
 * **Video** — 256×192 screen with correct Spectrum addressing and flashing,
   rendered into a 320×256 ARGB8888 framebuffer with border.
-* **Audio** — beeper plus AY-3-8912 (3 tone channels, noise, envelope, stereo
-  mono/ABC/ACB) mixed at 44.1 kHz through an `SDL_AudioStream`.
+* **Audio** — beeper plus a TurboSound Next of three AY-3-8912 (3 tone
+  channels, noise, envelope, stereo mono/ABC/ACB per chip, `0xFFFD` chip
+  select with per-chip left/right enables) and four 8-bit DACs on the SpecDrum
+  and SoundDrive ports, mixed at 44.1 kHz through an `SDL_AudioStream`.
 * **Tape** — TAP and TZX with a block model, EAR playback and instant load via
   the ROM loader trap at `0x0556`.
 * **ROM sets** — banked ROM images (`128-0.rom`…, `plus3-0.rom`…) are assembled
@@ -138,7 +140,7 @@ instant loading; turn it off to hear and debug the actual tape signal.
 ## Layout
 
 ```
-src/core/       Z80, ULA, keyboard, beeper, AY, µPD765, Machine — no OS deps
+src/core/       Z80, ULA, keyboard, beeper, AY, DACs, µPD765, Machine — no OS deps
 src/formats/    SNA / Z80 snapshots, TAP / TZX tapes, DSK / EDSK disk images
 src/frontend/   SDL3 + Dear ImGui host: app, audio, input, debugger
 tests/          unit tests, incl. an end-to-end boot test (no ROM required)
@@ -152,13 +154,14 @@ roms/           user-supplied ROMs (empty by design)
 ctest --test-dir build --output-on-failure
 ```
 
-263 tests cover the Z80 core (timings, flags, undocumented opcodes,
+280 tests cover the Z80 core (timings, flags, undocumented opcodes,
 interrupts), the Z80N extension, the Next MMU, palette, Layer 2, sprites
 (including relative and unified sprites and the collision flags), the tilemap,
 the Copper and the zxnDMA, ULA
 behaviour, contention, floating bus, frame length, audio rate, both snapshot
-formats, the AY, 128K/+3 paging and timings, tape blocks, the µPD765 and the DSK
-parser, and end-to-end runs of
+formats, the AY, the TurboSound chip select and stereo bits, the SpecDrum and
+SoundDrive DAC ports, 128K/+3 paging and timings, tape blocks, the µPD765 and
+the DSK parser, and end-to-end runs of
 hand-assembled programs through the machine. Golden tests also boot the real
 `roms/128-0.rom` and `roms/plus3-0.rom` sets when those files are present; they
 skip themselves on a clean checkout.

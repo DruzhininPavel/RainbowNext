@@ -79,6 +79,7 @@ add_library(mynext_core STATIC
   src/core/ula.cpp
   src/core/keyboard.cpp
   src/core/ay.cpp
+  src/core/turbosound.cpp
   src/core/beeper.cpp
   src/core/tape.cpp
   src/core/upd765.cpp
@@ -86,6 +87,7 @@ add_library(mynext_core STATIC
   src/core/palette.cpp
   src/core/sprites.cpp
   src/core/copper.cpp
+  src/core/dac.cpp
   src/core/dma.cpp
   src/formats/dsk.cpp
   src/formats/sna.cpp
@@ -130,6 +132,7 @@ if(MYNEXT_BUILD_TESTS)
     tests/test_sprites_relative.cpp
     tests/test_copper.cpp
     tests/test_dma.cpp
+  tests/test_turbosound.cpp
     tests/test_tilemap.cpp
     tests/test_nextreg.cpp
     tests/test_ula.cpp

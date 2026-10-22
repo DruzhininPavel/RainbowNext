@@ -13,7 +13,8 @@ flowchart TD
         KBD["Keyboard matrix 8x5"]
         BEEP["Beeper"]
         MACH["Machine<br/>memory map, paging, IRQ,<br/>framebuffer, audio accumulator"]
-        AY["AY-3-8912<br/>tone, noise, envelope, stereo"]
+        AY["TurboSound<br/>3x AY-3-8912, stereo"]
+        DAC["SpecDrum<br/>4x 8-bit DAC"]
         FDC["µPD765<br/>+3 disk controller,<br/>two ports, non-DMA"]
         FMT["Formats<br/>SNA, Z80, TAP, TZX, DSK"]
     end
@@ -31,6 +32,7 @@ flowchart TD
     MACH --> KBD
     MACH --> BEEP
     MACH --> AY
+    MACH --> DAC
     MACH --> FDC
     MACH --> FMT
     APP --> MACH
@@ -251,6 +253,51 @@ status, counter, port A, port B -- masked by the read mask, which `WR6` can
 narrow so a program polls only the status byte. The read index wraps, so a
 program that reads past the end of its mask starts over instead of reading
 garbage.
+
+## Sound
+
+`src/core/ay.*` is one AY-3-8912: three tone dividers, a 17-bit noise LFSR, a
+16-step envelope and a 4-bit volume per channel. It has no clock of its own --
+`Machine::tick()` hands it the elapsed T-states and it divides them down to its
+1.75 MHz, so the same program always produces the same samples. The stereo
+modes `Mono`, `ABC` and `ACB` are a property of the mixer, not of the chip:
+`sampleLeft()` and `sampleRight()` weight the three channel outputs by 1.0 for
+the outer ones and 0.5 for the middle one, so `ACB` swaps which channel is
+attenuated.
+
+`src/core/turbosound.*` owns three of those chips and the Next additions on top
+of them. A write to `0xFFFD` with bit 7 set selects a chip instead of a
+register: bits 1:0 pick it (`11` first, `10` second, `01` third), bit 6 gates
+its left output and bit 5 its right one, which is how a program pans a single
+chip without touching the shared stereo mode. With bit 7 clear the byte is an
+ordinary register number for the selected chip, and `0xBFFD` reads and writes
+that register's data. Chip select only exists on the Next, so on a 128 or a +3
+bit 7 stays part of the register number.
+
+NextReg `0x08` bit 1 enables the second and third chip, and while they are off
+`tick()` freezes them rather than muting them, so a program that switches them
+on later finds them exactly where it left them; bit 5 chooses between the `ABC`
+and the `ACB` layout. NextReg `0x09` bits 7:5 force a chip to mono, which folds
+its left and right outputs together.
+
+`src/core/dac.*` is the four 8-bit DACs of the SpecDrum and SoundDrive. They
+have no timing at all: a write latches a level and it stays there until the
+next write, which is what lets the CPU, or the DMA streaming into `0x0B`, drive
+them at its own pace. The port's low byte decides which DACs a write reaches --
+`0x1F` is A, `0x0F` is B, `0x4F` is C, `0x5F` is D, `0xDF` is A and D together
+(the centre channel a mono SpecDrum sample wants) and `0xB3` is B and C -- and
+NextReg `0x2C`, `0x2D` and `0x2E` mirror B, A+D and C for a program that would
+rather not touch an IO port. A and B mix into the left output, C and D into the
+right, each pair averaged so that a single DAC cannot clip the mix.
+
+`Machine::tick()` advances the audio accumulator too, and every time it passes
+a sample period it sums the beeper, the TurboSound and, on the Next, the DACs,
+runs the result through a one-pole high pass that removes the standing level --
+the speaker is AC coupled, so without it a silent AY would sit against a rail --
+clamps it to `[-1, 1]` and appends the left/right pair to `audioBuffer()`. That
+buffer keeps the last two seconds so a stalled frontend does not lose the
+stream, and the frontend drains it into an `SDL_AudioStream` that resamples to
+whatever the device wants.
 
 ## Frame buffer
 

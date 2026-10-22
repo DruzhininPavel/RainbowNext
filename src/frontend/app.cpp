@@ -565,16 +565,16 @@ void App::drawToolbar() {
       ImGui::EndMenu();
     }
     if (ImGui::BeginMenu("Sound")) {
-      const Ay38912::Stereo mode = machine_->ay().stereo();
+      const Ay38912::Stereo mode = machine_->sound().stereoMode();
       const bool ay = machine_->hasAy();
       if (ImGui::MenuItem("Mono", nullptr, mode == Ay38912::Stereo::Mono, ay)) {
-        machine_->ay().setStereo(Ay38912::Stereo::Mono);
+        machine_->sound().setStereoMode(Ay38912::Stereo::Mono);
       }
       if (ImGui::MenuItem("Stereo ABC", nullptr, mode == Ay38912::Stereo::ABC, ay)) {
-        machine_->ay().setStereo(Ay38912::Stereo::ABC);
+        machine_->sound().setStereoMode(Ay38912::Stereo::ABC);
       }
       if (ImGui::MenuItem("Stereo ACB", nullptr, mode == Ay38912::Stereo::ACB, ay)) {
-        machine_->ay().setStereo(Ay38912::Stereo::ACB);
+        machine_->sound().setStereoMode(Ay38912::Stereo::ACB);
       }
       ImGui::EndMenu();
     }

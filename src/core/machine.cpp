@@ -132,8 +132,11 @@ void Machine::reset() {
   pagingLocked_ = false;
   specialPaging_ = false;
   updatePaging();
-  ay_.reset();
-  ay_.setStereo(type_ == MachineType::Plus3 ? Ay38912::Stereo::ABC : Ay38912::Stereo::Mono);
+  sound_.reset();
+  sound_.setChipSelectEnabled(isNext());
+  sound_.setStereoMode(type_ == MachineType::Plus3 || isNext() ? Ay38912::Stereo::ABC
+                                                              : Ay38912::Stereo::Mono);
+  dacs_.reset();
   fdc_.reset();
   fdc_.setDisk(hasDiskController() && !disk_.empty() ? &disk_ : nullptr);
 
@@ -353,7 +356,7 @@ u8 Machine::ioRead(u16 port, u32) {
   }
 
   if (hasAy()) {
-    if ((port & 0xC002) == 0x8000) return ay_.read(); // 0xBFFD data
+    if ((port & 0xC002) == 0x8000) return sound_.read(); // 0xBFFD data
     if ((port & 0xC002) == 0xC000) return 0xFF;       // 0xFFFD status
   }
 
@@ -423,13 +426,18 @@ void Machine::ioWrite(u16 port, u8 value, u32) {
       return;
     }
     if ((port & 0xC002) == 0xC000) { // 0xFFFD, and 0xFFFF on the +2A/+3
-      ay_.select(value);
+      sound_.select(value);
       return;
     }
     if ((port & 0xC002) == 0x8000) { // 0xBFFD
-      ay_.write(value);
+      sound_.write(value);
       return;
     }
+  }
+
+  if (isNext() && SpecDrum::handles(port)) {
+    dacs_.write(port, value);
+    return;
   }
 
   if (hasDiskController()) {
@@ -549,6 +557,9 @@ u8 Machine::readNextReg(u8 reg) const {
   if (reg == 0x40) return palette_.index();
   if (reg == 0x61) return copper_.addressLsb();
   if (reg == 0x62) return copper_.control();
+  if (reg == 0x2C) return dacs_.dac(1);
+  if (reg == 0x2D) return dacs_.dac(0);
+  if (reg == 0x2E) return dacs_.dac(2);
   if (reg == 0x1E || reg == 0x1F) {
     const u32 line = u32(tstates_ % tstatesPerFrame_) / tstatesPerLine_;
     return reg == 0x1E ? u8(line) : u8(line >> 8);
@@ -601,9 +612,30 @@ void Machine::writeNextReg(u8 reg, u8 value) {
     case 0x63: // Copper program word, committed after the second byte
       copper_.writeData16(value);
       return;
-    case 0x09: // peripheral 2: bit 4 locks sprite number to port 0x303B
+    case 0x08: // peripheral 3: TurboSound, stereo arrangement, DACs
+      next_.write(reg, value);
+      sound_.setEnabled((value & 0x02) != 0);
+      sound_.setStereoMode((value & 0x20) ? Ay38912::Stereo::ACB : Ay38912::Stereo::ABC);
+      return;
+    case 0x09: // peripheral 2: AY mono bits, bit 4 locks the sprite number
       next_.write(reg, value);
       sprites_.setLockstep((value & 0x10) != 0);
+      for (int i = 0; i < TurboSound::ChipCount; ++i) {
+        sound_.setChipMono(i, (value & (0x20 << i)) != 0);
+      }
+      return;
+    case 0x2C: // DAC B mirror, left
+      next_.write(reg, value);
+      dacs_.writeDac(1, value);
+      return;
+    case 0x2D: // the mono mirror: DACs A and D together
+      next_.write(reg, value);
+      dacs_.writeDac(0, value);
+      dacs_.writeDac(3, value);
+      return;
+    case 0x2E: // DAC C mirror, right
+      next_.write(reg, value);
+      dacs_.writeDac(2, value);
       return;
     case 0x19: // sprite clip window, four writes: X1, X2, Y1, Y2
       next_.write(reg, value);
@@ -758,7 +790,7 @@ void Machine::tick(u32 cycles) {
     tstates_ += step;
     remaining -= step;
     tape_.advance(step);
-    if (hasAy()) ay_.tick(step);
+    if (hasAy()) sound_.tick(step);
 
     audioAccum_ += u64(step) * u64(sampleRate_);
     while (audioAccum_ >= u64(timings_.cpuHz)) {
@@ -767,8 +799,13 @@ void Machine::tick(u32 cycles) {
       float left = beeper_.sample();
       float right = left;
       if (hasAy()) {
-        left += ay_.sampleLeft() * 0.5f;
-        right += ay_.sampleRight() * 0.5f;
+        // All three chips of the Next add up, exactly as they do on the board.
+        left += sound_.sampleLeft() * 0.5f;
+        right += sound_.sampleRight() * 0.5f;
+      }
+      if (isNext()) {
+        left += dacs_.sampleLeft();
+        right += dacs_.sampleRight();
       }
       // The speaker is AC coupled, so remove the standing level; without this
       // a silent AY would push the output hard against the rails.

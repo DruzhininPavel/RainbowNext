@@ -109,7 +109,15 @@ a multicolour demo renders correctly; `z80test` passes.
       prescalar that paces a byte every `32 * prescalar` master clocks so the
       DMA can feed the DAC, auto restart at the end of a block, and the masked
       read sequence that reports the status byte and the live pointers
-* [ ] 3× AY with stereo, specdrum, `.nex` snapshot format
+* [x] TurboSound Next on port `0xFFFD`: three AY-3-8912 chips where bit 7 of
+      the register select byte chooses a chip and bits 6 and 5 enable its left
+      and right output, NextReg `0x08` bit 1 enables chips 1 and 2 and bit 5
+      swaps the middle and the right chip (ABC or ACB), and NextReg `0x09`
+      bits 7:5 force a chip to mono
+* [x] Four 8-bit DACs on the SpecDrum and SoundDrive ports (`0x1F`, `0x0F`,
+      `0x4F`, `0x5F`, `0xDF`, `0xB3` and their mirrors), with DAC A and B on the
+      left, C and D on the right, and the `0x2C`/`0x2D`/`0x2E` NextReg mirrors
+* [ ] `.nex` snapshot format
 * [ ] SD card image access for NextZXOS
 * [ ] Video pipeline: Timex modes, ULA+ palettes, blending modes 6 and 7 of the
       `0x15` priority byte (the ULA → tilemap → Layer 2 → sprite compositor and
@@ -156,6 +164,13 @@ These are deliberate simplifications, tracked here so they are not forgotten:
     rather than from a fixed 28 MHz, so a turbo machine paces its transfers
     faster. The variable cycle lengths of ports A and B are stored but do not
     slow anything down.
+12. NextReg `0x06` bits 1:0 (the audio chip mode: YM, AY, ZXN-8950 or hold all
+    AY in reset) is decoded but not applied, so all three chips always behave
+    as AY-3-8912.
+13. NextReg `0x08` bit 3, which enables the four DACs, is not checked: they are
+    always live, so a program that leaves them off still hears its writes. The
+    DAC outputs are not low-pass filtered, so a fast stream of samples aliases
+    instead of rolling off.
 
 ## Open decisions
 

@@ -8,11 +8,13 @@
 #include "core/beeper.h"
 #include "core/bus.h"
 #include "core/copper.h"
+#include "core/dac.h"
 #include "core/dma.h"
 #include "core/keyboard.h"
 #include "core/nextreg.h"
 #include "core/palette.h"
 #include "core/sprites.h"
+#include "core/turbosound.h"
 #include "core/tape.h"
 #include "core/upd765.h"
 #include "core/types.h"
@@ -132,8 +134,13 @@ public:
   Upd765& fdc() { return fdc_; }
   const Upd765& fdc() const { return fdc_; }
   const formats::DiskImage& disk() const { return disk_; }
-  Ay38912& ay() { return ay_; }
-  const Ay38912& ay() const { return ay_; }
+  // The first AY is the one every machine with a sound chip has; the other two
+  // only run on the Next.
+  Ay38912& ay() { return sound_.chip(0); }
+  const Ay38912& ay() const { return sound_.chip(0); }
+  TurboSound& sound() { return sound_; }
+  const TurboSound& sound() const { return sound_; }
+  const SpecDrum& dacs() const { return dacs_; }
   bool is128k() const { return type_ != MachineType::Spectrum48; }
   bool isPlus3() const { return type_ == MachineType::Plus3; }
   bool irqLine() const { return irqLine_; }
@@ -240,7 +247,8 @@ private:
   Ula ula_;
   Keyboard keyboard_;
   Beeper beeper_;
-  Ay38912 ay_;
+  TurboSound sound_;
+  SpecDrum dacs_;
   Tape tape_;
   Upd765 fdc_;
   formats::DiskImage disk_;
