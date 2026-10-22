@@ -22,6 +22,18 @@ roms/128-1.rom     (bank 1 — 48 BASIC)
 `+2` uses the same two-bank layout (`plus2-0.rom`, `plus2-1.rom`), while `+3`
 and `+2A` need four banks (`plus3-0.rom` … `plus3-3.rom`).
 
+For the Next, drop the 64 KiB board ROM (four 16 KiB banks) as:
+
+```
+roms/next.rom      (65 536 bytes)
+roms/next-0.rom … next-3.rom
+```
+
+If no `next` set is found the Next falls back to the `128` set, so a Next without
+its own ROM still boots the 128K machine. The ROM only covers the board ROM;
+NextZXOS lives on the SD card image and is loaded separately with `--sd` (see
+below).
+
 ### How banked ROM sets are loaded
 
 The frontend tries the banked layout first: for a candidate base name such as
@@ -36,9 +48,18 @@ is exactly 16 384 bytes. If no banked files exist it falls back to a single
 ```
 
 With no argument the frontend searches the candidate list for the selected
-machine type (`48`, `128`, `plus2`, `plus3`) in `roms/`, the working directory
-and next to the executable. The machine type can be switched at runtime from the
-*Machine* menu, which reloads the matching ROM set.
+machine type (`48`, `128`, `plus2`, `plus3`, `pentagon`, `next`) in `roms/`, the
+working directory and next to the executable. The machine type can be switched at
+runtime from the *Machine* menu, which reloads the matching ROM set.
+
+The Next also takes an SD card image, which is where NextZXOS and its ROMs live:
+
+```sh
+./build/rainbow --sd nextzxos.img
+```
+
+An `.img` dropped onto the window is mounted as the card as well; the card is
+owned by the frontend, so it survives a machine change.
 
 Snapshots can be dropped onto the window (`.sna`, `.z80`) or opened from the
 *File* menu; a snapshot carries its own memory image and does not need a ROM
@@ -51,6 +72,10 @@ You must dump them from hardware you own, or use a distribution that is legal in
 your jurisdiction. Amstrad has publicly permitted distribution of the Spectrum
 ROMs for emulation purposes; see the Amstrad / SpecNext terms before
 redistributing anything you place here.
+
+The official SpecNext distribution (<https://www.specnext.com/latestdistro/>) is
+the usual source for the Next files: it ships the board ROM used by emulators and
+the NextZXOS SD card image. Nothing from it is committed here.
 
 ## Why they are not bundled
 
