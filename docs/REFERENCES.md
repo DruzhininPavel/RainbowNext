@@ -12,6 +12,7 @@ port semantics, memory layouts) was reimplemented.
 | [Fuse](https://github.com/FuseEmulator/fuse-emulator-svn) — `libspectrum/timings.c`, `fuse/spectrum.c`, `fuse/ula.c`, `fuse/display.h` | GPL-2.0 | `base_timings` table for 48K/128K/+2A/+3/Pentagon; contention pattern `{5,4,3,2,1,0,0,6}`; floating-bus column rules; port 0xFE read/write semantics and `ula_default_value` |
 | [ZEsarUX](https://github.com/chernandezba/zesarux) | GPL-3.0 | Confirmation of contention ranges and border timing edge cases |
 | Fuse `fuse/peripherals/scld.c`, `scld.h` | GPL-2.0 | Timex SCLD: the `scrnmode`/`hirescol` bit split, `ALTDFILE_OFFSET`, the `hires_convert_dec` colour pairs (ink is the complement of paper, both bright) and the `x % 16 > 7` rule that picks the second display file |
+| Fuse `libspectrum/rzx.c` | GPL-2.0 | The RZX container layout: the `RZX!` header, the block identifiers and their length-includes-the-header rule, the creator/snapshot/input block fields, and the `0xFFFF` frame-count repeat marker. Reimplemented as `src/core/rzx.*`; no code copied |
 | [raxoft/z80test](https://github.com/raxoft/z80test) | MIT | Flag-behaviour expectations; planned as an external conformance suite |
 | [raxoft/zexall](https://github.com/raxoft/zexall) | — | Planned full Z80 conformance run |
 
@@ -54,6 +55,10 @@ port semantics, memory layouts) was reimplemented.
 
 * ROM images are **not** distributed; see `roms/README.md`.
 * Snapshot and tape format descriptions are reimplemented from public
-  documentation (`worldofspectrum.org` format pages).
+  documentation (`worldofspectrum.org` format pages). RZX has no specification
+  document, so its layout was taken from libspectrum's reader and writer.
+* An RZX file written by RainbowNext embeds our own `RBNS` state, so it is not
+  portable to other emulators; files written by Fuse can be read only if their
+  snapshot is one we understand, which in practice means they cannot.
 * If a future contribution needs to lift code from a GPL project, the whole
   project must move to a GPL-compatible license first.

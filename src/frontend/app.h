@@ -8,6 +8,7 @@
 
 #include "core/machine.h"
 #include "core/rewind.h"
+#include "core/rzx_session.h"
 #include "frontend/audio.h"
 #include "frontend/config.h"
 #include "frontend/debugger.h"
@@ -34,6 +35,7 @@ public:
     std::string disk;
     std::string sd;
     std::string state;      // save state to restore at startup
+    std::string rzx;        // RZX replay to play back at startup
     bool debugger = false;  // start paused with the debugger open
   };
 
@@ -62,7 +64,9 @@ private:
     DivMmcCard,
     Printout,
     StateSave,
-    StateLoad
+    StateLoad,
+    RzxSave,
+    RzxLoad
   };
 
   bool loadRom(const std::string& path);
@@ -79,6 +83,12 @@ private:
   bool savePrintout(const std::string& path);
   bool saveStateFile(const std::string& path);
   bool loadStateFile(const std::string& path);
+  // RZX replay: the recording is made from the running machine and only named
+  // once it is stopped, so starting one needs no path.
+  void startRzxRecording();
+  bool saveRzxFile(const std::string& path);
+  bool loadRzxFile(const std::string& path);
+  void stopRzx();
   // F8/F9 use one well-known file instead of asking for a name every time.
   void quickSaveState();
   void quickLoadState();
@@ -149,6 +159,9 @@ private:
   RewindBuffer rewind_;
   bool rewindEnabled_ = true;
   int rewindStride_ = 0;
+  // Declared after machine_ so it detaches from the machine before the machine
+  // is destroyed.
+  RzxSession rzx_;
   std::string status_;
 };
 

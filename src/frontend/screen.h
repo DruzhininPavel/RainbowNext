@@ -46,9 +46,6 @@ public:
                 float maxX, float maxY, float scale, const CrtSettings& crt);
 
 private:
-  bool createPipeline();
-  void releaseResources();
-
   SDL_Window* window_ = nullptr;
   SDL_GPUDevice* device_ = nullptr;
   SDL_GPUGraphicsPipeline* pipeline_ = nullptr;

@@ -181,7 +181,18 @@ a multicolour demo renders correctly; `z80test` passes.
 * [x] Rewind buffer: a ring of states capped by bytes, one recorded every four
       frames while the machine runs. `F10` pauses and steps back through it,
       `View > Rewind buffer` turns the recording off
-* [ ] RZX replay and recording
+* [x] RZX replay and recording. The container is the one libspectrum and Fuse
+      read: a `RZX!` header, a creator block, a snapshot block and an input
+      block whose frames hold the byte every port read returned. A session sits
+      on `Machine::ioRead` through an `IoReadHook`, so recording captures what
+      the CPU saw rather than what the keyboard held, and a replay substitutes
+      the recorded bytes even when the host would answer differently.
+      `File > Record RZX` starts one at the current frame boundary and snapshots
+      the machine, `File > Stop recording...` names the file, `File > Play RZX...`
+      rebuilds the machine from that snapshot and runs the input stream. The
+      snapshot uses our own `RBNS` state format, so other emulators cannot open
+      a RainbowNext RZX, and blocks are written uncompressed to keep zlib out of
+      the dependencies
 * [x] CRT/scanline shaders on an SDL_GPU backend. The frontend moved from
       `SDL_Renderer` to `SDL_GPU` (Metal on macOS, Vulkan on Linux) and draws the
       320x256 frame as one triangle through `crt.vert`/`crt.frag`, which adds a

@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.24)
-project(RainbowNext VERSION 0.1.2 LANGUAGES CXX)
+project(RainbowNext VERSION 0.1.3 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -82,6 +82,8 @@ add_library(rainbow_core STATIC
   src/core/disassembler.cpp
   src/core/machine.cpp
   src/core/rewind.cpp
+  src/core/rzx.cpp
+  src/core/rzx_session.cpp
   src/core/ula.cpp
   src/core/keyboard.cpp
   src/core/ay.cpp
@@ -178,6 +180,7 @@ if(RAINBOW_BUILD_TESTS)
     tests/test_disassembler.cpp
     tests/test_debugger.cpp
     tests/test_state.cpp
+    tests/test_rzx.cpp
     tests/test_palette.cpp
     tests/test_sprites.cpp
     tests/test_sprites_relative.cpp

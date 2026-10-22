@@ -60,6 +60,16 @@ const char* machineName(MachineType type);
 u32 tstatesPerLine(const Timings& t);
 u32 tstatesPerFrame(const Timings& t);
 
+// Port reads can be intercepted. RZX replay works by handing the CPU the bytes
+// the recording stored instead of the ones the machine would produce, so the
+// hook sits at the outside of ioRead, past the expansion bus: every value a
+// program can see passes through it.
+class IoReadHook {
+public:
+  virtual ~IoReadHook() = default;
+  virtual u8 ioRead(u16 port, u8 value) = 0;
+};
+
 // The complete machine: CPU, ULA, memory, paging and video. The class owns the
 // clock, so every subsystem observes the same T-state counter.
 class Machine : public Bus {
@@ -134,6 +144,9 @@ public:
   // written for before asking it to load. Says nothing about the rest of the
   // file: loadState still checks everything.
   static bool peekStateType(const std::vector<u8>& in, MachineType& type);
+  // Applies an already-decoded snapshot. An RZX file carries its snapshot
+  // inside itself, so it cannot go through loadSnapshot()'s file dispatch.
+  void applySnapshotData(const formats::Snapshot& snapshot) { applySnapshot(snapshot); }
 
   // Bus interface
   u8 memRead(u16 addr, u32 t) override;
@@ -159,6 +172,11 @@ public:
   int frameWidth() const { return FrameWidth; }
   int frameHeight() const { return FrameHeight; }
   u64 frames() const { return frames_; }
+  // Instructions executed since the machine was built. An RZX frame records how
+  // many it ran, and only a frame boundary reads the counter.
+  u64 instructions() const { return instructions_; }
+  // A recording needs to see, and a replay needs to replace, every port read.
+  void setIoReadHook(IoReadHook* hook) { ioReadHook_ = hook; }
   u8 border() const { return ula_.border(); }
   u8 ramBank() const { return ramBank_; }
   u8 screenBank() const { return screenBank_; }
@@ -373,6 +391,8 @@ private:
   u64 cpuTstates_ = 0;
   u32 turboAccum_ = 0;
   u64 frames_ = 0;
+  u64 instructions_ = 0;
+  IoReadHook* ioReadHook_ = nullptr;
   bool irqLine_ = false;
   u32 irqEnd_ = 0;
 
