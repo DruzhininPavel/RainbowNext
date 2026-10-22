@@ -14,6 +14,8 @@ endif()
 option(RAINBOW_BUILD_TESTS "Build unit tests" ON)
 option(RAINBOW_FETCH_IMGUI "Fetch Dear ImGui" ON)
 option(RAINBOW_FETCH_SDL3 "Build SDL3 from source when no system SDL3 is found" ON)
+option(RAINBOW_STATIC_SDL3
+  "Ignore any system SDL3 and build a static copy from source, so the binary needs no SDL library at runtime" OFF)
 
 include(FetchContent)
 
@@ -22,7 +24,9 @@ include(FetchContent)
 # ---------------------------------------------------------------------------
 find_package(Threads REQUIRED)
 
-find_package(SDL3 3.2 QUIET)
+if(NOT RAINBOW_STATIC_SDL3)
+  find_package(SDL3 3.2 QUIET)
+endif()
 if(NOT SDL3_FOUND)
   if(RAINBOW_FETCH_SDL3)
     message(STATUS "System SDL3 not found - building SDL3 from source")
