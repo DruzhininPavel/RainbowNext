@@ -87,6 +87,11 @@ public:
 
   u8 lastError() const { return lastError_; }
   int openHandles() const;
+  // How many calls have been answered, and the last hook code among them. A
+  // program that loads nothing looks the same as one that was refused, so this
+  // is the cheapest way to tell "it never asked" from "it asked and failed".
+  u64 callCount() const { return callCount_; }
+  u8 lastCall() const { return lastCall_; }
 
 private:
   struct Entry {
@@ -122,6 +127,8 @@ private:
   std::string root_;
   std::array<Entry, MaxHandles> handles_{};
   u8 lastError_ = 0;
+  u8 lastCall_ = 0;
+  u64 callCount_ = 0;
   bool enabled_ = false;
 };
 

@@ -178,6 +178,8 @@ bool EsxDos::trap(Bus& bus, Z80::Registers& regs) {
 }
 
 void EsxDos::call(Bus& bus, Z80::Registers& regs, u8 code) {
+  ++callCount_;
+  lastCall_ = code;
   switch (code) {
     case MDosVersion: dosVersion(regs); break;
     case MGetSetDrv: getSetDrv(regs); break;
