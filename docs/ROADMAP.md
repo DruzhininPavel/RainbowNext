@@ -182,7 +182,13 @@ a multicolour demo renders correctly; `z80test` passes.
       frames while the machine runs. `F10` pauses and steps back through it,
       `View > Rewind buffer` turns the recording off
 * [ ] RZX replay and recording
-* [ ] CRT/scanline shaders (SDL_GPU backend)
+* [x] CRT/scanline shaders on an SDL_GPU backend. The frontend moved from
+      `SDL_Renderer` to `SDL_GPU` (Metal on macOS, Vulkan on Linux) and draws the
+      320x256 frame as one triangle through `crt.vert`/`crt.frag`, which adds a
+      dark seam between source lines and an aperture grille. Both are strengths
+      in `View > CRT strength`, saved in `rainbow.cfg`; the shaders are compiled
+      to SPIR-V and MSL by `src/frontend/shaders/build.sh` and checked in, so a
+      build needs no shader toolchain
 * [x] CI releases: a tagged build of macOS and Linux x86_64, packaged as a
       self-contained zip (SDL3 linked in, `peripherals/` and `roms/` beside the
       executable) and attached to a GitHub release. `v0.1.0` is the first
@@ -276,5 +282,6 @@ These are deliberate simplifications, tracked here so they are not forgotten:
   require relicensing, which 0BSD permits but the GPL does not allow in the
   other direction.
 * **NextZXOS distribution.** Likely user-supplied SD image only, as JNEXT does.
-* **Renderer.** SDL_Renderer is enough for M0-M2; SDL_GPU is the target for
-  shaders in M3.
+* **Renderer.** SDL_GPU (Metal/Vulkan) since M3, which is what the CRT filter
+  needs. It costs a Vulkan loader on Linux, which SteamOS and every current
+  distribution already ship.

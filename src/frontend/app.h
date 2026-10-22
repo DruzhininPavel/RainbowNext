@@ -12,6 +12,7 @@
 #include "frontend/config.h"
 #include "frontend/debugger.h"
 #include "frontend/input.h"
+#include "frontend/screen.h"
 #include "frontend/ui.h"
 
 namespace rainbow::frontend {
@@ -48,7 +49,6 @@ private:
   void updateLayout();
   void computeToolbarMetrics();
   void toggleFullscreen();
-  void updateTexture();
   void pushAudio();
 
   void setMachine(MachineType type);
@@ -102,9 +102,9 @@ private:
   static void SDLCALL onFileDialog(void* userdata, const char* const* filelist, int filter);
 
   SDL_Window* window_ = nullptr;
-  SDL_Renderer* renderer_ = nullptr;
-  SDL_Texture* texture_ = nullptr;
+  ScreenRenderer screen_;
   bool imguiReady_ = false;
+  CrtSettings crt_;
 
   std::unique_ptr<Machine> machine_;
   Audio audio_;

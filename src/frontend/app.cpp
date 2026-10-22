@@ -9,7 +9,7 @@
 
 #include <imgui.h>
 #include <imgui_impl_sdl3.h>
-#include <imgui_impl_sdlrenderer3.h>
+#include <imgui_impl_sdlgpu3.h>
 
 #include "frontend/debugger.h"
 #include "frontend/ui.h"
@@ -144,20 +144,10 @@ bool App::init(const Options& options) {
     return false;
   }
 
-  renderer_ = SDL_CreateRenderer(window_, nullptr);
-  if (renderer_ == nullptr) {
-    std::fprintf(stderr, "SDL_CreateRenderer failed: %s\n", SDL_GetError());
+  if (!screen_.init(window_, Machine::FrameWidth, Machine::FrameHeight)) {
+    std::fprintf(stderr, "GPU initialisation failed\n");
     return false;
   }
-  SDL_SetRenderVSync(renderer_, 0);
-
-  texture_ = SDL_CreateTexture(renderer_, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STREAMING,
-                               Machine::FrameWidth, Machine::FrameHeight);
-  if (texture_ == nullptr) {
-    std::fprintf(stderr, "SDL_CreateTexture failed: %s\n", SDL_GetError());
-    return false;
-  }
-  SDL_SetTextureScaleMode(texture_, SDL_SCALEMODE_NEAREST);
 
   machine_ = std::make_unique<Machine>(MachineType::Spectrum48);
   audio_.init(44100);
@@ -201,8 +191,18 @@ bool App::init(const Options& options) {
   ImGui::StyleColorsDark();
   ui::applyTheme(ImGui::GetStyle());
   fonts_ = ui::loadFonts();
-  ImGui_ImplSDL3_InitForSDLRenderer(window_, renderer_);
-  ImGui_ImplSDLRenderer3_Init(renderer_);
+  if (!ImGui_ImplSDL3_InitForSDLGPU(window_)) {
+    std::fprintf(stderr, "ImGui SDL3 backend failed: %s\n", SDL_GetError());
+    return false;
+  }
+  ImGui_ImplSDLGPU3_InitInfo gpuInfo{};
+  gpuInfo.Device = screen_.device();
+  gpuInfo.ColorTargetFormat = screen_.swapchainFormat();
+  gpuInfo.MSAASamples = SDL_GPU_SAMPLECOUNT_1;
+  if (!ImGui_ImplSDLGPU3_Init(&gpuInfo)) {
+    std::fprintf(stderr, "ImGui SDL_GPU backend failed: %s\n", SDL_GetError());
+    return false;
+  }
   imguiReady_ = true;
   return true;
 }
@@ -213,19 +213,12 @@ void App::shutdown() {
   audio_.shutdown();
 
   if (imguiReady_) {
-    ImGui_ImplSDLRenderer3_Shutdown();
+    ImGui_ImplSDLGPU3_Shutdown();
     ImGui_ImplSDL3_Shutdown();
     ImGui::DestroyContext();
     imguiReady_ = false;
   }
-  if (texture_ != nullptr) {
-    SDL_DestroyTexture(texture_);
-    texture_ = nullptr;
-  }
-  if (renderer_ != nullptr) {
-    SDL_DestroyRenderer(renderer_);
-    renderer_ = nullptr;
-  }
+  screen_.shutdown();
   if (window_ != nullptr) {
     SDL_DestroyWindow(window_);
     window_ = nullptr;
@@ -289,10 +282,9 @@ void App::run() {
     }
 
     pushAudio();
-    updateTexture();
 
     ImGui_ImplSDL3_NewFrame();
-    ImGui_ImplSDLRenderer3_NewFrame();
+    ImGui_ImplSDLGPU3_NewFrame();
     ImGui::NewFrame();
     feedMouse();
 
@@ -316,9 +308,6 @@ void App::run() {
 
     ImGui::Render();
     drawScreen();
-    ImGui_ImplSDLRenderer3_RenderDrawData(ImGui::GetDrawData(), renderer_);
-
-    SDL_RenderPresent(renderer_);
 
     next += baseFrameNs / u64(speedMultiplier_);
     const u64 nowNs = SDL_GetTicksNS();
@@ -764,6 +753,9 @@ void App::loadConfig() {
     if (const char* base = SDL_GetBasePath()) pluginDir_ = std::string(base) + "peripherals";
   }
   config_.pluginDir = pluginDir_;
+  crt_.enabled = config_.crtEnabled;
+  crt_.scanlines = config_.crtScanlines;
+  crt_.mask = config_.crtMask;
 }
 
 void App::saveConfig() const {
@@ -773,6 +765,9 @@ void App::saveConfig() const {
   for (const auto& slot : machine_->expansion().slots()) {
     if (slot.enabled) copy.enabledPeripherals.push_back(slot.module->info().id);
   }
+  copy.crtEnabled = crt_.enabled;
+  copy.crtScanlines = crt_.scanlines;
+  copy.crtMask = crt_.mask;
   copy.save(configPath_);
 }
 
@@ -913,10 +908,6 @@ void App::pushAudio() {
   machine_->clearAudio();
 }
 
-void App::updateTexture() {
-  SDL_UpdateTexture(texture_, nullptr, machine_->framebuffer(), Machine::FrameWidth * int(sizeof(u32)));
-}
-
 void App::computeToolbarMetrics() {
   ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(ui::kToolbarPadX, ui::kToolbarPadY));
   toolbarRowHeight_ = ImGui::GetFrameHeight();
@@ -1051,6 +1042,17 @@ void App::drawToolbar() {
       clearRewind();
     }
     ImGui::Separator();
+    if (ImGui::MenuItem("CRT filter", nullptr, &crt_.enabled)) saveConfig();
+    if (ImGui::BeginMenu("CRT strength", crt_.enabled)) {
+      ImGui::SetNextItemWidth(160.0f);
+      ImGui::SliderFloat("Scanlines", &crt_.scanlines, 0.0f, 1.0f, "%.2f");
+      if (ImGui::IsItemDeactivatedAfterEdit()) saveConfig();
+      ImGui::SetNextItemWidth(160.0f);
+      ImGui::SliderFloat("Mask", &crt_.mask, 0.0f, 1.0f, "%.2f");
+      if (ImGui::IsItemDeactivatedAfterEdit()) saveConfig();
+      ImGui::EndMenu();
+    }
+    ImGui::Separator();
     ImGui::MenuItem("Toolbar", "Tab", &toolbarPinned_);
     if (ImGui::MenuItem("Fullscreen", "F11", fullscreen_)) toggleFullscreen();
     ImGui::Separator();
@@ -1144,16 +1146,17 @@ void App::updateLayout() {
 }
 
 void App::drawScreen() {
-  // Everything we hand to SDL stays in logical points; the render scale turns
-  // that into the physical backing store, so Retina and 1080p TVs both get a
-  // pixel-exact picture from the same layout maths.
-  SDL_SetRenderScale(renderer_, framebufferScale_, framebufferScale_);
-  SDL_SetRenderDrawColor(renderer_, 6, 6, 9, 255);
-  SDL_RenderClear(renderer_);
+  // The layout is worked out in logical points; the shader multiplies by the
+  // framebuffer scale, so Retina and 1080p TVs both get a pixel-exact picture
+  // from the same maths.
+  SDL_GPUCommandBuffer* command = screen_.beginFrame(
+      machine_->framebuffer(), Machine::FrameWidth * int(sizeof(u32)));
+  if (command == nullptr) return; // window minimised
 
-  const SDL_FRect destination = {screenMin_.x, screenMin_.y, screenMax_.x - screenMin_.x,
-                                 screenMax_.y - screenMin_.y};
-  SDL_RenderTexture(renderer_, texture_, nullptr, &destination);
+  ImDrawData* drawData = ImGui::GetDrawData();
+  ImGui_ImplSDLGPU3_PrepareDrawData(drawData, command);
+  screen_.endFrame(command, drawData, screenMin_.x, screenMin_.y, screenMax_.x, screenMax_.y,
+                   framebufferScale_, crt_);
 }
 
 void App::drawStatusOverlay() {

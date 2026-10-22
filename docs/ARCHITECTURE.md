@@ -515,8 +515,29 @@ whatever the device wants.
 ## Frame buffer
 
 `Machine::framebuffer()` is `320x256` ARGB8888: a 32-pixel border around a
-`256x192` screen. The frontend uploads it as an SDL streaming texture, so a
-shader-based CRT filter can be dropped in later without touching the core.
+`256x192` screen. The core never talks to the GPU; it only hands the frontend a
+pointer to that array.
+
+## Screen renderer
+
+`frontend/screen.cpp` owns the SDL_GPU device and everything drawn with it.
+Every frame it uploads the framebuffer into a `B8G8R8A8_UNORM` texture through a
+transfer buffer and draws a single triangle over the letterboxed destination
+rectangle. The vertex shader positions that triangle from a uniform block
+(`dest`, `surface`, `params`), so there is no vertex buffer and no per-frame
+allocation; the fragment shader samples the picture with a nearest-neighbour
+sampler and, when the CRT pass is on, multiplies in a seam at the edge of every
+source line and a three-pixel aperture grille.
+
+The shaders live in `src/frontend/shaders/` as GLSL and are compiled by
+`build.sh` into `crt_shaders.h`, which holds both SPIR-V and MSL. SDL_GPU picks
+whichever its driver understands, so the same source serves Metal and Vulkan,
+and a normal build never needs `glslang` or `spirv-cross`.
+
+ImGui renders into the same pass through `imgui_impl_sdlgpu3`, which means the
+overlay is composited by the GPU instead of a second renderer. Note that
+SDL_GPU's clip space has +Y up while the layout maths works in viewport pixels
+with +Y down, so `crt.vert` flips the vertical axis itself.
 
 ## Adding a machine
 

@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.24)
-project(RainbowNext VERSION 0.1.1 LANGUAGES CXX)
+project(RainbowNext VERSION 0.1.2 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -64,7 +64,7 @@ if(RAINBOW_FETCH_IMGUI)
     ${imgui_SOURCE_DIR}/imgui_tables.cpp
     ${imgui_SOURCE_DIR}/imgui_widgets.cpp
     ${imgui_SOURCE_DIR}/backends/imgui_impl_sdl3.cpp
-    ${imgui_SOURCE_DIR}/backends/imgui_impl_sdlrenderer3.cpp
+    ${imgui_SOURCE_DIR}/backends/imgui_impl_sdlgpu3.cpp
   )
   target_include_directories(imgui PUBLIC
     ${imgui_SOURCE_DIR}
@@ -152,6 +152,7 @@ add_executable(rainbow
   src/frontend/input.cpp
   src/frontend/debugger.cpp
   src/frontend/ui.cpp
+  src/frontend/screen.cpp
 )
 target_link_libraries(rainbow PRIVATE rainbow_core rainbow_plugin SDL3::SDL3 imgui Threads::Threads)
 # The example plugin is built into build/peripherals, where the emulator looks.
