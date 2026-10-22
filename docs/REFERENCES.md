@@ -11,6 +11,7 @@ port semantics, memory layouts) was reimplemented.
 |---|---|---|
 | [Fuse](https://github.com/FuseEmulator/fuse-emulator-svn) — `libspectrum/timings.c`, `fuse/spectrum.c`, `fuse/ula.c`, `fuse/display.h` | GPL-2.0 | `base_timings` table for 48K/128K/+2A/+3/Pentagon; contention pattern `{5,4,3,2,1,0,0,6}`; floating-bus column rules; port 0xFE read/write semantics and `ula_default_value` |
 | [ZEsarUX](https://github.com/chernandezba/zesarux) | GPL-3.0 | Confirmation of contention ranges and border timing edge cases |
+| Fuse `fuse/peripherals/scld.c`, `scld.h` | GPL-2.0 | Timex SCLD: the `scrnmode`/`hirescol` bit split, `ALTDFILE_OFFSET`, the `hires_convert_dec` colour pairs (ink is the complement of paper, both bright) and the `x % 16 > 7` rule that picks the second display file |
 | [raxoft/z80test](https://github.com/raxoft/z80test) | MIT | Flag-behaviour expectations; planned as an external conformance suite |
 | [raxoft/zexall](https://github.com/raxoft/zexall) | — | Planned full Z80 conformance run |
 
@@ -34,6 +35,10 @@ port semantics, memory layouts) was reimplemented.
 | [NEX file format](https://wiki.specnext.dev/NEX_file_format) | — | Header layout, loading-screen bits, bank order, the palette block |
 | [tbblue nexload.asm](https://gitlab.com/thesmog358/tbblue/-/blob/master/src/asm/nexload/nexload.asm) | — | Exact loader behaviour: register state left behind, bank order, entry bank, expansion-bus disable |
 | [MiSTer ZXNext](https://github.com/MiSTer-devel/ZXNext_MISTer) | GPL-3.0 | FPGA core as an accuracy oracle for video pipeline ordering |
+| [Timex / Video Modes](https://wiki.specnext.dev/Video_Modes) | — | SCLD mode numbers 0-7, the `0xBF3F`/`0xFF` port, the hi-res colour bits 5:3 |
+| [Sprite and Layers System Register](https://wiki.specnext.dev/Sprite_and_Layers_System_Register) | — | `0x15` bits 4:2 priority order and the blending modes 110/111 |
+| [ULANext Attribute Byte Format Register](https://wiki.specnext.dev/ULANext_Attribute_Byte_Format_Register) | — | The `0x42` ink mask and the `0x4A` fallback colour for full-ink mode |
+| [ULAplus](https://sinclair.wiki.zxnet.co.uk/wiki/ULAplus) | — | The `0xBF3B`/`0xFF3B` register pair, the `GGGRRRBB` byte, the `ink = (FLASH*2+BRIGHT)*16 + INK` and `paper = … + 8` layout, border from entry 8 |
 | [DivMMC](https://wiki.specnext.dev/DIVMMC) | — | Port map (`0xE3` control, `0xDF` SPI, `0xE7`/`0xEB` map/unmap), the automap hook addresses, `conmem`/`mapram` |
 | [SD Specifications, Part 1: Physical Layer](https://www.sdcard.org/downloads/pls/) | — | SPI command set, R1/R7 responses, the `CSD`/`CID` layouts, `ACMD41` and the HCS bit |
 

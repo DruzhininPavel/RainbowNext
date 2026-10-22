@@ -90,6 +90,19 @@ void NextPalette::write8(u8 value) {
   if (autoIncrement()) ++index_;
 }
 
+void NextPalette::write8(int palette, u8 index, u8 value) {
+  const u16 b2 = u16(value & 0x03);
+  store(palette, index,
+        u16(((value & 0xE0u) << 1) | (((value & 0x1Cu) >> 2) << 3) |
+            ((b2 << 1) | (b2 != 0 ? 1 : 0))));
+}
+
+u8 NextPalette::read8(int palette, u8 index) const {
+  const u16 rgb = colours_[size_t(palette & 7)][index];
+  return u8((((rgb >> 6) & 0x07) << 5) | (((rgb >> 3) & 0x07) << 2) |
+            ((rgb & 0x07) >> 1));
+}
+
 void NextPalette::write9(u8 value) {
   if (highBytePending_) {
     pendingHigh_ = value;

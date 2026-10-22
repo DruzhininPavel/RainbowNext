@@ -94,8 +94,10 @@ a multicolour demo renders correctly; `z80test` passes.
       rotate and scale. The status port `0x303B` reports a collision between
       two sprites (bit 0) and the per-scanline sprite budget running out
       (bit 1), and clears both as it is read.
-* [ ] The second Layer 2 palette and its priority bit, ULA+ palettes, Radastan
-      mode
+* [x] The second Layer 2 palette, selectable for drawing by `0x43` bits 6:4 and
+      for display by `0x43` bit 2, and bit 7 of a Layer 2 colour, which the
+      blending modes use to lift the pixel above the sprites
+* [ ] Radastan mode
 * [x] The Copper of registers `0x60`-`0x63`: 2K of program memory addressed by
       `0x61` (low byte) and bits 2:0 of `0x62` (high three bits), the `WAIT`
       and `MOVE` instructions, `0x0000` as a no-op and `0xFFFF` as the halt,
@@ -144,9 +146,25 @@ a multicolour demo renders correctly; `z80test` passes.
       with `CMD18`/`CMD25`/`CMD12`/`CMD23` for the multi-block reads and writes
       NextZXOS issues. The frontend owns the image, so it survives a machine
       switch, and `--sd FILE` or a dropped `.img` inserts it
-* [ ] Video pipeline: Timex modes, ULA+ palettes, blending modes 6 and 7 of the
-      `0x15` priority byte (the ULA → tilemap → Layer 2 → sprite compositor and
-      the palette path are in place)
+* [x] Video pipeline: the ULA → tilemap → Layer 2 → sprite compositor and the
+      palette path are in place, plus:
+  * Timex SCLD modes on port `0xBF3F`/`0xFF`: standard, `ALTDFILE` (the second
+    display file at `+0x2000`), `EXTCOLOUR` (one attribute per character cell
+    from the second file) and `HIRES`, whose 512 pixels per line are averaged
+    into the 256-pixel framebuffer. Bits 5:3 pick the hi-res colour pair, ink
+    being its complement, and the border takes the paper colour
+  * ULA+ on ports `0xBF3B`/`0xFF3B`: 64 colours in the low entries of the ULA
+    palette, `ink = (FLASH*2 + BRIGHT)*16 + INK` and
+    `paper = (FLASH*2 + BRIGHT)*16 + PAPER + 8`, the border taken from entry 8,
+    enabled by its own mode register or by NextReg `0x68` bit 3
+  * ULANext (NextReg `0x43` bit 0): the attribute becomes a pair of palette
+    indices, `ink = attr & 0x42` and `paper = 128 + (attr & ~0x42)`, with the
+    mask of `0x42` at `0xFF` turning the whole byte into one ink index and
+    `0x4A` supplying the paper and border
+  * Blending modes 110 and 111 of `0x15` bits 4:2: Layer 2 is mixed into the
+    ULA instead of ordered against it, by addition (110) or by addition minus
+    five per channel (111), with `0x68` bits 6:5 choosing which half of the ULA
+    layer is the blend colour and which is drawn on top
 
 ## M3 — Tooling and shipping
 
@@ -220,6 +238,15 @@ These are deliberate simplifications, tracked here so they are not forgotten:
     `loadingBar`, `loadingDelay` and `startDelay` fields are parsed and ignored,
     so the program starts at once instead of after an animated bar. The
     expansion-bus disable that V1.3 asks for is likewise parsed but not applied.
+19. The framebuffer stays 256 pixels wide, so the 512-pixel Timex hi-res line
+    is sampled 2:1 by averaging each pair of hi-res pixels. A dot that is one
+    hi-res pixel wide therefore shows as half brightness instead of a full one.
+20. Timex modes 3, 4, 5 and 7 have no separate implementation: they reuse the
+    second display file like `ALTDFILE` rather than reproducing the `HIRESATTR`
+    and `HIRESDOUBLECOL` combinations Fuse models.
+21. In blending modes 110 and 111 the half of the ULA layer that is not blended
+    is always drawn above the sprites, which is what the modes intend for the
+    ULA but not necessarily for the tilemap sharing that layer.
 
 ## Open decisions
 

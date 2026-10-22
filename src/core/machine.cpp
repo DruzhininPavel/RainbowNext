@@ -499,6 +499,12 @@ u8 Machine::ioReadBase(u16 port, u32) {
     // where a block is one byte longer than the programmed length.
     if ((port & 0x00FF) == 0x6B) return dma_.read(false);
     if ((port & 0x00FF) == 0x0B) return dma_.read(true);
+    // ULA+ data port; the register port 0xBF3B is write only.
+    if ((port & 0xC0FF) == 0xC03B) {
+      const u8 reg = ula_.ulaPlusRegister();
+      if ((reg & 0xC0) == 0x00) return palette_.read8(ulaPalette(), u8(reg & 0x3F));
+      return u8(ula_.ulaPlusMode() & 0x01);
+    }
   }
 
   if ((port & 0x0001) == 0) {
@@ -553,6 +559,19 @@ void Machine::ioWriteBase(u16 port, u8 value, u32) {
       dma_.write(value, true);
       return;
     }
+    if ((port & 0xC0FF) == 0x803B) { // ULA+ register select
+      ula_.writeUlaPlusRegister(value);
+      return;
+    }
+    if ((port & 0xC0FF) == 0xC03B) { // ULA+ data
+      const u8 reg = ula_.ulaPlusRegister();
+      if ((reg & 0xC0) == 0x00) {
+        palette_.write8(ulaPalette(), u8(reg & 0x3F), value);
+      } else if ((reg & 0xC0) == 0x40) {
+        ula_.setUlaPlusMode(value);
+      }
+      return;
+    }
   }
 
   if ((port & 0x0001) == 0) {
@@ -587,6 +606,13 @@ void Machine::ioWriteBase(u16 port, u8 value, u32) {
       sound_.write(value);
       return;
     }
+  }
+
+  // Timex SCLD register. The port is decoded on the low byte alone, so 0xBFFF
+  // and 0xFFFF reach it too, but the AY has already claimed 0xFFFF above.
+  if (isNext() && (port & 0x00FF) == 0xFF) {
+    ula_.writeTimex(value);
+    return;
   }
 
   if (isNext() && SpecDrum::handles(port)) {
@@ -1052,12 +1078,40 @@ namespace {
 constexpr int LayerSprites = 0;
 constexpr int LayerLayer2 = 1;
 constexpr int LayerUla = 2;
+
+// The framebuffer holds 8-bit channels but the palette works in three bits per
+// channel, so blending goes back to the palette's scale and clamps there. The
+// rounding keeps a level 1 colour from collapsing onto black.
+constexpr int channelOf(u32 argb, int shift) {
+  return (int((argb >> shift) & 0xFF) * 7 + 128) / 255;
+}
+
+u32 averageColours(u32 first, u32 second) {
+  const u32 r = (((first >> 16) & 0xFF) + ((second >> 16) & 0xFF) + 1) / 2;
+  const u32 g = (((first >> 8) & 0xFF) + ((second >> 8) & 0xFF) + 1) / 2;
+  const u32 b = ((first & 0xFF) + (second & 0xFF) + 1) / 2;
+  return 0xFF000000u | (r << 16) | (g << 8) | b;
+}
+
+// Priority modes 110 and 111 mix Layer 2 into the ULA rather than ordering the
+// two: 110 adds the colours, 111 subtracts five from each channel. A layer that
+// is transparent where the other is not is drawn on its own, unmixed.
+u32 blendColours(u32 base, u32 layer, bool dark) {
+  if (base == Machine::Transparent) return layer;
+  if (layer == Machine::Transparent) return base;
+  const int bias = dark ? 5 : 0;
+  const auto channel = [&](int shift) {
+    const int sum = channelOf(base, shift) + channelOf(layer, shift) - bias;
+    return u16(sum < 0 ? 0 : (sum > 7 ? 7 : sum));
+  };
+  return NextPalette::toArgb(u16((channel(16) << 6) | (channel(8) << 3) | channel(0)));
+}
 } // namespace
 
 std::array<int, 3> Machine::layerOrder() const {
   // 0x15 bits 4:2 list the layers from top to bottom. The two blending modes
-  // (110 and 111) mix Layer 2 into the ULA instead of ordering them, so they
-  // are treated as S L U for now.
+  // (110 and 111) mix Layer 2 into the ULA instead of ordering them; sprites
+  // stay on top and register 0x68 decides which half of the ULA is blended.
   static constexpr std::array<std::array<int, 3>, 6> Table = {{
       {{LayerSprites, LayerLayer2, LayerUla}}, // S L U
       {{LayerLayer2, LayerSprites, LayerUla}}, // L S U
@@ -1104,12 +1158,19 @@ void Machine::renderFrame() {
 
     const std::array<int, 3> order = layerOrder();
     const int spriteDepth = layerDepth(order, LayerSprites);
+    // 0x15 bits 4:2 modes 110 and 111 blend Layer 2 with the ULA instead of
+    // ordering them, and 0x68 bits 6:5 pick which half of the ULA is the blend
+    // colour: 00 the ULA alone, 10 the ULA and tilemap together, 11 the tilemap
+    // alone and 01 no blending at all.
+    const int priority = isNext() ? (next_.read(0x15) >> 2) & 0x07 : 0;
+    const bool blending = priority >= 6;
+    const int blendMode = (next_.read(0x68) >> 5) & 0x03;
     // 0x68 bit 7 blanks the ULA without touching the tilemap it shares a layer
     // with, so it has to be handled per pixel rather than by skipping the row.
     const bool ulaOn = !isNext() || (next_.read(0x68) & 0x80) == 0;
     const TilemapView tilemap = tilemapView();
     const Layer2View layer2 = layer2View();
-    const u32 border = paperColour(borderLines_[size_t(line)] & 0x07);
+    const u32 border = ulaBorderColour(borderLines_[size_t(line)] & 0x07);
 
     const int y = r - BorderHeight;
     const bool screenRow = y >= 0 && y < ScreenHeight;
@@ -1143,18 +1204,47 @@ void Machine::renderFrame() {
         }
       }
 
-      const u32 l2Rgb = inWindow ? layer2Pixel(layer2, ux, y) : Transparent;
+      bool l2Priority = false;
+      const u32 l2Rgb = inWindow ? layer2Pixel(layer2, ux, y, l2Priority) : Transparent;
 
       u32 rgb = border;
       u8 occluder = 0;
-      for (int depth = 0; depth < 3; ++depth) {
-        const int layer = order[size_t(depth)];
-        if (layer == LayerSprites) continue; // sprites are a second pass
-        const u32 colour = layer == LayerLayer2 ? l2Rgb : uRgb;
-        if (colour == Transparent) continue;
-        if (depth < spriteDepth) occluder = 1;
-        rgb = colour;
-        break;
+      bool blended = false;
+      if (blending && blendMode != 0x01) {
+        u32 base = uRgb;
+        u32 front = Transparent;
+        if (blendMode == 0x00) {
+          base = ulaRgb;   // the ULA is the blend colour, the tilemap the front
+          front = tileRgb;
+        } else if (blendMode == 0x03) {
+          base = tileRgb;  // and the other way round
+          front = ulaRgb;
+        }
+        // Whichever half of the ULA layer is not blended keeps its own place,
+        // which in these modes is above the sprites.
+        if (front != Transparent) {
+          rgb = front;
+          occluder = 1;
+        } else {
+          const u32 mixed = blendColours(base, l2Rgb, priority == 7);
+          if (mixed != Transparent) rgb = mixed;
+          // Bit 7 of the Layer 2 colour survives the blend and lifts the pixel
+          // above the sprites, which are otherwise on top in these modes.
+          if (l2Priority && l2Rgb != Transparent) occluder = 1;
+        }
+        blended = true;
+      }
+
+      if (!blended) {
+        for (int depth = 0; depth < 3; ++depth) {
+          const int layer = order[size_t(depth)];
+          if (layer == LayerSprites) continue; // sprites are a second pass
+          const u32 colour = layer == LayerLayer2 ? l2Rgb : uRgb;
+          if (colour == Transparent) continue;
+          if (depth < spriteDepth) occluder = 1;
+          rgb = colour;
+          break;
+        }
       }
       row[x] = rgb;
       occluders[x] = occluder;
@@ -1211,7 +1301,9 @@ Machine::Layer2View Machine::layer2View() const {
   return view;
 }
 
-u32 Machine::layer2Pixel(const Layer2View& view, int x, int y) const {
+u32 Machine::layer2Pixel(const Layer2View& view, int x, int y,
+                         bool& priority) const {
+  priority = false;
   if (!view.active) return Transparent;
 
   const int stride = view.width * (view.fourBit ? 1 : 2) / 2;
@@ -1232,6 +1324,7 @@ u32 Machine::layer2Pixel(const Layer2View& view, int x, int y) const {
 
   const int entry = view.fourBit ? (((next_.read(0x70) & 0x0F) << 4) | pixel)
                                  : pixel;
+  priority = (entry & 0x80) != 0;
   return palette_.colour(view.palette, u8(entry & 0xFF));
 }
 
@@ -1350,25 +1443,123 @@ Machine::TilemapView Machine::tilemapView() const {
 }
 
 void Machine::renderUlaRow(int y, std::array<u32, ScreenWidth>& row) const {
+  // Timex modes 1 and 2 move the attributes, and mode 6 is a different display
+  // entirely. The modes without a documented behaviour of their own (3, 4, 5,
+  // 7) reuse the second file like mode 1 does, which is what the Timex hardware
+  // does with the bits it does not decode.
+  const int mode = isNext() ? ula_.screenMode() : 0;
+  if (mode == 6) {
+    renderUlaHiresRow(y, row);
+    return;
+  }
+
   const size_t bankBase = size_t(screenBank_) * BankSize;
-  const size_t pixelBase = bankBase + ((size_t(y) & 0xC0) << 5) +
-                           ((size_t(y) & 0x07) << 8) + ((size_t(y) & 0x38) << 2);
-  const size_t attrBase = bankBase + 0x1800 + size_t(y >> 3) * 32;
+  const size_t altOffset = (mode & 0x01) != 0 ? 0x2000 : 0;
+  const size_t pixelOffset = ((size_t(y) & 0xC0) << 5) + ((size_t(y) & 0x07) << 8) +
+                             ((size_t(y) & 0x38) << 2);
+  const size_t pixelBase = bankBase + altOffset + pixelOffset;
+  // Hi-colour takes one attribute per character cell from the second file at
+  // the same interleaved offset as the pixels.
+  const size_t attrBase = mode == 2
+                              ? bankBase + 0x2000 + pixelOffset
+                              : bankBase + altOffset + 0x1800 + size_t(y >> 3) * 32;
   const bool flashOn = ((frames_ >> 4) & 1) != 0;
 
   for (int col = 0; col < 32; ++col) {
     const u8 pixels = ram_[pixelBase + size_t(col)];
     const u8 attr = ram_[attrBase + size_t(col)];
-    const u8 bright = u8(attr & 0x40) ? 8 : 0;
-    const u8 ink = u8((attr & 0x07) | bright);
-    const u8 paper = u8(((attr >> 3) & 0x07) | bright);
-    const bool flash = (attr & 0x80) != 0 && flashOn;
-    const u32 inkRgb = ulaColour(flash ? paper : ink);
-    const u32 paperRgb = paperColour(flash ? ink : paper);
+    u32 inkRgb = 0;
+    u32 paperRgb = 0;
+    ulaCellColours(attr, flashOn, inkRgb, paperRgb);
     for (int b = 0; b < 8; ++b) {
       row[size_t(col * 8 + b)] = (pixels & (0x80u >> b)) ? inkRgb : paperRgb;
     }
   }
+}
+
+void Machine::renderUlaHiresRow(int y, std::array<u32, ScreenWidth>& row) const {
+  const size_t bankBase = size_t(screenBank_) * BankSize;
+  const size_t pixelBase = bankBase + ((size_t(y) & 0xC0) << 5) +
+                           ((size_t(y) & 0x07) << 8) + ((size_t(y) & 0x38) << 2);
+  // The second file supplies the odd hi-res columns, and the two colours come
+  // from the SCLD register: ink is the complement of paper and both are bright.
+  const u8 hiresColour = u8(ula_.hiresColour());
+  const u32 ink = ulaColour(u8(8 + (hiresColour ^ 0x07)));
+  const u32 paper = paperColour(u8(8 + hiresColour));
+
+  for (int col = 0; col < 32; ++col) {
+    const u16 pixels = u16((ram_[pixelBase + size_t(col)] << 8) |
+                           ram_[pixelBase + 0x2000 + size_t(col)]);
+    // The two bytes are sixteen hi-res pixels, and each output pixel covers a
+    // pair of them, so one character cell stays eight pixels wide.
+    for (int pair = 0; pair < 8; ++pair) {
+      const u32 left = (pixels & (0x8000u >> (pair * 2))) ? ink : paper;
+      const u32 right = (pixels & (0x4000u >> (pair * 2))) ? ink : paper;
+      row[size_t(col * 8 + pair)] = averageColours(left, right);
+    }
+  }
+}
+
+void Machine::ulaCellColours(u8 attr, bool flashOn, u32& ink, u32& paper) const {
+  if (!isNext()) {
+    const u8 bright = u8(attr & 0x40) ? 8 : 0;
+    const u8 inkIndex = u8((attr & 0x07) | bright);
+    const u8 paperIndex = u8(((attr >> 3) & 0x07) | bright);
+    const bool flash = (attr & 0x80) != 0 && flashOn;
+    ink = ulaColour(flash ? paperIndex : inkIndex);
+    paper = paperColour(flash ? inkIndex : paperIndex);
+    return;
+  }
+
+  const int palette = ulaPalette();
+  if ((palette_.control() & 0x01) != 0) {
+    // ULANext turns the attribute into a pair of palette indices: the low bits
+    // hold ink, the high bits paper, offset by 128.
+    const u8 mask = next_.read(0x42);
+    if (mask == 0xFF) {
+      // Full ink: the paper and border colours come from register 0x4A.
+      const u8 fallback = u8(next_.read(0x4A) & 0x0F);
+      ink = palette_.colour(palette, attr);
+      paper = palette_.colour(palette, u8(16 + fallback));
+    } else {
+      ink = palette_.colour(palette, u8(attr & mask));
+      paper = palette_.colour(palette, u8(128 + (attr & u8(~mask))));
+    }
+    return;
+  }
+
+  if (ulaPlusEnabled()) {
+    // ULA+ keeps its 64 colours in the first entries of the ULA palette: ink in
+    // the low half of each block of 32 and paper in the high half, with the
+    // block chosen by FLASH and BRIGHT.
+    const u8 block = u8(((attr & 0x80) ? 2 : 0) | ((attr & 0x40) ? 1 : 0));
+    const u8 base = u8(block * 16);
+    ink = palette_.colour(palette, u8(base + (attr & 0x07)));
+    paper = palette_.colour(palette, u8(base + 8 + ((attr >> 3) & 0x07)));
+    return;
+  }
+
+  const u8 bright = u8(attr & 0x40) ? 8 : 0;
+  const u8 inkIndex = u8((attr & 0x07) | bright);
+  const u8 paperIndex = u8(((attr >> 3) & 0x07) | bright);
+  const bool flash = (attr & 0x80) != 0 && flashOn;
+  ink = ulaColour(flash ? paperIndex : inkIndex);
+  paper = paperColour(flash ? inkIndex : paperIndex);
+}
+
+bool Machine::ulaPlusEnabled() const {
+  if (!isNext()) return false;
+  return ula_.ulaPlusEnabled() || (next_.read(0x68) & 0x08) != 0;
+}
+
+u32 Machine::ulaBorderColour(u8 index) const {
+  if (!isNext()) return Palette[index & 0x07];
+  if (ula_.hiRes()) return paperColour(u8(8 + ula_.hiresColour()));
+  if ((palette_.control() & 0x01) != 0) {
+    return palette_.colour(ulaPalette(), u8(128 + (index & 0x07)));
+  }
+  if (ulaPlusEnabled()) return palette_.colour(ulaPalette(), 8);
+  return paperColour(index);
 }
 
 

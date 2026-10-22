@@ -214,7 +214,9 @@ private:
   };
   Layer2View layer2View() const;
   // One framebuffer pixel of Layer 2, or Transparent when nothing is drawn.
-  u32 layer2Pixel(const Layer2View& view, int x, int y) const;
+  // priority reports bit 7 of the colour, which the blending modes propagate so
+  // that the pixel ends up above the sprites.
+  u32 layer2Pixel(const Layer2View& view, int x, int y, bool& priority) const;
   // The tilemap shares the ULA's display layer and covers the whole surface,
   // border included, so it is resolved per pixel next to the ULA.
   struct TilemapView {
@@ -243,6 +245,10 @@ private:
   // "ULA on top" attribute, which the ULA needs to combine with the tilemap.
   u32 tilemapPixel(const TilemapView& view, int x, int y, bool& ulaOver) const;
   void renderUlaRow(int y, std::array<u32, ScreenWidth>& row) const;
+  // Timex hi-res: 512 pixels per line, eight bits from the screen file and eight
+  // from the file 8K above it. The framebuffer is 256 wide, so each output pixel
+  // is the average of the two hi-res pixels it covers.
+  void renderUlaHiresRow(int y, std::array<u32, ScreenWidth>& row) const;
   // Register 0x15 orders sprites, Layer 2 and the ULA from top to bottom.
   std::array<int, 3> layerOrder() const;
   static int layerDepth(const std::array<int, 3>& order, int layer);
@@ -255,6 +261,12 @@ private:
   u32 ulaColour(u8 index) const;
   u32 paperColour(u8 index) const;
   int ulaPalette() const;
+  // ULA+ is switched on either by its own mode register or by NextReg 0x68.
+  bool ulaPlusEnabled() const;
+  // The ink and paper colours of one attribute cell. ULA+ and ULANext remap the
+  // palette indices, so both halves are resolved together.
+  void ulaCellColours(u8 attr, bool flashOn, u32& ink, u32& paper) const;
+  u32 ulaBorderColour(u8 index) const;
   // Maps one 16K bank into a pair of neighbouring 8K slots.
   void mapBank(int slot, int bank, bool ram);
   void applySnapshot(const formats::Snapshot& snapshot);

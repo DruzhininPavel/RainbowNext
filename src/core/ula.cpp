@@ -10,6 +10,9 @@ void Ula::reset(bool is128) {
   // Issue 3 boards return 0xBF with no keys pressed, i.e. only the EAR bit (6)
   // reads high because the tape input is idle. Both 48K and 128K use this value.
   defaultValue_ = 0xBF;
+  timex_ = 0;
+  ulaPlusRegister_ = 0;
+  ulaPlusMode_ = 0;
 }
 
 u8 Ula::read(u16 port, const Keyboard& keyboard) const {

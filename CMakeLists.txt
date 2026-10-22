@@ -181,6 +181,9 @@ if(RAINBOW_BUILD_TESTS)
     tests/test_tilemap.cpp
     tests/test_nextreg.cpp
     tests/test_ula.cpp
+    tests/test_timex.cpp
+    tests/test_ulaplus.cpp
+    tests/test_blending.cpp
     tests/test_formats.cpp
     tests/test_tape.cpp
     tests/test_ay.cpp

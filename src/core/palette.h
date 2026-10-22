@@ -48,6 +48,10 @@ public:
 
   // Register 0x41: an 8-bit RRRGGGBB colour.
   void write8(u8 value);
+  // ULA+ writes an 8-bit RRRGGGBB colour into an arbitrary entry without
+  // touching the register index or the auto-increment state.
+  void write8(int palette, u8 index, u8 value);
+  u8 read8(int palette, u8 index) const;
   // Register 0x44: two writes, RRRGGGBB then the ninth bit.
   void write9(u8 value);
   // The value register 0x41 reads back.

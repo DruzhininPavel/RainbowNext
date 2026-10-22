@@ -11,6 +11,7 @@ void NextRegFile::reset() {
   values_[0x12] = 0x00; // Layer 2 active bank
   values_[0x13] = 0x00; // Layer 2 shadow bank
   values_[0x14] = 0xE3; // global transparency index
+  values_[0x42] = 0x07; // ULANext ink mask: eight inks, eight papers
   values_[0x4A] = 0xE3; // fallback colour
   values_[0x4B] = 0xE3; // sprite transparency index
   values_[0x4C] = 0x0F; // tilemap transparency index
