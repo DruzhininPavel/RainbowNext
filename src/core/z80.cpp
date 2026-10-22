@@ -239,15 +239,16 @@ void Z80::sbc16(u16& dest, u16 value) {
 
 void Z80::daa() {
   const u8 old = regs_.a;
-  u8 a = old;
+  // Both halves of the correction are decided from the original accumulator,
+  // so subtracting 6 first must not change whether 0x60 is added as well.
+  u8 correction = 0;
   bool carry = (regs_.f & CF) != 0;
-  if (regs_.f & NF) {
-    if ((regs_.f & HF) || (a & 0x0F) > 9) a = u8(a - 6);
-    if (carry || a > 0x99) { a = u8(a - 0x60); carry = true; }
-  } else {
-    if ((regs_.f & HF) || (a & 0x0F) > 9) a = u8(a + 6);
-    if (carry || a > 0x99) { a = u8(a + 0x60); carry = true; }
+  if ((regs_.f & HF) || (old & 0x0F) > 9) correction = 0x06;
+  if (carry || old > 0x99) {
+    correction = u8(correction | 0x60);
+    carry = true;
   }
+  const u8 a = (regs_.f & NF) ? u8(old - correction) : u8(old + correction);
   regs_.f = u8(szxyp(a) | (regs_.f & NF) | ((old ^ a) & HF) | (carry ? CF : 0));
   regs_.a = a;
 }
