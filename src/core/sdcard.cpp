@@ -140,7 +140,12 @@ u8 SdCard::transfer(u8 mosi) {
       ++frameBytes_;  // the CRC byte, which SPI mode ignores
       execute();
       state_ = State::Responding;
-      return nextByte();
+      // A real card never drives MISO during the command frame: the response
+      // arrives one to eight clocks later. The CRC clock is therefore still
+      // high, and the R1 lands on the following transfer. Drivers rely on
+      // this - esxDOS writes the CRC and then polls the data port for a byte
+      // that is not 0xFF, so answering a clock early looks like a dead card.
+      return 0xFF;
     }
     case State::Responding:
       // A multi-block read is a stream of tokens with no gaps, so the only way

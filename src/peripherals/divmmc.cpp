@@ -116,6 +116,12 @@ bool DivMmc::ioRead(u16 port, u32, u8& value) {
     return true;
   }
   if (low == PortSpiData && legacySpiPort_) {
+    // The SPI interface is a shift register, not a latch: any eight clocks,
+    // whether the driver reads or writes, move a byte out to the card and a
+    // byte back in. A driver therefore sends its command with writes and
+    // collects the answer with reads, and the byte a write returned is
+    // discarded because during the command frame the card is silent.
+    spiLatch_ = card_.transfer(0xFF);
     value = spiLatch_;
     return true;
   }

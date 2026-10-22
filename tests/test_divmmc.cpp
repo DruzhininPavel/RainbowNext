@@ -64,9 +64,11 @@ Exchange command(SdCard& card, u8 cmd, u32 arg, size_t extra = 0) {
   const u8 frame[6] = {u8(0x40 | cmd), u8(arg >> 24), u8(arg >> 16), u8(arg >> 8),
                        u8(arg), 0x95};
   for (size_t i = 0; i < 5; ++i) card.transfer(frame[i]);
-  // The R1 comes back on the clock that shifts the CRC byte in, exactly as it
-  // does on a real card, so that transfer's answer starts the response.
-  out.bytes.push_back(card.transfer(frame[5]));
+  // The card does not drive MISO during the command frame, so the CRC clock
+  // reads high and the R1 arrives on the clock after it, exactly as it does on
+  // a real card.
+  card.transfer(frame[5]);
+  out.bytes.push_back(card.transfer(0xFF));
   // Drain the rest: the queue is finite, so a fixed number of clocks is enough
   // and keeps the test independent of the internal length.
   for (size_t i = 0; i < 32 + extra; ++i) out.bytes.push_back(card.transfer(0xFF));
@@ -596,7 +598,9 @@ TEST(divmmc_routes_spi_bytes_through_the_data_port) {
   CHECK(div.loadCard(makeCard(), error));
   div.ioWrite(DivMmc::PortUnmap, 0, 0);
 
-  // CMD0 shifted out one byte at a time, then the R1 that comes back.
+  // CMD0 shifted out one byte at a time, then the R1 that comes back. The card
+  // is silent while the frame is being clocked in, so the CRC's own clock is
+  // its one byte of latency and the first read returns the response.
   div.ioWrite(DivMmc::PortSpiData, 0x40, 0);
   for (int i = 0; i < 4; ++i) div.ioWrite(DivMmc::PortSpiData, 0x00, 0);
   div.ioWrite(DivMmc::PortSpiData, 0x95, 0);
