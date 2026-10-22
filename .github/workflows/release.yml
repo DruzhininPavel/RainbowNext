@@ -15,19 +15,28 @@ jobs:
   build:
     name: ${{ matrix.name }}
     runs-on: ${{ matrix.os }}
+    env:
+      # CMake seeds its own cache entry from this variable, so the matrix can
+      # ask for a universal binary without quoting semicolons in the shell.
+      CMAKE_OSX_ARCHITECTURES: ${{ matrix.osx_arch }}
     strategy:
       fail-fast: false
       matrix:
         include:
-          - name: macOS (Apple Silicon)
+          # One archive for both kinds of Mac. SDL3 is built from source, so the
+          # cross compile costs nothing but the extra slice; CMake picks the
+          # architectures up from CMAKE_OSX_ARCHITECTURES in the job environment.
+          - name: macOS (Universal)
             os: macos-14
-            slug: macos-arm64
+            slug: macos-universal
+            osx_arch: arm64;x86_64
             setup: ""
           # The oldest runner still supported, so the archive also runs on newer
           # distributions: glibc is forward compatible, not backward.
           - name: Linux (x86_64)
             os: ubuntu-22.04
             slug: linux-x86_64
+            osx_arch: ""
             setup: |
               sudo apt-get update
               sudo apt-get install -y build-essential ninja-build zip curl
@@ -73,6 +82,16 @@ jobs:
           if otool -L build/rainbow 2>/dev/null | grep -qi sdl; then
             echo "rainbow still depends on a shared SDL library"; exit 1
           fi
+          if [ "${{ runner.os }}" = "macOS" ]; then
+            archs=$(lipo -archs build/rainbow)
+            echo "built for: ${archs}"
+            for want in arm64 x86_64; do
+              case " ${archs} " in
+                *" ${want} "*) ;;
+                *) echo "the binary has no ${want} slice"; exit 1 ;;
+              esac
+            done
+          fi
 
       - name: Package
         run: |
@@ -83,7 +102,7 @@ jobs:
             version="${version}-dev.${GITHUB_SHA:0:7}"
           fi
           name="rainbow-${version}-${{ matrix.slug }}"
-          stage="dist/${name}"
+          stage="stage/${name}"
           mkdir -p "${stage}/peripherals" "${stage}/roms" "${stage}/docs"
           cp build/rainbow "${stage}/"
           cp build/peripherals/* "${stage}/peripherals/"
@@ -97,13 +116,49 @@ jobs:
               > "${stage}/run-rainbow.command"
             chmod +x "${stage}/run-rainbow.command"
           fi
-          (cd dist && zip -r -9 "${name}.zip" "${name}" >/dev/null)
+          mkdir -p dist
+          (cd stage && zip -r -9 "../dist/${name}.zip" "${name}" >/dev/null)
           echo "PACKAGE=dist/${name}.zip" >> "${GITHUB_ENV}"
+          echo "VERSION=${version}" >> "${GITHUB_ENV}"
+
+      - name: Package an AppImage
+        if: runner.os == 'Linux'
+        # A single file the Steam Deck can run from anywhere: chmod +x and go.
+        run: |
+          name="rainbow-${VERSION}-${{ matrix.slug }}"
+          appdir="stage/RainbowNext.AppDir"
+          icons="${appdir}/usr/share/icons/hicolor/256x256/apps"
+          mkdir -p "${appdir}/usr/bin" "${appdir}/usr/share/applications" "${icons}"
+          cp build/rainbow "${appdir}/usr/bin/"
+          cp assets/rainbownext.png "${icons}/rainbownext.png"
+          cp assets/rainbownext.png "${appdir}/rainbownext.png"
+          cp assets/rainbownext.png "${appdir}/.DirIcon"
+          cp packaging/rainbownext.desktop "${appdir}/"
+          cp packaging/rainbownext.desktop "${appdir}/usr/share/applications/"
+          cat > "${appdir}/AppRun" <<'APPRUN'
+          #!/bin/sh
+          here="$(dirname "$(readlink -f "$0")")"
+          exec "${here}/usr/bin/rainbow" "$@"
+          APPRUN
+          chmod +x "${appdir}/AppRun"
+          curl -sSL -o appimagetool \
+            https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage
+          chmod +x appimagetool
+          # The tool is itself an AppImage, and a bare runner has no FUSE.
+          ARCH=x86_64 ./appimagetool --appimage-extract-and-run \
+            --no-appstream "${appdir}" "dist/${name}.AppImage"
+          # Unpack the result and run what came out, so a broken image fails
+          # here instead of on somebody's Steam Deck.
+          "./dist/${name}.AppImage" --appimage-extract > /dev/null
+          ./squashfs-root/usr/bin/rainbow --help > /dev/null
+          rm -rf squashfs-root appimagetool
+          echo "APPIMAGE=dist/${name}.AppImage" >> "${GITHUB_ENV}"
 
       - uses: actions/upload-artifact@v6
         with:
           name: dist-${{ matrix.slug }}
-          path: ${{ env.PACKAGE }}
+          # Only the finished archives, never the staging trees.
+          path: dist/*
           if-no-files-found: error
 
   release:
@@ -131,9 +186,16 @@ jobs:
           ./rainbow
           ```
 
-          On macOS `run-rainbow.command` does the same thing from Finder. If the
-          system refuses to run the downloaded binary, clear the quarantine flag
-          once with `xattr -d com.apple.quarantine rainbow`.
+          The macOS archive is universal, so the same file runs on Apple Silicon
+          and on Intel Macs. `run-rainbow.command` does the same thing from
+          Finder. If the system refuses to run the downloaded binary, clear the
+          quarantine flag once with `xattr -d com.apple.quarantine rainbow`.
+
+          On Linux there is also a single-file AppImage, which needs no unpacking:
+
+          ```sh
+          chmod +x rainbow-*.AppImage && ./rainbow-*.AppImage
+          ```
 
           **The Spectrum ROMs are not included** — they are still under copyright.
           Put your own dumps into the `roms/` folder next to the executable (see
@@ -144,9 +206,9 @@ jobs:
           it, no conditions. SDL3 and Dear ImGui keep their own licenses, both
           reproduced in `THIRD-PARTY-NOTICES.md` inside the archive.
 
-          The Linux build needs a running X11 or Wayland session and the usual
+          The Linux builds need a running X11 or Wayland session and the usual
           audio libraries (`libasound2`, `libpulse`); SDL3 itself is linked in.
           NOTES
-          gh release create "${GITHUB_REF_NAME}" dist/*.zip \
+          gh release create "${GITHUB_REF_NAME}" dist/* \
             --title "RainbowNext ${GITHUB_REF_NAME}" \
             --notes-file notes.md

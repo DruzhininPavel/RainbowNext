@@ -99,18 +99,26 @@ Status: v0.1.0 — M1 and M2 done: 48K and 128K/+2/+3 boot with AY sound, tape
 ## Download
 
 Every tagged release carries a ready-to-run archive per platform on the
-[releases page](../../releases): `rainbow-<version>-macos-arm64.zip` and
-`rainbow-<version>-linux-x86_64.zip`. Unpack it anywhere and start the emulator
-from that folder:
+[releases page](../../releases): `rainbow-<version>-macos-universal.zip` and
+`rainbow-<version>-linux-x86_64.zip`. The macOS archive is universal, so it runs
+on Apple Silicon and on Intel Macs alike. Unpack it anywhere and start the
+emulator from that folder:
 
 ```sh
 ./rainbow
 ```
 
+Linux also gets a single-file `rainbow-<version>-linux-x86_64.AppImage`, which
+needs no unpacking at all:
+
+```sh
+chmod +x rainbow-*.AppImage && ./rainbow-*.AppImage
+```
+
 On macOS `run-rainbow.command` does the same thing from Finder; if Gatekeeper
 refuses the downloaded binary, clear the flag once with
 `xattr -d com.apple.quarantine rainbow`. SDL3 is linked into the binary, so
-nothing has to be installed; the Linux build still needs an X11 or Wayland
+nothing has to be installed; the Linux builds still need an X11 or Wayland
 session and the usual audio libraries. The ROMs are **not** included — see
 [`roms/README.md`](roms/README.md).
 
@@ -126,6 +134,16 @@ installed, which is what the release archives do.
 ```sh
 brew install cmake sdl3
 ./scripts/build-macos.sh
+```
+
+The release build is universal. Homebrew only ships one architecture, so the
+release workflow asks for a static SDL3 built from source and lets CMake compile
+both slices:
+
+```sh
+CMAKE_OSX_ARCHITECTURES="arm64;x86_64" cmake -B build-universal \
+  -DCMAKE_BUILD_TYPE=Release -DRAINBOW_STATIC_SDL3=ON
+cmake --build build-universal
 ```
 
 ### SteamOS / Linux
