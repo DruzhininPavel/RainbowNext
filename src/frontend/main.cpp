@@ -28,6 +28,7 @@ void printUsage() {
       "  --snapshot FILE   SNA, Z80 snapshot or NEX program to load at startup\n"
       "  --disk FILE       DSK or EDSK image to insert into the +3 disk drive\n"
       "  --sd FILE         SD card image for the DivMMC; NextZXOS boots from it\n"
+      "  --esxdos DIR      host directory that answers the program's esxDOS calls\n"
       "  --state FILE      save state to restore at startup\n"
       "  --rzx FILE        RZX replay to play back at startup\n"
       "  --debugger        start paused with the debugger window open\n"
@@ -53,7 +54,7 @@ int main(int argc, char** argv) {
     }
     if ((argument == "--rom" || argument == "--machine" || argument == "--tape" ||
          argument == "--snapshot" || argument == "--disk" || argument == "--sd" ||
-         argument == "--state" || argument == "--rzx") &&
+         argument == "--esxdos" || argument == "--state" || argument == "--rzx") &&
         hasValue) {
       const std::string value = argv[++i];
       if (argument == "--rom") options.rom = value;
@@ -62,6 +63,7 @@ int main(int argc, char** argv) {
       if (argument == "--snapshot") options.snapshot = value;
       if (argument == "--disk") options.disk = value;
       if (argument == "--sd") options.sd = value;
+      if (argument == "--esxdos") options.esxdos = value;
       if (argument == "--state") options.state = value;
       if (argument == "--rzx") options.rzx = value;
       continue;

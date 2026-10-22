@@ -224,6 +224,7 @@ bool App::init(const Options& options) {
   scanPeripherals();
   applyPeripheralConfig();
   if (!options.sd.empty()) loadDivMmcCard(options.sd);
+  if (!options.esxdos.empty()) mountEsxDos(options.esxdos);
   if (!options.state.empty()) loadStateFile(options.state);
   if (!options.rzx.empty()) loadRzxFile(options.rzx);
   if (options.debugger) {
@@ -699,6 +700,22 @@ bool App::loadDivMmcCard(const std::string& path) {
   insertSdCard();
   status_ = "SD card: " + path + " (" + std::to_string(sdImage_.size() / 512) +
             " sectors)";
+  return true;
+}
+
+// Answers `RST 8` out of a host directory instead of booting the DivMMC
+// firmware, which is what a Next program that loads files needs. Nothing has to
+// be supplied alongside it: the calls are answered from the machine, so the
+// directory alone is enough.
+bool App::mountEsxDos(const std::string& path) {
+  if (!machine_) return false;
+  std::string error;
+  if (!machine_->esxDos().mount(path, error)) {
+    status_ = "esxDOS failed: " + error;
+    return false;
+  }
+  machine_->esxDos().setEnabled(true);
+  status_ = "esxDOS: " + machine_->esxDos().root();
   return true;
 }
 

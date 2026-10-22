@@ -438,6 +438,7 @@ void Machine::applyNex(const formats::NexFile& nex) {
 void Machine::stepInstruction() {
   if (irqLine_) cpu_.interrupt();
   if (cpu_.regs().pc == 0x0556 && tape_.fastLoad() && applyTapeFastLoad()) return;
+  if (cpu_.regs().pc == 0x0008 && esxDos_.trap(*this, cpu_.regs())) return;
   // Sampled after the interrupt, so the profile blames the handler rather than
   // the instruction the interrupt pushed off.
   if (profiling_) {

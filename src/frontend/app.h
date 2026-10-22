@@ -36,6 +36,7 @@ public:
     std::string snapshot;
     std::string disk;
     std::string sd;
+    std::string esxdos;     // host directory mounted as drive C for RST 8 calls
     std::string state;      // save state to restore at startup
     std::string rzx;        // RZX replay to play back at startup
     bool debugger = false;  // start paused with the debugger open
@@ -79,6 +80,7 @@ private:
   bool loadCartridge(const std::string& path);
   bool loadDivMmcRom(const std::string& path);
   bool loadDivMmcCard(const std::string& path);
+  bool mountEsxDos(const std::string& path);
   // The card image is kept here, not in the module, so switching the machine
   // type -- which rebuilds the bus -- does not silently take the card out.
   void insertSdCard();

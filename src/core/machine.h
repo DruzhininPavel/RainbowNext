@@ -11,6 +11,7 @@
 #include "core/copper.h"
 #include "core/dac.h"
 #include "core/dma.h"
+#include "core/esxdos.h"
 #include "core/expansion.h"
 #include "core/keyboard.h"
 #include "core/nextreg.h"
@@ -212,6 +213,11 @@ public:
   // switches them on and off through it.
   ExpansionBus& expansion() { return expansion_; }
   const ExpansionBus& expansion() const { return expansion_; }
+  // The DOS a Next program talks to through `RST 8`. It lives in the machine
+  // rather than on the bus because the trap happens before the instruction is
+  // fetched, which is earlier than any peripheral gets a look at it.
+  EsxDos& esxDos() { return esxDos_; }
+  const EsxDos& esxDos() const { return esxDos_; }
   const NextRegFile& nextRegs() const { return next_; }
   const NextPalette& palette() const { return palette_; }
   const Sprites& sprites() const { return sprites_; }
@@ -340,6 +346,7 @@ private:
   u32 tstatesPerFrame_ = 69888;
 
   Z80 cpu_;
+  EsxDos esxDos_;
   Ula ula_;
   Keyboard keyboard_;
   Beeper beeper_;

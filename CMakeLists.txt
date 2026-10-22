@@ -99,6 +99,7 @@ add_library(rainbow_core STATIC
   src/core/dma.cpp
   src/core/expansion.cpp
   src/core/sdcard.cpp
+  src/core/esxdos.cpp
   src/peripherals/kempston.cpp
   src/peripherals/kempston_mouse.cpp
   src/peripherals/printer.cpp
@@ -193,6 +194,7 @@ if(RAINBOW_BUILD_TESTS)
     tests/test_expansion.cpp
     tests/test_divmmc.cpp
     tests/test_nex.cpp
+    tests/test_esxdos.cpp
     src/frontend/config.cpp
     src/frontend/autoload.cpp
   tests/test_turbosound.cpp
