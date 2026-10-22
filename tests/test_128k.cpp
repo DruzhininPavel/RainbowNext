@@ -226,12 +226,70 @@ TEST(k128_contention_follows_the_paged_bank) {
   CHECK(m128.contention(0x4000, t) > 0);
   CHECK_EQ(m128.contention(0x8000, t), 0);
 
-  // The +2A/+3 only contends in the 0x4000 window.
+  // The +2A/+3 ASIC contends every bank it puts at 0xC000, odd or not.
   Machine m3(MachineType::Plus3);
   const u32 t3 = visibleTstate(m3);
+  m3.ioWrite(0x7FFD, 0x00, 0);
+  CHECK(m3.contention(0xC000, t3) > 0);
   m3.ioWrite(0x7FFD, 0x01, 0);
-  CHECK_EQ(m3.contention(0xC000, t3), 0);
+  CHECK(m3.contention(0xC000, t3) > 0);
   CHECK(m3.contention(0x4000, t3) > 0);
+}
+
+// The pattern is anchored to the frame's first pixel rather than to the left
+// border, so each machine meets a different phase at the start of its display
+// and the +3, whose lines are 228 T-states, alternates between two of them.
+TEST(k128_contention_pattern_phase_follows_the_first_pixel) {
+  Machine m48(MachineType::Spectrum48);
+  const auto& t48 = m48.timings();
+  const u32 first48 = tstatesPerLine(t48) * u32(t48.topBorder) + t48.leftBorder;
+  // 14336 is a multiple of eight, so the 48K meets the pattern at its start.
+  CHECK_EQ(m48.contention(0x4000, first48), 6);
+  CHECK_EQ(m48.contention(0x4000, first48 + 1), 5);
+  CHECK_EQ(m48.contention(0x4000, first48 + 6), 0);
+  CHECK_EQ(m48.contention(0x4000, first48 + 7), 0);
+  CHECK_EQ(m48.contention(0x4000, first48 + 8), 6);
+
+  // The 128K opens its display on the same step, but its lines are 228
+  // T-states, so the next line starts four steps further into the cycle.
+  Machine m128(MachineType::Spectrum128);
+  const auto& t128 = m128.timings();
+  const u32 line128 = tstatesPerLine(t128);
+  const u32 first128 = line128 * u32(t128.topBorder) + t128.leftBorder;
+  CHECK_EQ(m128.contention(0x4000, first128), 6);
+  CHECK_EQ(m128.contention(0x4000, first128 + 1), 5);
+  CHECK_EQ(m128.contention(0x4000, first128 + 6), 0);
+  CHECK_EQ(m128.contention(0x4000, first128 + 7), 0);
+  CHECK_EQ(m128.contention(0x4000, first128 + line128), 2);
+  CHECK_EQ(m128.contention(0x4000, first128 + 2 * line128), 6);
+
+  // 228 is not a multiple of eight, so the +3 walks the phase by four.
+  Machine m3(MachineType::Plus3);
+  const auto& t3 = m3.timings();
+  const u32 line3 = tstatesPerLine(t3);
+  const u32 first3 = line3 * u32(t3.topBorder) + t3.leftBorder;
+  CHECK_EQ(m3.contention(0x4000, first3), 6);
+  CHECK_EQ(m3.contention(0x4000, first3 + line3), 2);
+  CHECK_EQ(m3.contention(0x4000, first3 + 2 * line3), 6);
+  CHECK_EQ(m3.contention(0x4000, first3 + 3 * line3), 2);
+}
+
+// Outside the display window nothing contends, whichever machine asks.
+TEST(k128_contention_is_confined_to_the_display_window) {
+  Machine m(MachineType::Plus3);
+  const auto& t = m.timings();
+  const u32 line = tstatesPerLine(t);
+  const u32 first = line * u32(t.topBorder) + t.leftBorder;
+  CHECK_EQ(m.contention(0x4000, first - 1), 0);
+  CHECK_EQ(m.contention(0x4000, first + t.horizontalScreen), 0);
+  CHECK_EQ(m.contention(0x4000, line * u32(t.topBorder) - 1), 0);
+
+  // The Pentagon has no ULA contention anywhere.
+  Machine p(MachineType::Pentagon);
+  const auto& tp = p.timings();
+  const u32 firstP = tstatesPerLine(tp) * u32(tp.topBorder) + tp.leftBorder;
+  CHECK_EQ(p.contention(0x4000, firstP), 0);
+  CHECK_EQ(p.contention(0xC000, firstP), 0);
 }
 
 TEST(k128_pentagon_has_no_contention) {

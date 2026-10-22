@@ -53,11 +53,13 @@ Status: v0.1.3 — M1 and M2 done: 48K and 128K/+2/+3 boot with AY sound, tape
   that paces a byte every `32 * prescalar` clocks so a block can be streamed
   out as sampled audio while the CPU keeps running.
 * **ULA** — port `0xFE` read/write, border, beeper, 8×5 keyboard matrix,
-  Fuse-compatible memory contention, floating bus.
+  memory contention with the six-busy, two-idle pattern anchored to the first
+  pixel of the display, floating bus.
 * **Machines** — 48K, 128K, +2, +3 and Pentagon, each with its own timings
   (69 888 / 70 908 / 71 680 T-states per frame at 3.5 MHz).
 * **Paging** — `0x7FFD` RAM/screen/ROM bank + lock, `0x1FFD` CP/M special paging
-  and the +3 ROM bit, contention following the paged bank.
+  and the +3 ROM bit, contention following the paged bank: odd banks at
+  `0xC000` on the 128K and the grey +2, every bank on the +2A/+3.
 * **Video** — 256×192 screen with correct Spectrum addressing and flashing,
   rendered into a 320×256 ARGB8888 framebuffer with border. On the Next the ULA
   also answers the Timex SCLD port (`ALTDFILE`, `EXTCOLOUR` and 512-pixel
@@ -366,7 +368,7 @@ peripheral = printer
 ctest --test-dir build --output-on-failure
 ```
 
-501 tests cover the Z80 core (timings, flags, undocumented opcodes,
+503 tests cover the Z80 core (timings, flags, undocumented opcodes,
 interrupts), the disassembler (base, CB, ED, indexed and Z80N forms, lengths and
 flow), the debugger's breakpoints and profiler, save states (round trips of the
 CPU, memory, paging and peripherals, and the refusals for a damaged, truncated,
@@ -374,8 +376,8 @@ foreign or differently-ROM'd file), the rewind buffer, the Z80N extension, the
 Next MMU, palette, Layer 2, the Timex modes and the ULA+/ULANext attribute
 paths, the blending priority modes,
 sprites (including relative and unified sprites and the collision flags), the
-tilemap, the Copper and the zxnDMA, ULA behaviour, contention, floating bus,
-frame length, audio rate, both snapshot formats, the NEX parser and its
+tilemap, the Copper and the zxnDMA, ULA behaviour, the contention pattern and
+its per-machine phase, floating bus, frame length, audio rate, both snapshot formats, the NEX parser and its
 application to the machine, the AY, the TurboSound chip select and stereo bits,
 the SpecDrum and SoundDrive DAC ports, 128K/+3 paging and timings, tape blocks,
 the µPD765 and the DSK parser, the expansion bus with its modules and plugin

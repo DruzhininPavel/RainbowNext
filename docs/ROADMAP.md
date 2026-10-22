@@ -61,7 +61,14 @@ a multicolour demo renders correctly; `z80test` passes.
 * [x] Frame timings: 69 888 (128K), 70 908 (+2A/+3), 71 680 (Pentagon)
 * [x] Contention per paged bank; Pentagon reports no contention
 * [x] Real ROM boot verified: 128K menu, ROM paging into 48 BASIC, +3 Amstrad menu
-* [ ] Exact 128K contention (`offset` 1 vs 4, `line_times[]`)
+* [x] Exact contention: the six-busy, two-idle pattern is anchored to the first
+      T-state of the display window and then follows the absolute T-state, so
+      the 48K, whose 224-T-state line is a multiple of eight, meets the same
+      phase on every line while the 128K, the +3 and the Next, whose lines are
+      228 T-states, walk the phase by four and alternate between six and two
+      T-states of delay at the first pixel. The +2A/+3 ASIC contends every bank
+      at `0xC000`, whereas the 128K and the grey +2 contend only while an odd
+      bank is paged there, because the gate array cannot see the even ones.
 * [x] +3 disk controller (µPD765) and `.dsk`/`.edsk`: SPECIFY, SENSE DRIVE,
       SENSE INTERRUPT, RECALIBRATE, SEEK, READ ID, READ DATA/DELETED/TRACK,
       WRITE DATA/DELETED, FORMAT TRACK; standard CPCEMU, extended and raw TR-DOS
@@ -258,8 +265,11 @@ a multicolour demo renders correctly; `z80test` passes.
 
 These are deliberate simplifications, tracked here so they are not forgotten:
 
-1. `Machine::contention` uses the simplified pattern without `line_times[]`;
-   it can differ from Fuse by a few T-states at the exact border edges.
+1. `Machine::contention` derives its window from the border geometry rather
+   than from a per-line `line_times[]` table, so the contended window is the
+   whole display rectangle and the pattern restarts with it. The phase and the
+   per-bank `0xC000` rule match the hardware; what is missing is the Next's
+   layer 2 and sprite fetches, which contend on their own schedules.
 2. `Ula::reset()` always sets `defaultValue_ = 0xBF`; 128K Issue 3 should use
    `b & 0x10 ? 0xFF : 0xBF`.
 3. `ioRead` for ports other than `0xFE` does not return the floating bus on 48K.
@@ -276,8 +286,8 @@ These are deliberate simplifications, tracked here so they are not forgotten:
    completes in the same frame; the +3 ROM only polls the interrupt line, which
    this satisfies. Writes go straight into the in-memory image and are not
    flushed back to the `.dsk` file.
-9. Contention uses one fixed pattern per line instead of a per-line
-   `line_times[]` table, so the 128K/+3 windows start a few T-states early.
+9. The contended window is the display rectangle for every machine, so the
+   border lines a ULA fetch steals from the edges are not modelled.
 10. The Copper's horizontal `WAIT` position is decoded but does not delay the
     instruction: the compositor samples the register file once per scanline, so
     a Copper write lands at the start of its line rather than at its column.

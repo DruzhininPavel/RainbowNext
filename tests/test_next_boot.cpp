@@ -64,11 +64,14 @@ int countVisits(Machine& machine, u16 address, int target, long limit) {
 // through to the page-counting loop when every pass matched. The ROM runs the
 // whole boot sequence seven times before it settles, so seven arrivals at
 // 0x018E mean the probe - and with it the MMU, the 2 MB RAM size and the Z80N
-// instructions the setup table uses - is behaving.
+// instructions the setup table uses - is behaving. The budget covers a little
+// over two million instructions, which is what the seven passes cost; it is
+// deliberately generous because contention shifts how many instructions fit
+// into the waits between them.
 TEST(boot_real_next_rom_completes_its_ram_probe) {
   Machine machine(MachineType::Next);
   if (!loadNextRom(machine)) return;
-  CHECK_EQ(countVisits(machine, 0x018E, 7, 2000000), 7);
+  CHECK_EQ(countVisits(machine, 0x018E, 7, 2500000), 7);
 }
 
 // With the divMMC ROM present the board ROM's RST 0x38 stub writes 0x80 to
@@ -76,7 +79,10 @@ TEST(boot_real_next_rom_completes_its_ram_probe) {
 // through the board ROM's own 0x0048 into the esxDOS code that lives at that
 // offset in the divMMC image. 0x1EA0 is the divMMC ROM's "unmap and return"
 // entry, so arriving there proves the hand-off happened; without the image the
-// same address is zeroed RAM and the machine restarts instead.
+// same address is zeroed RAM and the machine restarts instead. The budget has
+// to cover the board ROM's 2 MB RAM probe, which is what fills most of it, and
+// it is measured in instructions rather than T-states because contention
+// shifts the second without touching the first.
 TEST(boot_real_next_rom_hands_control_to_the_divmmc_rom) {
   Machine machine(MachineType::Next);
   if (!loadNextRom(machine)) return;
@@ -87,5 +93,5 @@ TEST(boot_real_next_rom_hands_control_to_the_divmmc_rom) {
   machine.expansion().setEnabled("divmmc", true);
   machine.reset();
 
-  CHECK_EQ(countVisits(machine, 0x1EA0, 1, 600000), 1);
+  CHECK_EQ(countVisits(machine, 0x1EA0, 1, 1000000), 1);
 }

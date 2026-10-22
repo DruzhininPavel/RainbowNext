@@ -224,11 +224,21 @@ behavioural reference only:
 | 48K | 3 500 000 | — | 224 | 69 888 |
 | 128K / +2 | 3 546 900 | 1 773 400 | 228 | 70 908 |
 | +2A / +3 | 3 546 900 | 1 773 400 | 228 | 70 908 |
-| Pentagon | 3 584 000 | 1 792 000 | 224 | 70 908 |
+| Pentagon | 3 584 000 | 1 792 000 | 224 | 71 680 |
 
-Contention follows the Fuse pattern `{5,4,3,2,1,0,0,6}` indexed by
-`(x + 7) & 7` and only applies to `0x4000-0x7FFF` and `0xC000-0xFFFF` while the
-contended bank is paged into the screen window.
+Contention follows the pattern `{6,5,4,3,2,1,0,0}`: six busy T-states and two
+idle ones out of every eight, because the ULA fetches two pixels per T-state.
+The cycle is anchored to the first T-state of the display window and then
+indexed by the absolute T-state, which is what makes the machines differ. The
+48K line is 224 T-states, a multiple of eight, so every line meets the same
+phase; the 128K, the +3 and the Next line is 228, so their phase advances by
+four and the first pixel alternates between six and two T-states of delay.
+
+Contention applies to `0x4000-0x7FFF` always, and to `0xC000-0xFFFF` only while
+a contended bank is paged into the screen window: the 128K and the grey +2
+contend on the odd banks alone, because the gate array cannot see the even ones,
+while the +2A/+3 ASIC contends whatever bank it puts there. The Pentagon has no
+contention at all.
 
 ## Data flow of one frame
 

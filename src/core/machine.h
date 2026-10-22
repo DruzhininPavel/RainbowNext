@@ -52,7 +52,6 @@ struct Timings {
   u16 bottomBorder = 48;
   u16 verticalRetrace = 24;
   u16 interruptLength = 32;
-  u16 topLeftPixel = 14336;
   bool contended = true;
 };
 

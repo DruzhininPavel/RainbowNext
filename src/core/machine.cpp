@@ -30,12 +30,12 @@ namespace rainbow {
 const Timings& timingsFor(MachineType type) {
   // Values mirror the base_timings table in Fuse's libspectrum (see
   // docs/REFERENCES.md). Fields: cpu, ay, left, screen, right, hretrace,
-  // top, vscreen, bottom, vretrace, intlen, top_left_pixel, contended.
-  static const Timings t48{3500000, 0, 24, 128, 24, 48, 48, 192, 48, 24, 32, 14336, true};
-  static const Timings t128{3546900, 1773400, 24, 128, 24, 52, 48, 192, 48, 23, 36, 14362, true};
-  static const Timings tPlus3{3546900, 1773400, 24, 128, 24, 52, 48, 192, 48, 23, 32, 14365, true};
-  static const Timings tPentagon{3584000, 1792000, 36, 128, 28, 32, 64, 192, 48, 16, 36, 17988, false};
-  static const Timings tNext{3546900, 1773400, 24, 128, 24, 52, 48, 192, 48, 23, 36, 14362, true};
+  // top, vscreen, bottom, vretrace, intlen, contended.
+  static const Timings t48{3500000, 0, 24, 128, 24, 48, 48, 192, 48, 24, 32, true};
+  static const Timings t128{3546900, 1773400, 24, 128, 24, 52, 48, 192, 48, 23, 36, true};
+  static const Timings tPlus3{3546900, 1773400, 24, 128, 24, 52, 48, 192, 48, 23, 32, true};
+  static const Timings tPentagon{3584000, 1792000, 36, 128, 28, 32, 64, 192, 48, 16, 36, false};
+  static const Timings tNext{3546900, 1773400, 24, 128, 24, 52, 48, 192, 48, 23, 36, true};
 
   switch (type) {
     case MachineType::Spectrum48: return t48;
@@ -1256,14 +1256,16 @@ u32 Machine::turboMultiplier() const {
 u8 Machine::contention(u16 addr, u32 t) {
   if (!timings_.contended) return 0;
 
-  // Every machine with a ULA contends on bank 5 at 0x4000. The 128K also
-  // contends on 0xC000 when an odd bank is paged there; the +2A/+3 does not,
-  // and the Pentagon has no contention at all (`contended` is false there).
+  // Every machine with a ULA contends on the memory it fetches: bank 5 at
+  // 0x4000, and the RAM at 0xC000. The 128K and the grey +2 only contend there
+  // while an odd bank is paged in, because the odd banks are the ones the gate
+  // array can see; the +2A/+3 ASIC contends whatever bank it puts at 0xC000.
+  // The Pentagon has no contention at all (`contended` is false there).
   bool contended = false;
   if (addr >= 0x4000 && addr < 0x8000) {
     contended = true;
-  } else if (addr >= 0xC000 && !isPlus3() && (page_[7].page & 2) != 0) {
-    contended = true;
+  } else if (addr >= 0xC000) {
+    contended = isPlus3() || (ramBank() & 1) != 0;
   }
   if (!contended) return 0;
 
@@ -1277,11 +1279,17 @@ u8 Machine::contention(u16 addr, u32 t) {
     return 0;
   }
 
-  // The ULA contends on six of every eight T-states. The classic 48K pattern
-  // (6,5,4,3,2,1,0,0) starts at the first visible T-state.
-  static constexpr u8 Pattern[8] = {5, 4, 3, 2, 1, 0, 0, 6};
-  const u32 x = hc - timings_.leftBorder;
-  return Pattern[(x + 7) & 7];
+  // The ULA fetches two pixels per T-state, so each group of eight T-states
+  // repeats the same bus pattern: six busy ones and two idle ones at the end.
+  // The cycle is anchored to the first T-state of the display window, so every
+  // machine opens its display on the first step. From there the step follows
+  // the absolute T-state, which is what separates the machines: the 48K line is
+  // 224 T-states, a multiple of eight, so it meets the same phase on every
+  // line, while the 128K, the +3 and the Next use 228 and walk it by four.
+  static constexpr u8 Pattern[8] = {6, 5, 4, 3, 2, 1, 0, 0};
+  const u32 displayStart =
+      tstatesPerLine_ * u32(timings_.topBorder) + timings_.leftBorder;
+  return Pattern[(t - displayStart) & 7];
 }
 
 u8 Machine::floatingBus() const {
