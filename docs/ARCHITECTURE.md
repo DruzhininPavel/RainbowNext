@@ -232,6 +232,39 @@ runFrame()
 0xC000-0xFFFF  RAM bank 0-7 (bits 0-2 of port 0x7FFD)
 ```
 
+## Programs and snapshots
+
+`.sna` and `.z80` are snapshots of a running classic machine: CPU registers, up
+to 128K of RAM, the border and `0x7FFD`. They land in a `formats::Snapshot` and
+`Machine::applySnapshot` copies it straight in.
+
+`.nex` is a different shape. It is a program image for the Next: the 16K RAM
+banks it wants, an optional 256-entry palette, optional loading screens, and the
+register state its author assumes. `src/formats/nex.cpp` only parses the file
+into a `formats::NexFile` and leaves the hardware alone; `Machine::applyNex`
+does the rest, in the order the official `nexload` uses:
+
+1. reset, because a `.nex` describes a whole machine, not a delta;
+2. unless `preserveNextRegs` is set, the register state `nexload` leaves behind
+   — Copper stopped, 28 MHz, Layer 2 on bank 9, clip windows full-screen, and
+   the ULA palette filled with its sixteen defaults while the Layer 2 and sprite
+   palettes are blanked;
+3. the palette block into the Layer 2 first palette;
+4. the loading screens, with the Layer 2 one spread over banks 9, 10 and 11 and
+   the ULA one at the top of bank 5;
+5. the banks, so a bank that shares memory with a loading screen wins;
+6. the entry bank through MMU slots 6 and 7, then `PC` and `SP`.
+
+The banks are read in the order `nexload` reads them — 5, 2 and 0 first because
+it can show a screen straight out of those, then the rest ascending — and the
+file's declared bank count is not trusted; the per-bank flags are.
+
+Because a `.nex` carries NextReg state and 2 MB of RAM, loading one switches the
+machine to the Next first. The loading screen is applied as memory and not
+animated: the `loadingBar` and delay fields are parsed but nothing draws a
+progress bar, which is a determinism win and a fidelity loss noted in the
+roadmap.
+
 ## Disk
 
 The +3's µPD765 lives in `src/core/upd765.*` and talks to the CPU through the

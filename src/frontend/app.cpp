@@ -103,6 +103,8 @@ std::string lowerExtension(const std::string& path) {
   return ext;
 }
 
+bool isNexPath(const std::string& path) { return lowerExtension(path) == ".nex"; }
+
 } // namespace
 
 App::~App() { shutdown(); }
@@ -395,12 +397,17 @@ bool App::loadRom(const std::string& path) {
 }
 
 bool App::loadSnapshot(const std::string& path) {
+  // A .nex carries NextReg state and 2 MB of RAM, so it only makes sense on the
+  // machine it was built for. Switching first keeps the user from having to
+  // pick the type before every load.
+  if (isNexPath(path) && !machine_->isNext()) setMachine(MachineType::Next);
+
   std::string error;
   if (!machine_->loadSnapshot(path, error)) {
     status_ = "Snapshot failed: " + error;
     return false;
   }
-  status_ = "Snapshot loaded: " + path;
+  status_ = std::string(isNexPath(path) ? "NEX loaded: " : "Snapshot loaded: ") + path;
   return true;
 }
 
@@ -435,7 +442,7 @@ void App::openFileDialog(DialogKind kind) {
   if (dialogOpen_) return;
   static const SDL_DialogFileFilter romFilters[] = {{"Spectrum ROM", "rom"}, {"All files", "*"}};
   static const SDL_DialogFileFilter snapshotFilters[] = {
-      {"Snapshots", "sna;z80"}, {"All files", "*"}};
+      {"Snapshots and programs", "sna;z80;nex"}, {"All files", "*"}};
   static const SDL_DialogFileFilter tapeFilters[] = {
       {"Tape images", "tap;tzx"}, {"All files", "*"}};
   static const SDL_DialogFileFilter diskFilters[] = {

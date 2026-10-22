@@ -14,6 +14,7 @@
 #include "peripherals/printer.h"
 
 #include "formats/dsk.h"
+#include "formats/nex.h"
 #include "formats/sna.h"
 #include "formats/snapshot.h"
 #include "formats/z80file.h"
@@ -252,19 +253,22 @@ bool Machine::loadRomImageData(const u8* data, size_t size) {
 }
 
 bool Machine::loadSnapshot(const std::string& path, std::string& error) {
-  std::ifstream in(path, std::ios::binary);
-  if (!in) {
-    error = "cannot open " + path;
-    return false;
-  }
-  std::vector<u8> data((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
-
   std::string ext;
   const size_t dot = path.find_last_of('.');
   if (dot != std::string::npos) {
     ext = path.substr(dot);
     for (char& c : ext) c = char(std::tolower(static_cast<unsigned char>(c)));
   }
+  // .nex is not a snapshot of a running machine but a program image, so it gets
+  // its own loader and reads the file itself.
+  if (ext == ".nex") return loadNex(path, error);
+
+  std::ifstream in(path, std::ios::binary);
+  if (!in) {
+    error = "cannot open " + path;
+    return false;
+  }
+  std::vector<u8> data((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
 
   formats::Snapshot snapshot;
   bool ok = false;
@@ -292,6 +296,110 @@ void Machine::applySnapshot(const formats::Snapshot& snapshot) {
   updatePaging();
 
   ula_.write(0xFE, u8(snapshot.border & 0x07));
+  beeper_.setLevel(ula_.beeper());
+}
+
+bool Machine::loadNex(const std::string& path, std::string& error) {
+  if (!isNext()) {
+    error = "a .nex program needs the ZX Spectrum Next";
+    return false;
+  }
+  std::ifstream in(path, std::ios::binary);
+  if (!in) {
+    error = "cannot open " + path;
+    return false;
+  }
+  std::vector<u8> data((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+
+  formats::NexFile nex;
+  if (!formats::loadNex(data, nex, error)) return false;
+  applyNex(nex);
+  return true;
+}
+
+// A .nex is a program plus the memory it wants rather than a snapshot of a
+// running machine, so loading one starts from a reset Next and then replays what
+// the file asks for. The order follows nexload: registers, loading screen, RAM,
+// then the jump, so a bank that shares memory with a loading screen wins.
+void Machine::applyNex(const formats::NexFile& nex) {
+  reset();
+
+  if (!nex.preserveNextRegs) {
+    // The state nexload leaves behind, which a program written for a freshly
+    // booted Next expects: Copper stopped, expansion bus off the way, AY and
+    // Timex on, and every clip window covering the whole screen.
+    writeNextReg(0x62, 0x00);
+    writeNextReg(0x61, 0x00);
+    writeNextReg(0x06, 0xA8);
+    writeNextReg(0x08, 0xEE);
+    writeNextReg(0x07, 0x03);   // the loader leaves the machine at 28 MHz
+    writeNextReg(0x12, 0x09);   // Layer 2 main and shadow banks
+    writeNextReg(0x13, 0x0C);
+    writeNextReg(0x14, 0xE3);   // Layer 2 global transparency
+    writeNextReg(0x15, 0x01);   // Layer 2 priority, sprites visible
+    writeNextReg(0x16, 0x00);
+    writeNextReg(0x17, 0x00);
+    writeNextReg(0x2D, 0x00);   // both DAC channels to silence
+    writeNextReg(0x32, 0x00);   // LoRes scroll
+    writeNextReg(0x33, 0x00);
+    writeNextReg(0x4A, 0x00);   // transparent fallback colour
+    writeNextReg(0x4B, 0xE3);   // sprite transparency index
+    writeNextReg(0x1C, 0x0F);   // all four clip indices wrap immediately
+    for (const u8 value : {u8(0), u8(255), u8(0), u8(191)}) writeNextReg(0x18, value);
+    for (const u8 value : {u8(0), u8(255), u8(0), u8(191)}) writeNextReg(0x19, value);
+    for (const u8 value : {u8(0), u8(255), u8(0), u8(191)}) writeNextReg(0x1A, value);
+    for (const u8 value : {u8(0), u8(159), u8(0), u8(255)}) writeNextReg(0x1B, value);
+
+    // The loader blanks the Layer 2 and sprite palettes and fills the ULA one
+    // with its sixteen default colours repeated, so a program that only sets
+    // the entries it uses does not inherit a leftover ramp.
+    static constexpr u8 DefaultUla[16] = {
+        0x00, 0x02, 0xA0, 0xA2, 0x14, 0x16, 0xB4, 0xB6,
+        0x00, 0x03, 0xE0, 0xE7, 0x1C, 0x1F, 0xFC, 0xFF};
+    writeNextReg(0x43, 0x00);
+    writeNextReg(0x40, 0x00);
+    for (int entry = 0; entry < 256; ++entry) writeNextReg(0x41, DefaultUla[entry & 15]);
+    for (const u8 control : {u8(0x10), u8(0x20)}) {
+      writeNextReg(0x43, control);
+      writeNextReg(0x40, 0x00);
+      for (int entry = 0; entry < 256; ++entry) writeNextReg(0x41, 0x00);
+    }
+  }
+
+  // The palette block is written to the Layer 2 first palette, which is what
+  // the loader's LoRes and Layer 2 screens both read.
+  if (nex.hasPalette) {
+    writeNextReg(0x43, 0x10);
+    writeNextReg(0x40, 0x00);
+    for (int entry = 0; entry < 256; ++entry) {
+      palette_.setColour9(NextPalette::Layer2First, u8(entry), nex.palette[size_t(entry)]);
+    }
+  }
+
+  const auto place = [this](size_t bank, const std::vector<u8>& bytes) {
+    const size_t offset = bank * size_t(BankSize);
+    const size_t count = std::min(bytes.size(), ram_.size() - offset);
+    std::copy_n(bytes.begin(), count, ram_.data() + offset);
+  };
+  // The Layer 2 screen spans banks 9, 10 and 11 and the ULA screen is the top
+  // 6912 bytes of bank 5, which is where 0x4000 lands on a Next.
+  place(9, nex.layer2Screen);
+  place(5, nex.ulaScreen);
+  for (const formats::NexBank& bank : nex.banks) place(size_t(bank.number), bank.data);
+
+  next_.setMmuSlot(6, u8(nex.entryBank * 2));
+  next_.setMmuSlot(7, u8(nex.entryBank * 2 + 1));
+  updatePaging();
+
+  Z80::Registers& regs = cpu_.regs();
+  regs.pc = nex.pc;
+  regs.sp = nex.sp;
+  // nexload runs the program with interrupts off; it enables them once it has
+  // installed its own handler.
+  regs.iff1 = false;
+  regs.iff2 = false;
+
+  ula_.write(0xFE, nex.border);
   beeper_.setLevel(ula_.beeper());
 }
 

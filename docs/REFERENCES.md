@@ -31,6 +31,8 @@ port semantics, memory layouts) was reimplemented.
 | [SpecNext extended Z80 instruction set](https://wiki.specnext.dev/Extended_Z80_instruction_set) | — | Z80N opcode table (`SWAPNIB`, `MIRROR`, `TEST`, `BSLA`, `MUL D,E`, `NEXTREG`, `PIXELDN`, `LDIRX`, …) |
 | [Next hardware reference](https://wiki.specnext.dev/) | — | NextREG map, Layer 2, sprites, tilemap, Copper, DMA, 3× AY |
 | [specnext/next-firmware](https://gitlab.com/the-next-team/the-next-firmware) | — | Behaviour of NextZXOS, SD image layout (not bundled) |
+| [NEX file format](https://wiki.specnext.dev/NEX_file_format) | — | Header layout, loading-screen bits, bank order, the palette block |
+| [tbblue nexload.asm](https://gitlab.com/thesmog358/tbblue/-/blob/master/src/asm/nexload/nexload.asm) | — | Exact loader behaviour: register state left behind, bank order, entry bank, expansion-bus disable |
 | [MiSTer ZXNext](https://github.com/MiSTer-devel/ZXNext_MISTer) | GPL-3.0 | FPGA core as an accuracy oracle for video pipeline ordering |
 | [DivMMC](https://wiki.specnext.dev/DIVMMC) | — | Port map (`0xE3` control, `0xDF` SPI, `0xE7`/`0xEB` map/unmap), the automap hook addresses, `conmem`/`mapram` |
 | [SD Specifications, Part 1: Physical Layer](https://www.sdcard.org/downloads/pls/) | — | SPI command set, R1/R7 responses, the `CSD`/`CID` layouts, `ACMD41` and the HCS bit |

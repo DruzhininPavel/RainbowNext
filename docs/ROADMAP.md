@@ -129,7 +129,9 @@ a multicolour demo renders correctly; `z80test` passes.
       `src/plugin/plugin_api.h`, a loader that scans a `peripherals/` folder,
       skips a broken library instead of failing, and a worked example
       (`plugins/fuller`)
-* [ ] `.nex` snapshot format
+* [x] `.nex` program format: V1.0-V1.3, banks read in the loader's order,
+      palette, Layer 2 and ULA loading screens, entry bank, and the register
+      state `nexload` leaves behind. Loading one switches the machine to the Next
 * [x] Memory in the `Peripheral` contract: `interceptsMemory()`, `memRead` with
       an M1 flag, `memWrite`, and `Bus::memFetch` so a module can map itself in
       on an opcode fetch and shadow `0x0000`/`0x2000`
@@ -210,6 +212,10 @@ These are deliberate simplifications, tracked here so they are not forgotten:
 17. The DivMMC does not decode NextReg `0xB8`-`0xBB`, the programmable automap
     entry points, and its status port at `0x1F` is an approximation (card detect
     and busy only); the exact bit layout of a real board was not available.
+18. A `.nex` loading screen is loaded into memory but never shown: the
+    `loadingBar`, `loadingDelay` and `startDelay` fields are parsed and ignored,
+    so the program starts at once instead of after an animated bar. The
+    expansion-bus disable that V1.3 asks for is likewise parsed but not applied.
 
 ## Open decisions
 

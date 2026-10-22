@@ -69,6 +69,9 @@ Status: M1 — 48K and 128K/+2/+3 boot with AY sound, tape loading, disk images
   and extended `.edsk` images (SPECIFY, SEEK, READ ID, READ/WRITE DATA, FORMAT
   TRACK), driven by the real +3 ROM.
 * **Snapshots** — `.sna` (48K/128K) and `.z80` (v1, v2, v3 with RLE).
+* **Next programs** — `.nex` (V1.0–V1.3): the RAM banks in the loader's own
+  order, the optional palette, Layer 2 and ULA loading screens, the entry bank
+  and the loader's register state. Loading one switches the machine to the Next.
 * **Modular peripherals** — an expansion bus in the spirit of the edge
   connector. A Kempston joystick, a Kempston mouse, a ZX Printer (with PBM
   export), a ROM cartridge and a DivMMC ship with the emulator; each is a module
@@ -127,7 +130,7 @@ ROM images are not bundled — see [`roms/README.md`](roms/README.md).
 ```
 
 A bare path is routed by extension: `.rom`, `.tap`/`.tzx`, `.sna`/`.z80`,
-`.dsk`/`.edsk`. The same files can be dropped onto the window.
+`.nex`, `.dsk`/`.edsk`. The same files can be dropped onto the window.
 
 Tape playback is real-time through the EAR bit, so `LOAD ""` works as on real
 hardware. `Tape > Instant load` (on by default) short-circuits the ROM loader for
@@ -158,7 +161,7 @@ src/peripherals/   built-in modules: kempston, kempston mouse, printer,
                    cartridge, divmmc (with an SPI SD card)
 src/plugin/        the C ABI and the loader for out-of-tree modules
 plugins/           example plugin: a Fuller Audio Box joystick interface
-src/formats/       SNA / Z80 snapshots, TAP / TZX tapes, DSK / EDSK disk images
+src/formats/       SNA / Z80 / NEX images, TAP / TZX tapes, DSK / EDSK disks
 src/frontend/      SDL3 + Dear ImGui host: app, audio, input, debugger, config
 tests/             unit tests, incl. an end-to-end boot test (no ROM required)
 docs/              ARCHITECTURE.md, REFERENCES.md, ROADMAP.md
@@ -211,11 +214,12 @@ peripheral = printer
 ctest --test-dir build --output-on-failure
 ```
 
-328 tests cover the Z80 core (timings, flags, undocumented opcodes,
+356 tests cover the Z80 core (timings, flags, undocumented opcodes,
 interrupts), the Z80N extension, the Next MMU, palette, Layer 2, sprites
 (including relative and unified sprites and the collision flags), the tilemap,
 the Copper and the zxnDMA, ULA behaviour, contention, floating bus, frame
-length, audio rate, both snapshot formats, the AY, the TurboSound chip select
+length, audio rate, both snapshot formats, the NEX parser and its application
+to the machine, the AY, the TurboSound chip select
 and stereo bits, the SpecDrum and SoundDrive DAC ports, 128K/+3 paging and
 timings, tape blocks, the µPD765 and the DSK parser, the expansion bus with its
 modules and plugin loader, the DivMMC and its SPI SD card, the settings file,

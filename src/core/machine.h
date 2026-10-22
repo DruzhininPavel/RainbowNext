@@ -25,6 +25,7 @@
 namespace mynext {
 
 namespace formats {
+struct NexFile;
 struct Snapshot;
 }
 
@@ -89,6 +90,9 @@ public:
   bool loadRomImageData(const u8* data, size_t size);
   bool loadRomData(const u8* data, size_t size, int bank);
   bool loadSnapshot(const std::string& path, std::string& error);
+  // Loads a .nex program. The machine must already be a Next; the caller
+  // switches type first, because loading resets RAM and NextRegs.
+  bool loadNex(const std::string& path, std::string& error);
   bool loadTape(const std::string& path, std::string& error);
   // +2A/+3 only: inserts a .dsk/.edsk image into the disk controller.
   bool loadDisk(const std::string& path, std::string& error);
@@ -254,6 +258,7 @@ private:
   // Maps one 16K bank into a pair of neighbouring 8K slots.
   void mapBank(int slot, int bank, bool ram);
   void applySnapshot(const formats::Snapshot& snapshot);
+  void applyNex(const formats::NexFile& nex);
   bool applyTapeFastLoad();
 
   MachineType type_;

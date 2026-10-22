@@ -96,6 +96,7 @@ add_library(mynext_core STATIC
   src/peripherals/cartridge.cpp
   src/peripherals/divmmc.cpp
   src/formats/dsk.cpp
+  src/formats/nex.cpp
   src/formats/sna.cpp
   src/formats/tape.cpp
   src/formats/z80file.cpp
@@ -173,6 +174,7 @@ if(MYNEXT_BUILD_TESTS)
     tests/test_dma.cpp
     tests/test_expansion.cpp
     tests/test_divmmc.cpp
+    tests/test_nex.cpp
     src/frontend/config.cpp
   tests/test_turbosound.cpp
     tests/test_tilemap.cpp
