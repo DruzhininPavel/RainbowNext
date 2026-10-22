@@ -292,14 +292,23 @@ These are deliberate simplifications, tracked here so they are not forgotten:
     the next byte instead of after the few hundred cycles a real card needs, so
     a driver that polls for readiness simply sees it at once.
 17. DivMMC on the Next is unfinished and the module therefore ships unplugged.
-    NextReg `0xB8`-`0xBB` (the programmable automap entry points) are decoded,
-    but on `MachineType::Next` the hook returns into an address that is a `+3DOS`
-    data table in the real ROM, so the boot ROM executes data, issues an invalid
-    SD command frame and soft-resets -- NextZXOS never reaches its menu. The
-    plan is to finish it as a separate out-of-tree plugin over the expansion bus
-    rather than keep it on the Next's boot path. Its status port at `0x1F` is
-    also an approximation (card detect and busy only); the exact bit layout of a
-    real board was not available.
+    The hook, the automap entry points and the SD card now all work: the boot
+    ROM reaches the divMMC ROM's `RST 0x08` handler, the card answers with a
+    valid R1 and the handler returns. The remaining break is inside the boot
+    ROM itself. Its glue at ROM page 2 `0x3F18`-`0x3F3D` ends with
+    `PUSH 0x4804 / JP 0x3CFC`, and ROM page 2 `0x3CFC` holds
+    `NEXTREG 0x8E,3` -- `ED 91 8E 03` and then zero fill. The write selects
+    ROM page 3, so the next fetch is `0x3D00`, which in the `+3DOS` ROM is
+    zero fill too (verified byte-identical to `plus3.rom` from `0x3D00` on), and
+    the CPU NOP-slides out of page 3 into the `+3DOS` soft reset instead of
+    returning to `0x4804`. ROM page 3 `0x3CFC` is `C9`, exactly the `RET` the
+    glue needs, so the trampoline only works if ROM 3 is already selected when
+    `JP 0x3CFC` runs. Working out why a real Next is in that state -- the ROM
+    bytes are the same, so it is not an image difference -- is what is left.
+    The plan is still to finish this as a separate out-of-tree plugin over the
+    expansion bus rather than keep it on the Next's boot path. Its status port
+    at `0x1F` is also an approximation (card detect and busy only); the exact
+    bit layout of a real board was not available.
 18. A `.nex` loading screen is loaded into memory but never shown: the
     `loadingBar`, `loadingDelay` and `startDelay` fields are parsed and ignored,
     so the program starts at once instead of after an animated bar. The
