@@ -1042,6 +1042,14 @@ u8 Machine::readNextReg(u8 reg) const {
     const u32 line = u32(tstates_ % tstatesPerFrame_) / tstatesPerLine_;
     return reg == 0x1E ? u8(line) : u8(line >> 8);
   }
+  if (reg == 0x8E) {
+    // Composed from the classic ports, so a guest that reads the register back
+    // sees whatever it last wrote through either interface.
+    const u8 bank = isNext() ? u8(next_.mmuSlot(6) >> 1) : u8(port7ffd_ & 0x07);
+    const u8 rom = u8((isPlus3() || isNext()) ? ((port1ffd_ & 0x04) ? 2 : 0) : 0);
+    return u8((bank << 4) | 0x08 | (rom | ((port7ffd_ & 0x10) ? 1 : 0)) |
+              ((port1ffd_ & 0x01) ? 0x04 : 0x00));
+  }
   return next_.read(reg);
 }
 
@@ -1060,7 +1068,28 @@ void Machine::writeNextReg(u8 reg, u8 value) {
     case 0x50: case 0x51: case 0x52: case 0x53:
     case 0x54: case 0x55: case 0x56: case 0x57:
     case 0x8C: // alternate ROM
+    case 0x8F: // mapping mode: only the standard 128K/+3 layout is modelled
       next_.write(reg, value);
+      updatePaging();
+      return;
+    case 0x8E: // the 128K memory map as a single register
+      // Bits 0 and 1 are the two ROM select bits of ports 0x7FFD and 0x1FFD and
+      // bit 2 the +2A/+3 paging mode, all of which are visible as the classic
+      // ports. The RAM bank is only taken when bit 3 asks for it, which is how
+      // a caller can change the ROM without disturbing the RAM mapping. The
+      // 0x7FFD lock freezes this register just as it freezes that port.
+      if (pagingLocked_) return;
+      if ((value & 0x08) != 0) {
+        const u8 bank = u8((value >> 4) & 0x07);
+        port7ffd_ = u8((port7ffd_ & 0xF0) | bank);
+        if (isNext()) {
+          next_.setMmuSlot(6, u8(bank * 2));
+          next_.setMmuSlot(7, u8(bank * 2 + 1));
+        }
+      }
+      port7ffd_ = u8((port7ffd_ & ~0x10) | ((value & 0x01) ? 0x10 : 0x00));
+      port1ffd_ = u8((port1ffd_ & ~0x05) | ((value & 0x02) ? 0x04 : 0x00) |
+                     ((value & 0x04) ? 0x01 : 0x00));
       updatePaging();
       return;
     case 0x40: // palette index
