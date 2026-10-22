@@ -12,7 +12,7 @@
 #include "frontend/input.h"
 #include "frontend/ui.h"
 
-namespace mynext::frontend {
+namespace rainbow::frontend {
 
 class App {
 public:
@@ -29,6 +29,7 @@ public:
     std::string tape;
     std::string snapshot;
     std::string disk;
+    std::string sd;
   };
 
   bool init(const Options& options);
@@ -65,6 +66,10 @@ private:
   bool loadCartridge(const std::string& path);
   bool loadDivMmcRom(const std::string& path);
   bool loadDivMmcCard(const std::string& path);
+  // The card image is kept here, not in the module, so switching the machine
+  // type -- which rebuilds the bus -- does not silently take the card out.
+  void insertSdCard();
+  void ejectSdCard();
   bool savePrintout(const std::string& path);
   void openFileDialog(DialogKind kind);
   void openSaveDialog(DialogKind kind);
@@ -93,6 +98,8 @@ private:
   Input input_;
 
   std::string romPath_;
+  std::string sdPath_;
+  std::vector<u8> sdImage_;
   std::string pendingDialogResult_;
   bool dialogOpen_ = false;
   bool dialogSave_ = false;
@@ -127,4 +134,4 @@ private:
   std::string status_;
 };
 
-} // namespace mynext::frontend
+} // namespace rainbow::frontend

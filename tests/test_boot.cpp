@@ -5,11 +5,11 @@
 
 #include "core/machine.h"
 
-using mynext::Machine;
-using mynext::MachineType;
-using mynext::u32;
-using mynext::u64;
-using mynext::u8;
+using rainbow::Machine;
+using rainbow::MachineType;
+using rainbow::u32;
+using rainbow::u64;
+using rainbow::u8;
 
 namespace {
 
@@ -104,9 +104,9 @@ namespace {
 
 // Pixel address of the first byte of a text cell, using the ULA's interleaved
 // layout (third of the screen, then pixel line, then character row).
-mynext::u16 screenCellAddress(int textRow, int column, int pixelLine) {
+rainbow::u16 screenCellAddress(int textRow, int column, int pixelLine) {
   const int y = textRow * 8 + pixelLine;
-  return mynext::u16(0x4000 + ((y & 0xC0) << 5) + ((y & 0x07) << 8) +
+  return rainbow::u16(0x4000 + ((y & 0xC0) << 5) + ((y & 0x07) << 8) +
                      ((y & 0x38) << 2) + column);
 }
 
@@ -120,17 +120,17 @@ bool textRowHasInk(Machine& machine, int textRow) {
 // Recovers the text of one character row by matching each cell against the ROM
 // character set, so the test does not depend on how glyphs are rasterised.
 std::string screenRowText(Machine& machine, int textRow) {
-  constexpr mynext::u16 kChars = 0x3D00;
+  constexpr rainbow::u16 kChars = 0x3D00;
   std::string text;
   for (int column = 0; column < 32; ++column) {
-    const mynext::u16 address = screenCellAddress(textRow, column, 0);
+    const rainbow::u16 address = screenCellAddress(textRow, column, 0);
     int bestChar = '?';
     int bestDistance = 8 * 8 + 1;
     for (int ch = 32; ch < 128; ++ch) {
       int distance = 0;
       for (int line = 0; line < 8; ++line) {
-        const u8 glyph = machine.memRead(kChars + mynext::u16((ch - 32) * 8 + line), 0);
-        const u8 pixels = machine.memRead(address + mynext::u16(line << 8), 0);
+        const u8 glyph = machine.memRead(kChars + rainbow::u16((ch - 32) * 8 + line), 0);
+        const u8 pixels = machine.memRead(address + rainbow::u16(line << 8), 0);
         distance += __builtin_popcount(pixels ^ glyph);
       }
       if (distance < bestDistance) {
@@ -156,7 +156,7 @@ void tapKey(Machine& machine, int row, int column) {
 // so the test skips silently when the file is absent (e.g. in CI).
 TEST(boot_real_48k_rom_prints_copyright_message) {
   Machine machine(MachineType::Spectrum48);
-  if (!machine.loadRom(MYNEXT_SOURCE_DIR "/roms/48.rom")) return;
+  if (!machine.loadRom(RAINBOW_SOURCE_DIR "/roms/48.rom")) return;
 
   for (int i = 0; i < 120; ++i) machine.runFrame();
 
@@ -182,7 +182,7 @@ TEST(boot_real_48k_rom_prints_copyright_message) {
 // report channel on top of everything the copyright test already covers.
 TEST(boot_real_48k_rom_runs_basic_program) {
   Machine machine(MachineType::Spectrum48);
-  if (!machine.loadRom(MYNEXT_SOURCE_DIR "/roms/48.rom")) return;
+  if (!machine.loadRom(RAINBOW_SOURCE_DIR "/roms/48.rom")) return;
 
   for (int i = 0; i < 130; ++i) machine.runFrame();
 

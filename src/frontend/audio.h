@@ -4,7 +4,7 @@
 
 #include <SDL3/SDL.h>
 
-namespace mynext::frontend {
+namespace rainbow::frontend {
 
 // Thin wrapper around an SDL3 audio stream. The core produces interleaved
 // stereo float samples; SDL handles device format conversion and buffering.
@@ -20,4 +20,4 @@ private:
   SDL_AudioSpec spec_{};
 };
 
-} // namespace mynext::frontend
+} // namespace rainbow::frontend

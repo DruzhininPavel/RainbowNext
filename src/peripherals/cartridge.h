@@ -5,7 +5,7 @@
 
 #include "core/peripheral.h"
 
-namespace mynext {
+namespace rainbow {
 
 // A ROM cartridge in the spirit of the ZX Interface 2: the image takes over the
 // bottom 16K of the address space while the module is plugged in, and the
@@ -33,4 +33,4 @@ private:
   std::vector<u8> image_;
 };
 
-} // namespace mynext
+} // namespace rainbow

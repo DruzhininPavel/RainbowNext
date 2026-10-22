@@ -4,7 +4,7 @@
 
 #include "core/types.h"
 
-namespace mynext {
+namespace rainbow {
 
 // The ZX Spectrum Next configuration space: 256 byte-wide registers addressed
 // by number. Port 0x243B selects one, port 0x253B reads or writes it, and the
@@ -44,4 +44,4 @@ private:
   u8 selected_ = 0;
 };
 
-} // namespace mynext
+} // namespace rainbow

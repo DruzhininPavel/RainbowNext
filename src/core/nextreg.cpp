@@ -1,6 +1,6 @@
 #include "core/nextreg.h"
 
-namespace mynext {
+namespace rainbow {
 
 void NextRegFile::reset() {
   values_.fill(0);
@@ -58,4 +58,4 @@ void NextRegFile::write(u8 reg, u8 value) {
   values_[reg] = value;
 }
 
-} // namespace mynext
+} // namespace rainbow

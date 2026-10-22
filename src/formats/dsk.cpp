@@ -5,7 +5,7 @@
 #include <fstream>
 #include <iterator>
 
-namespace mynext::formats {
+namespace rainbow::formats {
 namespace {
 
 constexpr char StandardMagic[] = "MV - CPCEMU Disk-File\r\nDisk-Info\r\n";
@@ -206,4 +206,4 @@ bool loadDskFile(const std::string& path, DiskImage& out, std::string& error) {
   return true;
 }
 
-} // namespace mynext::formats
+} // namespace rainbow::formats

@@ -3,10 +3,10 @@
 #include "core/ay.h"
 #include "core/machine.h"
 
-using mynext::Ay38912;
-using mynext::Machine;
-using mynext::MachineType;
-using mynext::u8;
+using rainbow::Ay38912;
+using rainbow::Machine;
+using rainbow::MachineType;
+using rainbow::u8;
 
 namespace {
 

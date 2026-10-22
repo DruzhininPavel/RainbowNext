@@ -2,7 +2,7 @@
 
 #include <cstdio>
 
-namespace mynext::frontend::ui {
+namespace rainbow::frontend::ui {
 namespace {
 
 bool fileExists(const char* path) {
@@ -169,4 +169,4 @@ void drawSpectrumStripe(ImDrawList* drawList, ImVec2 min, ImVec2 max) {
   }
 }
 
-} // namespace mynext::frontend::ui
+} // namespace rainbow::frontend::ui

@@ -2,7 +2,7 @@
 
 #include <algorithm>
 
-namespace mynext {
+namespace rainbow {
 namespace {
 
 // Opcodes are compared on their low five bits so the two variants of a command
@@ -455,4 +455,4 @@ formats::DskTrack& Upd765::trackFor(int cylinder, int head) {
   return disk_->ensureTrack(cylinder, head);
 }
 
-} // namespace mynext
+} // namespace rainbow

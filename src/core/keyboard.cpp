@@ -1,6 +1,6 @@
 #include "core/keyboard.h"
 
-namespace mynext {
+namespace rainbow {
 
 void Keyboard::reset() {
   for (auto& row : keys_) row.fill(false);
@@ -28,4 +28,4 @@ u8 Keyboard::read(u8 high) const {
   return u8(result | 0xE0);
 }
 
-} // namespace mynext
+} // namespace rainbow

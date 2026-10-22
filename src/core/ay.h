@@ -2,7 +2,7 @@
 
 #include "core/types.h"
 
-namespace mynext {
+namespace rainbow {
 
 // AY-3-8912 programmable sound generator as wired into the Spectrum 128 and
 // everything after it: three square-wave channels, one noise generator and one
@@ -86,4 +86,4 @@ private:
   Stereo stereo_ = Stereo::Mono;
 };
 
-} // namespace mynext
+} // namespace rainbow

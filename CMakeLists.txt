@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.24)
-project(myNext VERSION 0.1.0 LANGUAGES CXX)
+project(RainbowNext VERSION 0.1.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -11,9 +11,9 @@ if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
   set(CMAKE_BUILD_TYPE RelWithDebInfo CACHE STRING "" FORCE)
 endif()
 
-option(MYNEXT_BUILD_TESTS "Build unit tests" ON)
-option(MYNEXT_FETCH_IMGUI "Fetch Dear ImGui" ON)
-option(MYNEXT_FETCH_SDL3 "Build SDL3 from source when no system SDL3 is found" ON)
+option(RAINBOW_BUILD_TESTS "Build unit tests" ON)
+option(RAINBOW_FETCH_IMGUI "Fetch Dear ImGui" ON)
+option(RAINBOW_FETCH_SDL3 "Build SDL3 from source when no system SDL3 is found" ON)
 
 include(FetchContent)
 
@@ -24,7 +24,7 @@ find_package(Threads REQUIRED)
 
 find_package(SDL3 3.2 QUIET)
 if(NOT SDL3_FOUND)
-  if(MYNEXT_FETCH_SDL3)
+  if(RAINBOW_FETCH_SDL3)
     message(STATUS "System SDL3 not found - building SDL3 from source")
     FetchContent_Declare(
       SDL3
@@ -41,11 +41,11 @@ if(NOT SDL3_FOUND)
   else()
     message(FATAL_ERROR
       "SDL3 >= 3.2 not found. Install it (brew install sdl3 / apt install libsdl3-dev) "
-      "or configure with -DMYNEXT_FETCH_SDL3=ON.")
+      "or configure with -DRAINBOW_FETCH_SDL3=ON.")
   endif()
 endif()
 
-if(MYNEXT_FETCH_IMGUI)
+if(RAINBOW_FETCH_IMGUI)
   FetchContent_Declare(
     imgui
     GIT_REPOSITORY https://github.com/ocornut/imgui.git
@@ -73,7 +73,7 @@ endif()
 # ---------------------------------------------------------------------------
 # Core (deterministic, no OS dependencies)
 # ---------------------------------------------------------------------------
-add_library(mynext_core STATIC
+add_library(rainbow_core STATIC
   src/core/z80.cpp
   src/core/machine.cpp
   src/core/ula.cpp
@@ -90,6 +90,7 @@ add_library(mynext_core STATIC
   src/core/dac.cpp
   src/core/dma.cpp
   src/core/expansion.cpp
+  src/core/sdcard.cpp
   src/peripherals/kempston.cpp
   src/peripherals/kempston_mouse.cpp
   src/peripherals/printer.cpp
@@ -101,43 +102,43 @@ add_library(mynext_core STATIC
   src/formats/tape.cpp
   src/formats/z80file.cpp
 )
-target_include_directories(mynext_core PUBLIC src)
-target_compile_options(mynext_core PRIVATE -Wall -Wextra -Wpedantic)
+target_include_directories(rainbow_core PUBLIC src)
+target_compile_options(rainbow_core PRIVATE -Wall -Wextra -Wpedantic)
 
 # ---------------------------------------------------------------------------
 # Plugin loader (the only part of the core that talks to the operating system)
 # ---------------------------------------------------------------------------
-add_library(mynext_plugin STATIC src/plugin/loader.cpp)
-target_link_libraries(mynext_plugin PUBLIC mynext_core)
-target_include_directories(mynext_plugin PUBLIC src)
-target_compile_options(mynext_plugin PRIVATE -Wall -Wextra -Wpedantic)
+add_library(rainbow_plugin STATIC src/plugin/loader.cpp)
+target_link_libraries(rainbow_plugin PUBLIC rainbow_core)
+target_include_directories(rainbow_plugin PUBLIC src)
+target_compile_options(rainbow_plugin PRIVATE -Wall -Wextra -Wpedantic)
 if(CMAKE_DL_LIBS)
-  target_link_libraries(mynext_plugin PUBLIC ${CMAKE_DL_LIBS})
+  target_link_libraries(rainbow_plugin PUBLIC ${CMAKE_DL_LIBS})
 endif()
 
 # ---------------------------------------------------------------------------
 # Example peripheral plugin, built into build/peripherals/ so the emulator and
 # the tests find it the same way a user's own plugin would be found.
 # ---------------------------------------------------------------------------
-add_library(mynext_fuller MODULE plugins/fuller/fuller.cpp)
-target_include_directories(mynext_fuller PRIVATE src)
-set_target_properties(mynext_fuller PROPERTIES
+add_library(rainbow_fuller MODULE plugins/fuller/fuller.cpp)
+target_include_directories(rainbow_fuller PRIVATE src)
+set_target_properties(rainbow_fuller PROPERTIES
   PREFIX ""
   OUTPUT_NAME "fuller_joystick"
   LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/peripherals"
 )
 if(APPLE)
-  set_target_properties(mynext_fuller PROPERTIES SUFFIX ".dylib")
+  set_target_properties(rainbow_fuller PROPERTIES SUFFIX ".dylib")
 elseif(WIN32)
-  set_target_properties(mynext_fuller PROPERTIES SUFFIX ".dll")
+  set_target_properties(rainbow_fuller PROPERTIES SUFFIX ".dll")
 else()
-  set_target_properties(mynext_fuller PROPERTIES SUFFIX ".so")
+  set_target_properties(rainbow_fuller PROPERTIES SUFFIX ".so")
 endif()
 
 # ---------------------------------------------------------------------------
 # Frontend (SDL3 + Dear ImGui)
 # ---------------------------------------------------------------------------
-add_executable(mynext
+add_executable(rainbow
   src/frontend/main.cpp
   src/frontend/app.cpp
   src/frontend/config.cpp
@@ -146,13 +147,13 @@ add_executable(mynext
   src/frontend/debugger.cpp
   src/frontend/ui.cpp
 )
-target_link_libraries(mynext PRIVATE mynext_core mynext_plugin SDL3::SDL3 imgui Threads::Threads)
+target_link_libraries(rainbow PRIVATE rainbow_core rainbow_plugin SDL3::SDL3 imgui Threads::Threads)
 # The example plugin is built into build/peripherals, where the emulator looks.
-add_dependencies(mynext mynext_fuller)
-target_compile_options(mynext PRIVATE -Wall -Wextra -Wpedantic)
+add_dependencies(rainbow rainbow_fuller)
+target_compile_options(rainbow PRIVATE -Wall -Wextra -Wpedantic)
 
 if(APPLE)
-  set_target_properties(mynext PROPERTIES
+  set_target_properties(rainbow PROPERTIES
     MACOSX_RPATH ON
     BUILD_WITH_INSTALL_RPATH OFF
   )
@@ -161,9 +162,9 @@ endif()
 # ---------------------------------------------------------------------------
 # Tests
 # ---------------------------------------------------------------------------
-if(MYNEXT_BUILD_TESTS)
+if(RAINBOW_BUILD_TESTS)
   enable_testing()
-  add_executable(mynext_tests
+  add_executable(rainbow_tests
     tests/test_main.cpp
     tests/test_z80.cpp
     tests/test_z80n.cpp
@@ -188,11 +189,11 @@ if(MYNEXT_BUILD_TESTS)
     tests/test_dsk.cpp
     tests/test_boot.cpp
   )
-  target_link_libraries(mynext_tests PRIVATE mynext_core mynext_plugin)
-  target_compile_options(mynext_tests PRIVATE -Wall -Wextra -Wpedantic)
+  target_link_libraries(rainbow_tests PRIVATE rainbow_core rainbow_plugin)
+  target_compile_options(rainbow_tests PRIVATE -Wall -Wextra -Wpedantic)
   # Lets the golden ROM test look for roms/48.rom in the source tree.
-  target_compile_definitions(mynext_tests PRIVATE
-    MYNEXT_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}"
-    MYNEXT_PLUGIN_DIR="${CMAKE_BINARY_DIR}/peripherals")
-  add_test(NAME mynext_tests COMMAND mynext_tests)
+  target_compile_definitions(rainbow_tests PRIVATE
+    RAINBOW_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}"
+    RAINBOW_PLUGIN_DIR="${CMAKE_BINARY_DIR}/peripherals")
+  add_test(NAME rainbow_tests COMMAND rainbow_tests)
 endif()

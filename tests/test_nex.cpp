@@ -10,13 +10,13 @@
 #include "core/palette.h"
 #include "formats/nex.h"
 
-using mynext::Machine;
-using mynext::MachineType;
-using mynext::NextPalette;
-using mynext::u16;
-using mynext::u8;
-using mynext::formats::loadNex;
-using mynext::formats::NexFile;
+using rainbow::Machine;
+using rainbow::MachineType;
+using rainbow::NextPalette;
+using rainbow::u16;
+using rainbow::u8;
+using rainbow::formats::loadNex;
+using rainbow::formats::NexFile;
 
 namespace {
 
@@ -58,7 +58,7 @@ void appendBank(std::vector<u8>& file, int bank) {
 
 std::string tempDir() {
   const std::filesystem::path dir =
-      std::filesystem::temp_directory_path() / "mynext-tests" / "nex";
+      std::filesystem::temp_directory_path() / "rainbow-tests" / "nex";
   std::error_code ec;
   std::filesystem::create_directories(dir, ec);
   return dir.string();

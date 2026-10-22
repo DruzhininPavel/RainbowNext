@@ -4,7 +4,7 @@
 
 #include "core/types.h"
 
-namespace mynext {
+namespace rainbow {
 
 // The Next's colour hardware: eight palettes of 256 entries, each entry a 9-bit
 // RGB333 colour. Register 0x43 picks the palette being written, 0x40 the entry
@@ -75,4 +75,4 @@ private:
   bool highBytePending_ = true;
 };
 
-} // namespace mynext
+} // namespace rainbow

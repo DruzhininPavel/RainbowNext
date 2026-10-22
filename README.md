@@ -1,4 +1,4 @@
-# myNext
+# RainbowNext
 
 A from-scratch ZX Spectrum / ZX Spectrum Next emulator written in C++20, built
 around a deterministic headless core and a thin SDL3 + Dear ImGui frontend.
@@ -76,7 +76,7 @@ Status: M1 — 48K and 128K/+2/+3 boot with AY sound, tape loading, disk images
   connector. A Kempston joystick, a Kempston mouse, a ZX Printer (with PBM
   export), a ROM cartridge and a DivMMC ship with the emulator; each is a module
   that can be switched on and off in `Peripherals`, and the choice is remembered
-  in `mynext.cfg`. Further modules are shared libraries dropped into a
+  in `rainbow.cfg`. Further modules are shared libraries dropped into a
   `peripherals/` folder next to the executable — the emulator finds them at
   startup and needs no rebuild (see [Writing a peripheral](#writing-a-peripheral)).
 * **DivMMC and SD card** — the mass-storage interface esxDOS runs on: an 8K (or
@@ -92,7 +92,7 @@ Status: M1 — 48K and 128K/+2/+3 boot with AY sound, tape loading, disk images
 ## Build
 
 Requirements: CMake ≥ 3.24, a C++20 compiler, SDL3 ≥ 3.2. If SDL3 is missing it
-is downloaded and built automatically (`-DMYNEXT_FETCH_SDL3=OFF` to disable).
+is downloaded and built automatically (`-DRAINBOW_FETCH_SDL3=OFF` to disable).
 
 ### macOS
 
@@ -122,15 +122,16 @@ ctest --test-dir build --output-on-failure
 ROM images are not bundled — see [`roms/README.md`](roms/README.md).
 
 ```sh
-./build/mynext                      # searches roms/48.rom, roms/48.ROM, 48.rom
-./build/mynext roms/48.rom          # explicit ROM
-./build/mynext game.tap             # ROM from roms/, tape inserted
-./build/mynext --rom 48.rom --tape game.tzx --snapshot save.z80
-./build/mynext --rom roms/plus3-0.rom --disk game.dsk
+./build/rainbow                      # searches roms/48.rom, roms/48.ROM, 48.rom
+./build/rainbow roms/48.rom          # explicit ROM
+./build/rainbow game.tap             # ROM from roms/, tape inserted
+./build/rainbow --rom 48.rom --tape game.tzx --snapshot save.z80
+./build/rainbow --rom roms/plus3-0.rom --disk game.dsk
+./build/rainbow --rom roms/48.rom --sd nextzxos.img   # DivMMC SD card
 ```
 
 A bare path is routed by extension: `.rom`, `.tap`/`.tzx`, `.sna`/`.z80`,
-`.nex`, `.dsk`/`.edsk`. The same files can be dropped onto the window.
+`.nex`, `.dsk`/`.edsk`, `.img`. The same files can be dropped onto the window.
 
 Tape playback is real-time through the EAR bit, so `LOAD ""` works as on real
 hardware. `Tape > Instant load` (on by default) short-circuits the ROM loader for
@@ -155,10 +156,10 @@ instant loading; turn it off to hear and debug the actual tape signal.
 ## Layout
 
 ```
-src/core/          Z80, ULA, AY, DACs, µPD765, Machine — no OS deps
+src/core/          Z80, ULA, AY, DACs, µPD765, SD card, Machine — no OS deps
 src/core/          peripheral.h and expansion.h: the bus and the module contract
 src/peripherals/   built-in modules: kempston, kempston mouse, printer,
-                   cartridge, divmmc (with an SPI SD card)
+                   cartridge, divmmc (SPI SD card shared from src/core/sdcard)
 src/plugin/        the C ABI and the loader for out-of-tree modules
 plugins/           example plugin: a Fuller Audio Box joystick interface
 src/formats/       SNA / Z80 / NEX images, TAP / TZX tapes, DSK / EDSK disks
@@ -170,7 +171,7 @@ roms/              user-supplied ROMs (empty by design)
 
 ## Writing a peripheral
 
-A module is one class deriving from `mynext::Peripheral`
+A module is one class deriving from `rainbow::Peripheral`
 (`src/core/peripheral.h`). Implement `info()` and whatever you need of
 `ioRead`/`ioWrite`/`rom`/`tick`/`loadFile`, and remember that `ioRead`/`ioWrite`
 return **true only when the module owns the access** — return false and the
@@ -186,20 +187,20 @@ and storing nothing is allowed; the boolean means "mine", not "changed".
 
 Two ways to ship it:
 
-1. **Built-in** — put the source in `src/peripherals/`, add it to `mynext_core`
+1. **Built-in** — put the source in `src/peripherals/`, add it to `rainbow_core`
    in `CMakeLists.txt` and create it in `Machine::installPeripherals()`. Use
    this while you develop, since you get the debugger and the tests for free.
 2. **Plugin** — implement the plain C ABI of `src/plugin/plugin_api.h` and
-   export a `mynext_plugin_v1` symbol. `plugins/fuller/fuller.cpp` is a complete
-   worked example; `mynext_fuller` in `CMakeLists.txt` shows the link line. The
+   export a `rainbow_plugin_v1` symbol. `plugins/fuller/fuller.cpp` is a complete
+   worked example; `rainbow_fuller` in `CMakeLists.txt` shows the link line. The
    result is a `.dylib`/`.so`/`.dll` you drop into the `peripherals/` folder
-   (next to the executable, or wherever `plugin_dir` in `mynext.cfg` points) and
-   switch on in `Peripherals`. The ABI in `mynext_peripheral_v1` has a
+   (next to the executable, or wherever `plugin_dir` in `rainbow.cfg` points) and
+   switch on in `Peripherals`. The ABI in `rainbow_peripheral_v1` has a
    `struct_size`, so fields are only ever appended: a plugin built against an
    older header keeps working, and the loader reads the optional memory hooks
    only when the struct is long enough to have them.
 
-The settings file lives at `~/Library/Application Support/myNext/myNext/mynext.cfg`
+The settings file lives at `~/Library/Application Support/RainbowNext/RainbowNext/rainbow.cfg`
 on macOS and in the SDL pref path on Linux, and is a flat `key = value` file:
 
 ```
@@ -214,7 +215,7 @@ peripheral = printer
 ctest --test-dir build --output-on-failure
 ```
 
-356 tests cover the Z80 core (timings, flags, undocumented opcodes,
+358 tests cover the Z80 core (timings, flags, undocumented opcodes,
 interrupts), the Z80N extension, the Next MMU, palette, Layer 2, sprites
 (including relative and unified sprites and the collision flags), the tilemap,
 the Copper and the zxnDMA, ULA behaviour, contention, floating bus, frame
@@ -222,7 +223,8 @@ length, audio rate, both snapshot formats, the NEX parser and its application
 to the machine, the AY, the TurboSound chip select
 and stereo bits, the SpecDrum and SoundDrive DAC ports, 128K/+3 paging and
 timings, tape blocks, the µPD765 and the DSK parser, the expansion bus with its
-modules and plugin loader, the DivMMC and its SPI SD card, the settings file,
+modules and plugin loader, the DivMMC and its SPI SD card (single- and
+multi-block reads and writes), the settings file,
 and end-to-end runs of
 hand-assembled programs through the machine. Golden tests also boot the real
 `roms/128-0.rom` and `roms/plus3-0.rom` sets when those files are present; they

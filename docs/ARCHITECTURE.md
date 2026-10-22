@@ -1,12 +1,12 @@
 # Architecture
 
-myNext is split into a **deterministic core** and a **thin host frontend**, the
+RainbowNext is split into a **deterministic core** and a **thin host frontend**, the
 same shape used by RustZX (`core` / `host`), JNEXT (`core` / `gui`) and
 Tom Harte's CLK (processor + clocked components).
 
 ```mermaid
 flowchart TD
-    subgraph core["mynext_core (headless, no OS deps)"]
+    subgraph core["rainbow_core (headless, no OS deps)"]
         Z80["Z80 CPU<br/>cycle-accurate, per-instruction"]
         BUS["Bus interface<br/>memRead/memWrite/ioRead/ioWrite<br/>contention/tick/now"]
         ULA["ULA<br/>video, border, port 0xFE,<br/>contention, floating bus"]
@@ -73,7 +73,7 @@ flowchart TD
 
 ## Expansion bus
 
-The Spectrum had its expansion on the edge connector, and myNext keeps that
+The Spectrum had its expansion on the edge connector, and RainbowNext keeps that
 shape: `src/core/peripheral.h` is the contract a device implements,
 `src/core/expansion.h` is the bus that owns the devices, and `Machine` routes
 every access through it. Nothing in the machine knows which modules exist, so
@@ -82,7 +82,7 @@ never touches the core.
 
 There are two levels of module, and the difference is only who compiles them:
 
-* **Built-in** (`src/peripherals/`) are compiled into `mynext_core`, created by
+* **Built-in** (`src/peripherals/`) are compiled into `rainbow_core`, created by
   a factory in `Machine::installPeripherals()` and type-safe. They can reach the
   rest of the core directly when they need to; `kempston`, `kempston-mouse`,
   `printer`, `cartridge` and `divmmc` ship this way.
@@ -163,15 +163,23 @@ image is 32K. An opcode fetch at `0x0000`, `0x0008`, `0x0038`, `0x0066`,
 `0x04C6` or `0x0562` sets `conmem` by itself; a plain read of the same address
 does not.
 
-**The card.** The SD card is an `SdCard`: a plain sector image in memory with
-the SPI state machine in front of it, which is why it is testable without a
-file. A driver sends a six-byte command frame (`0x40 | cmd`, four argument
-bytes, a CRC that SPI mode ignores) and reads an R1 back; `CMD0`, `CMD8`,
-`CMD55`+`ACMD41`, `CMD9`, `CMD10`, `CMD13`, `CMD16`, `CMD17`, `CMD24`, `CMD58`
-and `CMD59` are answered, and everything else gets the illegal-command bit. The
-card reports SDHC and block addressing once `ACMD41` sets the HCS bit, and its
-`CSD` is rewritten to match the size of the image, because that is the one field
-a driver sanity-checks.
+**The card.** The SD card lives in the core as `src/core/sdcard.*`: a plain
+sector image in memory with the SPI state machine in front of it, which is why
+it is testable without a file. It sits outside the module because the Next's
+own firmware talks to the same card over the same port, and because a test
+should not have to plug in a DivMMC to exercise it. A driver sends a six-byte
+command frame (`0x40 | cmd`, four argument bytes, a CRC that SPI mode ignores)
+and reads an R1 back; `CMD0`, `CMD8`, `CMD9`, `CMD10`, `CMD12`, `CMD13`,
+`CMD16`, `CMD17`, `CMD18`, `CMD23`, `CMD24`, `CMD25`, `CMD55`+`ACMD41`,
+`CMD58` and `CMD59` are answered, and everything else gets the
+illegal-command bit. The card reports SDHC and block addressing once `ACMD41`
+sets the HCS bit, and its `CSD` is rewritten to match the size of the image,
+because that is the one field a driver sanity-checks.
+
+`CMD18` streams: the next block is generated on demand as the driver clocks
+bytes out, so a multi-block read of a 64M image never copies it. `CMD25`
+collects the blocks until the `0xFD` stop token and answers with the usual
+data-response token. `CMD12` aborts either direction.
 
 Two details are worth knowing:
 
@@ -188,8 +196,11 @@ module is plugged in last and the joystick wins `0x1F`; the module answers on
 `0x3F`, `0x9F` and `0xBF` instead.
 
 The frontend offers `Load DivMMC ROM...` and `Insert SD card image...` under
-**Peripherals**; both switch the module on. The ROM is not shipped — put
-`esxdos.rom` (8K, or 32K for a DivMMC+) wherever you keep your ROMs and load it
+**Peripherals**, and `--sd FILE` / a dropped `.img` does the same at startup.
+Both switch the module on. The card image is owned by the app rather than the
+module, so switching the machine type rebuilds the bus without ejecting the
+card. The ROM is not shipped — put `esxdos.rom` (8K, or 32K for a DivMMC+)
+wherever you keep your ROMs and load it
 from there.
 
 ## Timings

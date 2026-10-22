@@ -2,7 +2,7 @@
 
 #include "core/peripheral.h"
 
-namespace mynext {
+namespace rainbow {
 
 // Kempston joystick: one read port that decodes A7-A5 as zero, so 0x1F and its
 // mirrors answer. Bits 5-7 stay clear, which is how a program detects that the
@@ -20,4 +20,4 @@ private:
   const HostServices* host_ = nullptr;
 };
 
-} // namespace mynext
+} // namespace rainbow

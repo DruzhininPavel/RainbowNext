@@ -6,9 +6,9 @@
 #include "formats/snapshot.h"
 #include "formats/z80file.h"
 
-using mynext::u8;
-using mynext::u16;
-using mynext::formats::Snapshot;
+using rainbow::u8;
+using rainbow::u16;
+using rainbow::formats::Snapshot;
 
 namespace {
 
@@ -58,7 +58,7 @@ TEST(sna_48k) {
 
   Snapshot snap;
   std::string error;
-  CHECK(mynext::formats::loadSna(sna, snap, error));
+  CHECK(rainbow::formats::loadSna(sna, snap, error));
   CHECK_EQ(snap.regs.pc, 0x1234);
   CHECK_EQ(snap.regs.sp, 0xFF02);
   CHECK_EQ(snap.regs.i, 0x3F);
@@ -83,7 +83,7 @@ TEST(sna_128k) {
 
   Snapshot snap;
   std::string error;
-  CHECK(mynext::formats::loadSna(sna, snap, error));
+  CHECK(rainbow::formats::loadSna(sna, snap, error));
   CHECK(snap.is128);
   CHECK_EQ(snap.regs.pc, 0x8000);
   CHECK_EQ(snap.port7ffd, 0x17);
@@ -96,7 +96,7 @@ TEST(sna_rejects_truncated) {
   std::vector<u8> sna(27 + 1024, 0);
   Snapshot snap;
   std::string error;
-  CHECK(!mynext::formats::loadSna(sna, snap, error));
+  CHECK(!rainbow::formats::loadSna(sna, snap, error));
   CHECK(!error.empty());
 }
 
@@ -110,7 +110,7 @@ TEST(z80_v1) {
 
   Snapshot snap;
   std::string error;
-  CHECK(mynext::formats::loadZ80(z80, snap, error));
+  CHECK(rainbow::formats::loadZ80(z80, snap, error));
   CHECK_EQ(snap.regs.pc, 0x8000);
   CHECK_EQ(snap.regs.sp, 0xFF00);
   CHECK_EQ(u16(snap.regs.a) << 8 | snap.regs.f, 0x8000);
@@ -148,7 +148,7 @@ TEST(z80_v2_mixed_blocks) {
 
   Snapshot snap;
   std::string error;
-  CHECK(mynext::formats::loadZ80(z80, snap, error));
+  CHECK(rainbow::formats::loadZ80(z80, snap, error));
   CHECK_EQ(snap.regs.pc, 0x8000);
   CHECK_EQ(snap.regs.sp, 0xFF00);
   CHECK(!snap.is128);
@@ -161,6 +161,6 @@ TEST(z80_rejects_truncated) {
   std::vector<u8> z80(20, 0);
   Snapshot snap;
   std::string error;
-  CHECK(!mynext::formats::loadZ80(z80, snap, error));
+  CHECK(!rainbow::formats::loadZ80(z80, snap, error));
   CHECK(!error.empty());
 }

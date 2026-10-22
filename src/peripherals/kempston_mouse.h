@@ -2,7 +2,7 @@
 
 #include "core/peripheral.h"
 
-namespace mynext {
+namespace rainbow {
 
 // Kempston mouse. Three read-only ports carry the buttons and the two
 // quadrature counters; the interface itself does the counting, so a program
@@ -36,4 +36,4 @@ private:
   u8 buttons_ = 0;
 };
 
-} // namespace mynext
+} // namespace rainbow

@@ -2,7 +2,7 @@
 
 #include <cstdio>
 
-namespace mynext::frontend {
+namespace rainbow::frontend {
 
 bool Audio::init(int sampleRate) {
   spec_.format = SDL_AUDIO_F32;
@@ -35,4 +35,4 @@ void Audio::push(const std::vector<float>& samples) {
   SDL_PutAudioStreamData(stream_, samples.data(), int(samples.size() * sizeof(float)));
 }
 
-} // namespace mynext::frontend
+} // namespace rainbow::frontend

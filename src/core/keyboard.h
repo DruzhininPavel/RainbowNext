@@ -4,7 +4,7 @@
 
 #include "core/types.h"
 
-namespace mynext {
+namespace rainbow {
 
 // The ZX Spectrum keyboard is an 8x5 matrix. A row is selected by pulling one
 // of the address lines A8..A15 low; the five data bits report the keys in that
@@ -26,4 +26,4 @@ private:
   std::array<std::array<bool, Columns>, Rows> keys_{};
 };
 
-} // namespace mynext
+} // namespace rainbow

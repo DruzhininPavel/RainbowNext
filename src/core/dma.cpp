@@ -1,6 +1,6 @@
 #include "core/dma.h"
 
-namespace mynext {
+namespace rainbow {
 
 void ZxnDma::reset() {
   aStart_ = 0;
@@ -299,4 +299,4 @@ u8 ZxnDma::read(bool zilogMode) {
   return 0;
 }
 
-} // namespace mynext
+} // namespace rainbow

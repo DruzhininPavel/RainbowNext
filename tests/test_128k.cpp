@@ -2,13 +2,13 @@
 
 #include "core/machine.h"
 
-using mynext::Machine;
-using mynext::MachineType;
-using mynext::u16;
-using mynext::u32;
-using mynext::u8;
-using mynext::tstatesPerLine;
-using mynext::tstatesPerFrame;
+using rainbow::Machine;
+using rainbow::MachineType;
+using rainbow::u16;
+using rainbow::u32;
+using rainbow::u8;
+using rainbow::tstatesPerLine;
+using rainbow::tstatesPerFrame;
 
 namespace {
 
@@ -236,9 +236,9 @@ TEST(k128_rom_image_loads_every_16k_bank) {
 }
 
 TEST(k128_machine_types_report_their_timings) {
-  CHECK_EQ(mynext::timingsFor(MachineType::Spectrum48).cpuHz, 3500000u);
-  CHECK_EQ(mynext::timingsFor(MachineType::Spectrum128).cpuHz, 3546900u);
-  CHECK_EQ(mynext::timingsFor(MachineType::Plus3).cpuHz, 3546900u);
-  CHECK_EQ(mynext::timingsFor(MachineType::Pentagon).cpuHz, 3584000u);
-  CHECK_EQ(mynext::timingsFor(MachineType::Spectrum128).ayHz, 1773400u);
+  CHECK_EQ(rainbow::timingsFor(MachineType::Spectrum48).cpuHz, 3500000u);
+  CHECK_EQ(rainbow::timingsFor(MachineType::Spectrum128).cpuHz, 3546900u);
+  CHECK_EQ(rainbow::timingsFor(MachineType::Plus3).cpuHz, 3546900u);
+  CHECK_EQ(rainbow::timingsFor(MachineType::Pentagon).cpuHz, 3584000u);
+  CHECK_EQ(rainbow::timingsFor(MachineType::Spectrum128).ayHz, 1773400u);
 }

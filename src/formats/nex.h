@@ -6,7 +6,7 @@
 
 #include "core/types.h"
 
-namespace mynext::formats {
+namespace rainbow::formats {
 
 // A .nex container: a ZX Spectrum Next program together with the RAM banks it
 // needs, an optional loading screen and the NextReg state its author asked for.
@@ -58,4 +58,4 @@ struct NexFile {
 // rejected rather than half-loaded.
 bool loadNex(const std::vector<u8>& data, NexFile& out, std::string& error);
 
-} // namespace mynext::formats
+} // namespace rainbow::formats

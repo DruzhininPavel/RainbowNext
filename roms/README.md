@@ -1,7 +1,7 @@
 # ROM images
 
 This directory is intentionally **empty**. No ROM images are distributed with
-myNext, because the original ZX Spectrum / ZX Spectrum Next ROMs are still
+RainbowNext, because the original ZX Spectrum / ZX Spectrum Next ROMs are still
 under copyright by Amstrad plc / SpecNext Ltd.
 
 ## What to put here
@@ -30,9 +30,9 @@ is exactly 16 384 bytes. If no banked files exist it falls back to a single
 `<base>.rom`. That means either layout works:
 
 ```sh
-./build/mynext roms/128-0.rom        # the rest of the set is picked up
-./build/mynext roms/plus3-0.rom      # four-bank +3 set
-./build/mynext roms/48.rom           # plain single-bank 48K
+./build/rainbow roms/128-0.rom        # the rest of the set is picked up
+./build/rainbow roms/plus3-0.rom      # four-bank +3 set
+./build/rainbow roms/48.rom           # plain single-bank 48K
 ```
 
 With no argument the frontend searches the candidate list for the selected

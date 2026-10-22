@@ -4,13 +4,13 @@
 #include <fstream>
 #include <iterator>
 
-namespace mynext {
+namespace rainbow {
 
 Cartridge::Cartridge() {
   info_.id = "cartridge";
   info_.name = "ROM Cartridge";
   info_.version = "1.0";
-  info_.author = "myNext";
+  info_.author = "RainbowNext";
   info_.description =
       "Maps a 16K ROM image at 0x0000 and hides the machine's own ROM, like a "
       "ZX Interface 2 cartridge. Load a .rom or .bin image from the menu.";
@@ -44,4 +44,4 @@ bool Cartridge::loadData(const u8* data, size_t size, std::string& error) {
   return true;
 }
 
-} // namespace mynext
+} // namespace rainbow

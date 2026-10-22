@@ -3,7 +3,7 @@
 #include <algorithm>
 #include <cstdio>
 
-namespace mynext {
+namespace rainbow {
 
 bool Tape::load(const std::string& path, std::string& error) {
   formats::TapeImage image;
@@ -125,4 +125,4 @@ void Tape::stepBlock() {
   remaining_ = 0;
 }
 
-} // namespace mynext
+} // namespace rainbow

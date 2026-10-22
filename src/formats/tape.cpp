@@ -5,7 +5,7 @@
 #include <fstream>
 #include <iterator>
 
-namespace mynext::formats {
+namespace rainbow::formats {
 namespace {
 
 // 3.5 MHz: the unit every tape timing in this file is expressed in.
@@ -398,4 +398,4 @@ bool loadTapeFile(const std::string& path, TapeImage& out, std::string& error) {
   return parseTap(bytes, out, error);
 }
 
-} // namespace mynext::formats
+} // namespace rainbow::formats

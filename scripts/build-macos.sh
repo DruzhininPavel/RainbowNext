@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Build myNext on macOS (Apple Silicon or Intel).
+# Build RainbowNext on macOS (Apple Silicon or Intel).
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
@@ -18,4 +18,4 @@ cmake --build "$BUILD_DIR" -j"$(sysctl -n hw.ncpu)"
 ctest --test-dir "$BUILD_DIR" --output-on-failure
 
 echo
-echo "Built $BUILD_DIR/mynext — run: $BUILD_DIR/mynext roms/48.rom"
+echo "Built $BUILD_DIR/rainbow — run: $BUILD_DIR/rainbow roms/48.rom"

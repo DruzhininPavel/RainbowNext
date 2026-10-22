@@ -7,14 +7,14 @@
 #include "core/tape.h"
 #include "formats/tape.h"
 
-using mynext::Machine;
-using mynext::MachineType;
-using mynext::Tape;
-using mynext::u16;
-using mynext::u32;
-using mynext::u8;
-using mynext::formats::TapeBlock;
-using mynext::formats::TapeImage;
+using rainbow::Machine;
+using rainbow::MachineType;
+using rainbow::Tape;
+using rainbow::u16;
+using rainbow::u32;
+using rainbow::u8;
+using rainbow::formats::TapeBlock;
+using rainbow::formats::TapeImage;
 
 namespace {
 
@@ -53,7 +53,7 @@ TEST(tap_parses_blocks_with_standard_timings) {
 
   TapeImage image;
   std::string error;
-  CHECK(mynext::formats::parseTap(tap, image, error));
+  CHECK(rainbow::formats::parseTap(tap, image, error));
 
   CHECK_EQ(image.blocks.size(), 2);
   CHECK_EQ(image.blocks[0].data.size(), kHeader.size());
@@ -63,13 +63,13 @@ TEST(tap_parses_blocks_with_standard_timings) {
   CHECK(!image.blocks[1].isHeader());
 
   const TapeBlock& block = image.blocks[1];
-  CHECK_EQ(block.pilotPulses, mynext::formats::StandardPilotPulses);
-  CHECK_EQ(block.pilotLength, mynext::formats::StandardPilotLength);
-  CHECK_EQ(block.syncFirst, mynext::formats::StandardSyncFirst);
-  CHECK_EQ(block.syncSecond, mynext::formats::StandardSyncSecond);
-  CHECK_EQ(block.zeroLength, mynext::formats::StandardZeroLength);
-  CHECK_EQ(block.oneLength, mynext::formats::StandardOneLength);
-  CHECK_EQ(block.pauseMs, mynext::formats::StandardPauseMs);
+  CHECK_EQ(block.pilotPulses, rainbow::formats::StandardPilotPulses);
+  CHECK_EQ(block.pilotLength, rainbow::formats::StandardPilotLength);
+  CHECK_EQ(block.syncFirst, rainbow::formats::StandardSyncFirst);
+  CHECK_EQ(block.syncSecond, rainbow::formats::StandardSyncSecond);
+  CHECK_EQ(block.zeroLength, rainbow::formats::StandardZeroLength);
+  CHECK_EQ(block.oneLength, rainbow::formats::StandardOneLength);
+  CHECK_EQ(block.pauseMs, rainbow::formats::StandardPauseMs);
 }
 
 TEST(tap_pulse_train_matches_the_rom_loader) {
@@ -78,7 +78,7 @@ TEST(tap_pulse_train_matches_the_rom_loader) {
 
   TapeImage image;
   std::string error;
-  CHECK(mynext::formats::parseTap(tap, image, error));
+  CHECK(rainbow::formats::parseTap(tap, image, error));
   const TapeBlock& block = image.blocks[0];
 
   CHECK_EQ(block.bitCount(), 16);
@@ -104,7 +104,7 @@ TEST(tap_rejects_a_truncated_block) {
 
   TapeImage image;
   std::string error;
-  CHECK(!mynext::formats::parseTap(tap, image, error));
+  CHECK(!rainbow::formats::parseTap(tap, image, error));
   CHECK(!error.empty());
 }
 
@@ -141,7 +141,7 @@ TEST(tzx_parses_standard_turbo_tone_and_pause_blocks) {
   const std::vector<u8> tzx = makeTzx(body);
   TapeImage image;
   std::string error;
-  CHECK(mynext::formats::parseTzx(tzx, image, error));
+  CHECK(rainbow::formats::parseTzx(tzx, image, error));
   CHECK(image.fromTzx);
   CHECK(image.title == "TESTTAPE");
   CHECK_EQ(image.blocks.size(), 4);
@@ -194,7 +194,7 @@ TEST(tzx_resolves_loops_and_jumps) {
   const std::vector<u8> tzx = makeTzx(body);
   TapeImage image;
   std::string error;
-  CHECK(mynext::formats::parseTzx(tzx, image, error));
+  CHECK(rainbow::formats::parseTzx(tzx, image, error));
   CHECK_EQ(image.blocks.size(), 4);
   CHECK_EQ(image.blocks[0].kind, TapeBlock::Kind::Pulses);
   CHECK_EQ(image.blocks[2].kind, TapeBlock::Kind::Pulses);
@@ -208,7 +208,7 @@ TEST(tzx_rejects_unknown_blocks) {
 
   TapeImage image;
   std::string error;
-  CHECK(!mynext::formats::parseTzx(tzx, image, error));
+  CHECK(!rainbow::formats::parseTzx(tzx, image, error));
   CHECK(!error.empty());
 }
 
@@ -218,7 +218,7 @@ TEST(tape_playback_toggles_the_ear_bit) {
 
   TapeImage image;
   std::string error;
-  CHECK(mynext::formats::parseTap(tap, image, error));
+  CHECK(rainbow::formats::parseTap(tap, image, error));
 
   Tape tape;
   tape.loadImage(image);
@@ -244,7 +244,7 @@ TEST(tape_rewind_restarts_the_picture) {
   appendTapBlock(tap, kData);
   TapeImage image;
   std::string error;
-  CHECK(mynext::formats::parseTap(tap, image, error));
+  CHECK(rainbow::formats::parseTap(tap, image, error));
 
   Tape tape;
   tape.loadImage(image);
@@ -262,7 +262,7 @@ TEST(tape_rewind_restarts_the_picture) {
 // routine, exactly as a LOAD "" command would enter it.
 TEST(tape_fast_load_serves_the_rom_loader) {
   Machine machine(MachineType::Spectrum48);
-  if (!machine.loadRom(MYNEXT_SOURCE_DIR "/roms/48.rom")) return;
+  if (!machine.loadRom(RAINBOW_SOURCE_DIR "/roms/48.rom")) return;
   machine.reset();
 
   std::vector<u8> tap;
@@ -270,7 +270,7 @@ TEST(tape_fast_load_serves_the_rom_loader) {
 
   TapeImage image;
   std::string error;
-  CHECK(mynext::formats::parseTap(tap, image, error));
+  CHECK(rainbow::formats::parseTap(tap, image, error));
   machine.tape().loadImage(image);
   machine.tape().setFastLoad(true);
 
@@ -305,14 +305,14 @@ TEST(tape_fast_load_serves_the_rom_loader) {
 
 TEST(tape_fast_load_ignores_a_misaligned_block) {
   Machine machine(MachineType::Spectrum48);
-  if (!machine.loadRom(MYNEXT_SOURCE_DIR "/roms/48.rom")) return;
+  if (!machine.loadRom(RAINBOW_SOURCE_DIR "/roms/48.rom")) return;
   machine.reset();
 
   std::vector<u8> tap;
   appendTapBlock(tap, kHeader); // a header block, but the caller wants data
   TapeImage image;
   std::string error;
-  CHECK(mynext::formats::parseTap(tap, image, error));
+  CHECK(rainbow::formats::parseTap(tap, image, error));
   machine.tape().loadImage(image);
 
   auto& regs = machine.cpu().regs();
@@ -407,12 +407,12 @@ std::vector<u8> makeHelloTap() {
 // leave the BASIC program in memory exactly as it is on the tape.
 TEST(rom_loads_a_basic_program_from_a_tap) {
   Machine machine(MachineType::Spectrum48);
-  if (!machine.loadRom(MYNEXT_SOURCE_DIR "/roms/48.rom")) return;
+  if (!machine.loadRom(RAINBOW_SOURCE_DIR "/roms/48.rom")) return;
 
   const std::vector<u8> tap = makeHelloTap();
   TapeImage image;
   std::string error;
-  CHECK(mynext::formats::parseTap(tap, image, error));
+  CHECK(rainbow::formats::parseTap(tap, image, error));
   image.title = "hello.tap";
   machine.tape().loadImage(image);
 

@@ -1,6 +1,6 @@
 #include "core/sprites.h"
 
-namespace mynext {
+namespace rainbow {
 
 void Sprites::reset() {
   for (auto& attr : attrs_) attr.fill(0);
@@ -173,4 +173,4 @@ int Sprites::pixel(const SpriteState& state, int column, int row,
   return index == hidden ? -1 : int(index);
 }
 
-} // namespace mynext
+} // namespace rainbow

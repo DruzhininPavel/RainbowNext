@@ -2,7 +2,7 @@
 
 #include "core/types.h"
 
-namespace mynext {
+namespace rainbow {
 
 // The 1-bit beeper driven by bit 4 of port 0xFE. The machine samples it at the
 // audio rate while ticking, which is accurate enough for M0 and avoids the
@@ -17,4 +17,4 @@ private:
   float level_ = 0.0f;
 };
 
-} // namespace mynext
+} // namespace rainbow

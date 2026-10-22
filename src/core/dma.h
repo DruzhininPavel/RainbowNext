@@ -5,7 +5,7 @@
 
 #include "core/types.h"
 
-namespace mynext {
+namespace rainbow {
 
 // The Next's zxnDMA: a single channel of the Z80 DMA mapped to port 0x6B, with
 // port 0x0B as the Zilog compatibility port, where a block is one byte longer
@@ -143,4 +143,4 @@ private:
   bool expectMask_ = false;
 };
 
-} // namespace mynext
+} // namespace rainbow

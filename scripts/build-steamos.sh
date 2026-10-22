@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Build myNext on SteamOS / Arch / any Linux with SDL3 available.
+# Build RainbowNext on SteamOS / Arch / any Linux with SDL3 available.
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
@@ -25,4 +25,4 @@ cmake --build "$BUILD_DIR" -j"$(nproc)"
 ctest --test-dir "$BUILD_DIR" --output-on-failure
 
 echo
-echo "Built $BUILD_DIR/mynext — run: $BUILD_DIR/mynext roms/48.rom"
+echo "Built $BUILD_DIR/rainbow — run: $BUILD_DIR/rainbow roms/48.rom"

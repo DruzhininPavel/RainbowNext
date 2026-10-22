@@ -1,12 +1,12 @@
 #include "peripherals/kempston_mouse.h"
 
-namespace mynext {
+namespace rainbow {
 
 KempstonMouse::KempstonMouse() {
   info_.id = "kempston-mouse";
   info_.name = "Kempston Mouse";
   info_.version = "1.0";
-  info_.author = "myNext";
+  info_.author = "RainbowNext";
   info_.description =
       "Three read-only ports: buttons on 0xFBDF, X on 0xFFDF and Y on 0xFDFF.";
   info_.ports = {0xFBDF, 0xFFDF, 0xFDFF};
@@ -35,4 +35,4 @@ void KempstonMouse::move(int dx, int dy) {
   y_ = u8((int(y_) - dy) & 0xFF);
 }
 
-} // namespace mynext
+} // namespace rainbow

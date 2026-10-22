@@ -6,7 +6,7 @@
 #include "core/types.h"
 #include "formats/dsk.h"
 
-namespace mynext {
+namespace rainbow {
 
 // NEC µPD765 as wired into the +2A/+3: two ports, non-DMA mode only, one or
 // two single-sided drives. The controller is a small state machine because the
@@ -90,4 +90,4 @@ class Upd765 {
   u8 lastN_ = 2;
 };
 
-} // namespace mynext
+} // namespace rainbow

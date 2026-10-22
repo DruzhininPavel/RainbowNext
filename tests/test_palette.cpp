@@ -5,12 +5,12 @@
 #include "core/machine.h"
 #include "core/palette.h"
 
-using mynext::Machine;
-using mynext::MachineType;
-using mynext::NextPalette;
-using mynext::u16;
-using mynext::u32;
-using mynext::u8;
+using rainbow::Machine;
+using rainbow::MachineType;
+using rainbow::NextPalette;
+using rainbow::u16;
+using rainbow::u32;
+using rainbow::u8;
 
 namespace {
 

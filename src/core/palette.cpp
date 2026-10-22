@@ -1,6 +1,6 @@
 #include "core/palette.h"
 
-namespace mynext {
+namespace rainbow {
 namespace {
 
 // RRR GGG BBB, three bits per channel.
@@ -106,4 +106,4 @@ void NextPalette::write9(u8 value) {
   if (autoIncrement()) ++index_;
 }
 
-} // namespace mynext
+} // namespace rainbow

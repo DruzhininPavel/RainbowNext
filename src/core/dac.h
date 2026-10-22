@@ -2,7 +2,7 @@
 
 #include "core/types.h"
 
-namespace mynext {
+namespace rainbow {
 
 // The four 8-bit DACs of the Next. A write parks a sample on a DAC and it stays
 // there until the next write, so a program feeds them from the DMA, the Copper
@@ -32,4 +32,4 @@ private:
   u8 dacs_[DacCount] = {0x80, 0x80, 0x80, 0x80};
 };
 
-} // namespace mynext
+} // namespace rainbow

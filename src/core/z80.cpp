@@ -1,6 +1,6 @@
 #include "core/z80.h"
 
-namespace mynext {
+namespace rainbow {
 
 // ===========================================================================
 // Construction and reset
@@ -1210,4 +1210,4 @@ void Z80::nmi() {
   tick(6);
 }
 
-} // namespace mynext
+} // namespace rainbow

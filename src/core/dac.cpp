@@ -1,6 +1,6 @@
 #include "core/dac.h"
 
-namespace mynext {
+namespace rainbow {
 
 namespace {
 
@@ -55,4 +55,4 @@ float SpecDrum::sampleLeft() const { return (level(dacs_[A]) + level(dacs_[B])) 
 
 float SpecDrum::sampleRight() const { return (level(dacs_[C]) + level(dacs_[D])) * 0.5f; }
 
-} // namespace mynext
+} // namespace rainbow

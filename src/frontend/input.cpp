@@ -2,7 +2,7 @@
 
 #include <cstdio>
 
-namespace mynext::frontend {
+namespace rainbow::frontend {
 namespace {
 
 struct KeyMapping {
@@ -106,4 +106,4 @@ void Input::pollGamepads(u8& kempston) {
   kempston = bits;
 }
 
-} // namespace mynext::frontend
+} // namespace rainbow::frontend

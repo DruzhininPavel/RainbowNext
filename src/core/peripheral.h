@@ -5,7 +5,7 @@
 
 #include "core/types.h"
 
-namespace mynext {
+namespace rainbow {
 
 // What a module declares about itself. The frontend shows these strings in the
 // settings menu, and the bus stores `id` in the config file, so an id must stay
@@ -125,4 +125,4 @@ public:
   }
 };
 
-} // namespace mynext
+} // namespace rainbow

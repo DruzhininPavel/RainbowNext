@@ -19,7 +19,7 @@
 #include "peripherals/printer.h"
 #include "plugin/loader.h"
 
-namespace mynext::frontend {
+namespace rainbow::frontend {
 namespace {
 
 constexpr MachineType AllMachines[] = {
@@ -116,14 +116,14 @@ void SDLCALL App::onFileDialog(void* userdata, const char* const* filelist, int)
 }
 
 bool App::init(const Options& options) {
-  SDL_SetAppMetadata("myNext", "0.1.0", "com.mynext.emulator");
+  SDL_SetAppMetadata("RainbowNext", "0.1.0", "com.rainbownext.emulator");
 
   if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO | SDL_INIT_GAMEPAD)) {
     std::fprintf(stderr, "SDL_Init failed: %s\n", SDL_GetError());
     return false;
   }
 
-  window_ = SDL_CreateWindow("myNext", Machine::FrameWidth * 3, Machine::FrameHeight * 3,
+  window_ = SDL_CreateWindow("RainbowNext", Machine::FrameWidth * 3, Machine::FrameHeight * 3,
                              SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY);
   if (window_ == nullptr) {
     std::fprintf(stderr, "SDL_CreateWindow failed: %s\n", SDL_GetError());
@@ -172,6 +172,7 @@ bool App::init(const Options& options) {
   loadConfig();
   scanPeripherals();
   applyPeripheralConfig();
+  if (!options.sd.empty()) loadDivMmcCard(options.sd);
   // Write the file on the first run too, so the plugin folder is recorded even
   // if the emulator is killed rather than closed.
   saveConfig();
@@ -344,6 +345,8 @@ void App::handleEvent(const SDL_Event& event) {
         loadTape(path);
       } else if (extension == ".dsk" || extension == ".edsk") {
         loadDisk(path);
+      } else if (extension == ".img") {
+        loadDivMmcCard(path);
       } else {
         loadSnapshot(path);
       }
@@ -384,6 +387,8 @@ void App::setMachine(MachineType type) {
   // the user's choices replayed.
   scanPeripherals();
   applyPeripheralConfig();
+  // The card lives in the frontend, so it goes back in whichever bus exists now.
+  insertSdCard();
 }
 
 bool App::loadRom(const std::string& path) {
@@ -512,18 +517,53 @@ bool App::loadDivMmcRom(const std::string& path) {
 }
 
 bool App::loadDivMmcCard(const std::string& path) {
-  auto* div = static_cast<DivMmc*>(machine_->expansion().find("divmmc"));
-  if (div == nullptr) return false;
-  std::string error;
-  if (!div->loadCardFile(path, error)) {
-    status_ = "SD card failed: " + error;
+  std::ifstream in(path, std::ios::binary);
+  if (!in) {
+    status_ = "SD card failed: cannot open " + path;
     return false;
   }
-  machine_->expansion().setEnabled("divmmc", true);
-  syncConfigFromBus();
-  status_ = "SD card: " + path + " (" + std::to_string(div->card().sectors()) +
+  std::vector<u8> image{std::istreambuf_iterator<char>(in),
+                        std::istreambuf_iterator<char>()};
+  if (!in.eof() && in.fail()) {
+    status_ = "SD card failed: cannot read " + path;
+    return false;
+  }
+
+  // A card that does not fit the sector size is refused here rather than in the
+  // module, because the message is the only thing the user gets to see.
+  if (image.empty() || image.size() % 512 != 0) {
+    status_ = "SD card failed: " + path + " is not a whole number of 512-byte sectors";
+    return false;
+  }
+
+  sdImage_ = std::move(image);
+  sdPath_ = path;
+  insertSdCard();
+  status_ = "SD card: " + path + " (" + std::to_string(sdImage_.size() / 512) +
             " sectors)";
   return true;
+}
+
+void App::insertSdCard() {
+  if (sdImage_.empty()) return;
+  auto* div = static_cast<DivMmc*>(machine_->expansion().find("divmmc"));
+  if (div == nullptr) return;
+  std::string error;
+  if (!div->loadCard(sdImage_, error)) {
+    status_ = "SD card failed: " + error;
+    return;
+  }
+  // The card is useless unless the ports that reach it are decoded, and on the
+  // Next the interface is built into the board, so enabling it is never wrong.
+  machine_->expansion().setEnabled("divmmc", true);
+  syncConfigFromBus();
+}
+
+void App::ejectSdCard() {
+  sdImage_.clear();
+  sdPath_.clear();
+  auto* div = static_cast<DivMmc*>(machine_->expansion().find("divmmc"));
+  if (div != nullptr) div->card().eject();
 }
 
 bool App::savePrintout(const std::string& path) {
@@ -540,7 +580,7 @@ bool App::savePrintout(const std::string& path) {
 }
 
 void App::loadConfig() {
-  if (const char* dir = SDL_GetPrefPath("myNext", "myNext")) configPath_ = std::string(dir) + "mynext.cfg";
+  if (const char* dir = SDL_GetPrefPath("RainbowNext", "RainbowNext")) configPath_ = std::string(dir) + "rainbow.cfg";
   config_.load(configPath_);
 
   // Plugins live next to the executable, which is where a downloaded build and
@@ -632,14 +672,15 @@ void App::drawPeripheralsMenu() {
       openFileDialog(DialogKind::DivMmcCard);
     }
     if (ImGui::MenuItem("Eject SD card", nullptr, false, divmmc->card().inserted())) {
-      divmmc->card().eject();
+      ejectSdCard();
       status_ = "SD card ejected";
     }
     ImGui::TextDisabled("ROM: %s", divmmc->romLoaded() ? "loaded" : "none");
-    ImGui::TextDisabled("Card: %s",
-                        divmmc->card().inserted()
-                            ? (std::to_string(divmmc->card().sectors()) + " sectors").c_str()
-                            : "none");
+    if (divmmc->card().inserted()) {
+      ImGui::TextDisabled("Card: %s (%u sectors)", sdPath_.c_str(), divmmc->card().sectors());
+    } else {
+      ImGui::TextDisabled("Card: none");
+    }
   }
   if (printer != nullptr) {
     if (ImGui::MenuItem("Save printout...", nullptr, false, printer->used())) {
@@ -933,7 +974,7 @@ void App::drawStatusOverlay() {
     ImGui::TextUnformatted("No Spectrum ROM is loaded.");
     ImGui::Spacing();
     ImGui::TextUnformatted("Copy a 16K 48K ROM to roms/48.rom or use File > Open ROM.");
-    ImGui::TextUnformatted("ROM images are copyrighted and are not bundled with myNext.");
+    ImGui::TextUnformatted("ROM images are copyrighted and are not bundled with RainbowNext.");
     ImGui::Spacing();
     ImGui::TextUnformatted(
         "Keyboard: F1 debugger, F2 pause, F5 reset, F6 tape, F7 rewind, arrows/Ctrl = Kempston.");
@@ -973,8 +1014,8 @@ void App::drawStatusOverlay() {
 
   if (showAbout_) {
     ImGui::SetNextWindowSize(ImVec2(420.0f, 0.0f), ImGuiCond_FirstUseEver);
-    ImGui::Begin("About myNext", &showAbout_);
-    ImGui::TextUnformatted("myNext - a from-scratch ZX Spectrum / Next emulator");
+    ImGui::Begin("About RainbowNext", &showAbout_);
+    ImGui::TextUnformatted("RainbowNext - a from-scratch ZX Spectrum / Next emulator");
     ImGui::Separator();
     ImGui::TextUnformatted("Core: cycle-stepped Z80 + ULA with contention and floating bus.");
     ImGui::TextUnformatted("Frontend: SDL3 + Dear ImGui.");
@@ -983,4 +1024,4 @@ void App::drawStatusOverlay() {
   }
 }
 
-} // namespace mynext::frontend
+} // namespace rainbow::frontend

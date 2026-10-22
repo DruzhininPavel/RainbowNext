@@ -6,13 +6,13 @@
 #include "core/machine.h"
 #include "peripherals/divmmc.h"
 
-using mynext::DivMmc;
-using mynext::Machine;
-using mynext::MachineType;
-using mynext::SdCard;
-using mynext::u16;
-using mynext::u32;
-using mynext::u8;
+using rainbow::DivMmc;
+using rainbow::Machine;
+using rainbow::MachineType;
+using rainbow::SdCard;
+using rainbow::u16;
+using rainbow::u32;
+using rainbow::u8;
 
 namespace {
 
@@ -21,6 +21,16 @@ namespace {
 std::vector<u8> makeCard(int sectors = 64) {
   std::vector<u8> image(size_t(sectors) * 512);
   for (size_t i = 0; i < image.size(); ++i) image[i] = u8(i & 0xFF);
+  return image;
+}
+
+// Every sector filled with one value that depends on its index, so a multi-block
+// transfer can be checked sector by sector.
+std::vector<u8> makeSectorCard(int sectors = 16) {
+  std::vector<u8> image(size_t(sectors) * 512);
+  for (int sector = 0; sector < sectors; ++sector) {
+    for (int i = 0; i < 512; ++i) image[size_t(sector) * 512 + size_t(i)] = u8(0x40 + sector);
+  }
   return image;
 }
 
@@ -212,6 +222,81 @@ TEST(sdcard_writes_a_single_block) {
   while (token < read.bytes.size() && read.bytes[token] != 0xFE) ++token;
   CHECK(token + 1 < read.bytes.size());
   if (token + 1 < read.bytes.size()) CHECK_EQ(read.bytes[token + 1], u8(0xA0));
+}
+
+TEST(sdcard_reads_multiple_blocks_until_cmd12) {
+  SdCard card;
+  std::string error;
+  CHECK(card.load(makeSectorCard(), error));
+  card.select(true);
+  CHECK(ready(card));
+
+  // A driver announces the length first; the card only records that it may
+  // happen, so the answer is a plain R1.
+  CHECK_EQ(command(card, 23, 2).bytes[0], u8(0x00));
+
+  // CMD18 has no length: the response is followed by block after block, each
+  // one a token, 512 bytes and two CRC bytes.
+  const Exchange read = command(card, 18, 2, 1024);
+  CHECK_EQ(read.bytes[0], u8(0x00));
+
+  constexpr size_t BlockBytes = 1 + 512 + 2;
+  // R1, one byte of latency, then two blocks.
+  CHECK(read.bytes.size() >= 2 + 2 * BlockBytes);
+  if (read.bytes.size() >= 2 + 2 * BlockBytes) {
+    CHECK_EQ(read.bytes[2], u8(0xFE));
+    CHECK_EQ(read.bytes[3], u8(0x42));  // sector 2
+    CHECK_EQ(read.bytes[2 + BlockBytes], u8(0xFE));
+    CHECK_EQ(read.bytes[2 + BlockBytes + 1], u8(0x43));  // sector 3
+  }
+
+  // CMD12 interrupts the stream, and the card answers normally afterwards.
+  const Exchange stop = command(card, 12, 0);
+  CHECK_EQ(stop.bytes[0], u8(0x00));
+
+  const Exchange single = command(card, 17, 7, 512);
+  size_t token = 0;
+  while (token < single.bytes.size() && single.bytes[token] != 0xFE) ++token;
+  CHECK(token + 1 < single.bytes.size());
+  if (token + 1 < single.bytes.size()) CHECK_EQ(single.bytes[token + 1], u8(0x47));
+}
+
+TEST(sdcard_writes_multiple_blocks_until_the_stop_token) {
+  SdCard card;
+  std::string error;
+  CHECK(card.load(makeCard(16), error));
+  card.select(true);
+  CHECK(ready(card));
+
+  const Exchange start = command(card, 25, 4);
+  CHECK_EQ(start.bytes[0], u8(0x00));
+
+  // Each block is the data token, 512 bytes and two CRC bytes. The card answers
+  // with the data-response token on the clock of the second CRC byte, then
+  // spends two busy bytes before it listens again.
+  for (int block = 0; block < 2; ++block) {
+    for (int i = 0; i < 3; ++i) card.transfer(0xFF);
+    CHECK_EQ(card.transfer(0xFE), u8(0xFF));
+    for (int i = 0; i < 512; ++i) card.transfer(u8(0x11 * (block + 1)));
+    card.transfer(0xFF);  // first CRC byte
+    CHECK_EQ(card.transfer(0xFF), u8(0x05));  // data accepted
+  }
+
+  // CMD25 ends with the stop token instead of a length.
+  for (int i = 0; i < 3; ++i) card.transfer(0xFF);
+  CHECK_EQ(card.transfer(0xFD), u8(0x05));
+
+  const Exchange first = command(card, 17, 4, 512);
+  size_t token = 0;
+  while (token < first.bytes.size() && first.bytes[token] != 0xFE) ++token;
+  CHECK(token + 1 < first.bytes.size());
+  if (token + 1 < first.bytes.size()) CHECK_EQ(first.bytes[token + 1], u8(0x11));
+
+  const Exchange second = command(card, 17, 5, 512);
+  token = 0;
+  while (token < second.bytes.size() && second.bytes[token] != 0xFE) ++token;
+  CHECK(token + 1 < second.bytes.size());
+  if (token + 1 < second.bytes.size()) CHECK_EQ(second.bytes[token + 1], u8(0x22));
 }
 
 TEST(sdcard_reports_an_unknown_command) {

@@ -124,7 +124,7 @@ a multicolour demo renders correctly; `z80test` passes.
       observer that re-reads a cartridge's ROM. Four built-in modules ship:
       Kempston joystick, Kempston mouse, ZX Printer with PBM export, and a ROM
       cartridge that maps into `0x0000`. Modules are switched on and off in the
-      `Peripherals` menu and the choice is written to `mynext.cfg`
+      `Peripherals` menu and the choice is written to `rainbow.cfg`
 * [x] Out-of-tree modules as shared libraries: the plain C ABI of
       `src/plugin/plugin_api.h`, a loader that scans a `peripherals/` folder,
       skips a broken library instead of failing, and a worked example
@@ -139,7 +139,11 @@ a multicolour demo renders correctly; `z80test` passes.
       automap on `0x0000`/`0x0008`/`0x0038`/`0x0066`/`0x04C6`/`0x0562`, and an
       SPI SD card on an in-memory sector image (`CMD0`-`CMD59`, SDHC, block
       addressing). Loaded from the `Peripherals` menu
-* [ ] SD card image access for NextZXOS, sharing the `SdCard` state machine
+* [x] SD card image access for NextZXOS: the card is `src/core/sdcard.*`, shared
+      by the DivMMC and the Next firmware instead of hidden inside the module,
+      with `CMD18`/`CMD25`/`CMD12`/`CMD23` for the multi-block reads and writes
+      NextZXOS issues. The frontend owns the image, so it survives a machine
+      switch, and `--sd FILE` or a dropped `.img` inserts it
 * [ ] Video pipeline: Timex modes, ULA+ palettes, blending modes 6 and 7 of the
       `0x15` priority byte (the ULA → tilemap → Layer 2 → sprite compositor and
       the palette path are in place)
@@ -204,7 +208,7 @@ These are deliberate simplifications, tracked here so they are not forgotten:
     it, and the plugin ABI is version 1, so a module built against a future
     header is refused rather than adapted. Memory hooks were appended to the
     ABI without a version bump, because `struct_size` makes them optional.
-16. The DivMMC's SD card is written in place in memory and never flushed back to
+16. The SD card image is written in place in memory and never flushed back to
     the image file, so a save from esxDOS survives until the card is ejected or
     the emulator exits. The SPI clock is not modelled: a command is answered on
     the next byte instead of after the few hundred cycles a real card needs, so

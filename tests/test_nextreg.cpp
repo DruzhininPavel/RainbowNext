@@ -7,13 +7,13 @@
 #include "core/machine.h"
 #include "core/nextreg.h"
 
-using mynext::Machine;
-using mynext::MachineType;
-using mynext::NextRegFile;
-using mynext::u16;
-using mynext::u32;
-using mynext::u8;
-using mynext::tstatesPerLine;
+using rainbow::Machine;
+using rainbow::MachineType;
+using rainbow::NextRegFile;
+using rainbow::u16;
+using rainbow::u32;
+using rainbow::u8;
+using rainbow::tstatesPerLine;
 
 namespace {
 
@@ -261,7 +261,7 @@ TEST(next_boots_the_128k_rom_through_the_mmu) {
   Machine m(MachineType::Next);
   std::vector<u8> image;
   for (const char* name : {"128-0.rom", "128-1.rom"}) {
-    const std::vector<u8> bank = readFile(std::string(MYNEXT_SOURCE_DIR) + "/roms/" + name);
+    const std::vector<u8> bank = readFile(std::string(RAINBOW_SOURCE_DIR) + "/roms/" + name);
     if (bank.size() != 0x4000) return; // no ROM set available
     image.insert(image.end(), bank.begin(), bank.end());
   }

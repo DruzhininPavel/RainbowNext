@@ -3,7 +3,7 @@
 #include "core/ay.h"
 #include "core/types.h"
 
-namespace mynext {
+namespace rainbow {
 
 // The three AY-3-8912 chips of the Next. Port 0xFFFD still selects the active
 // register, but a byte with bit 7 set selects a chip instead: bit 6 is its left
@@ -66,4 +66,4 @@ private:
   bool enabled_ = false;
 };
 
-} // namespace mynext
+} // namespace rainbow

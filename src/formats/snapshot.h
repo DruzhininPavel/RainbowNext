@@ -5,7 +5,7 @@
 
 #include "core/z80.h"
 
-namespace mynext::formats {
+namespace rainbow::formats {
 
 // A machine-independent snapshot: CPU registers plus a full 128K RAM image
 // (8 x 16K banks). 48K snapshots leave banks 1,3,4,6,7 zeroed and place the
@@ -18,4 +18,4 @@ struct Snapshot {
   bool is128 = false;
 };
 
-} // namespace mynext::formats
+} // namespace rainbow::formats

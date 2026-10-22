@@ -2,7 +2,7 @@
 
 #include <imgui.h>
 
-namespace mynext::frontend::ui {
+namespace rainbow::frontend::ui {
 
 // Sizes are expressed in logical points. Dear ImGui rasterises glyphs at the
 // display's pixel density on its own (it reads io.DisplayFramebufferScale), so
@@ -45,4 +45,4 @@ ImVec4 toVec4(ImU32 color);
 // The six bright Spectrum colours, drawn as a thin band.
 void drawSpectrumStripe(ImDrawList* drawList, ImVec2 min, ImVec2 max);
 
-} // namespace mynext::frontend::ui
+} // namespace rainbow::frontend::ui

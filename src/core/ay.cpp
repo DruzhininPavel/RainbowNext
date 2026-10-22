@@ -2,7 +2,7 @@
 
 #include <algorithm>
 
-namespace mynext {
+namespace rainbow {
 
 namespace {
 
@@ -198,4 +198,4 @@ float Ay38912::sampleRight() const {
   return (a + b + c) / 3.0f;
 }
 
-} // namespace mynext
+} // namespace rainbow

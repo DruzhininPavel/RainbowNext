@@ -4,7 +4,7 @@
 
 #include <imgui.h>
 
-namespace mynext::frontend {
+namespace rainbow::frontend {
 namespace {
 
 void flagRow(const char* name, u8 value) {
@@ -92,4 +92,4 @@ bool drawDebugger(Machine& machine, bool* open) {
   return open == nullptr || *open;
 }
 
-} // namespace mynext::frontend
+} // namespace rainbow::frontend

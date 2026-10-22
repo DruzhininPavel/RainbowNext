@@ -14,22 +14,22 @@
 #  include <dlfcn.h>
 #endif
 
-namespace mynext {
+namespace rainbow {
 
 namespace {
 
-constexpr size_t kHostSize = sizeof(mynext_host_v1);
+constexpr size_t kHostSize = sizeof(rainbow_host_v1);
 
 // The fields that were there from ABI 1. A plugin is accepted when it declares
 // at least this much, so a newer header with appended fields stays compatible
 // with an older plugin and the other way round.
 constexpr uint32_t kPeripheralMinimum =
-    uint32_t(offsetof(mynext_peripheral_v1, tick) + sizeof(void (*)(void*, uint32_t)));
+    uint32_t(offsetof(rainbow_peripheral_v1, tick) + sizeof(void (*)(void*, uint32_t)));
 constexpr uint32_t kPeripheralMemory =
-    uint32_t(offsetof(mynext_peripheral_v1, mem_write) +
+    uint32_t(offsetof(rainbow_peripheral_v1, mem_write) +
              sizeof(int (*)(void*, uint16_t, uint8_t, uint32_t)));
 constexpr uint32_t kPeripheralFetch =
-    uint32_t(offsetof(mynext_peripheral_v1, mem_fetch) +
+    uint32_t(offsetof(rainbow_peripheral_v1, mem_fetch) +
              sizeof(int (*)(void*, uint16_t, uint32_t, uint8_t*)));
 
 void* openLibrary(const std::string& path, std::string& error) {
@@ -75,16 +75,16 @@ bool hasExtension(const std::string& path, const std::string& ext) {
 
 } // namespace
 
-PluginPeripheral::PluginPeripheral(void* library, const mynext_peripheral_v1* api,
+PluginPeripheral::PluginPeripheral(void* library, const rainbow_peripheral_v1* api,
                                    const HostServices& host)
     : library_(library), api_(api) {
-  hostC_ = static_cast<mynext_host_v1*>(std::calloc(1, kHostSize));
+  hostC_ = static_cast<rainbow_host_v1*>(std::calloc(1, kHostSize));
   info_.id = api->id != nullptr ? api->id : "plugin";
   info_.name = api->name != nullptr ? api->name : info_.id;
   info_.version = api->version != nullptr ? api->version : "1.0";
   info_.author = api->author != nullptr ? api->author : "";
   info_.description = api->description != nullptr ? api->description : "";
-  info_.nextOnly = (api->flags & MYNEXT_PERIPHERAL_NEXT_ONLY) != 0;
+  info_.nextOnly = (api->flags & RAINBOW_PERIPHERAL_NEXT_ONLY) != 0;
   attachHost(host);
   if (api->create != nullptr) self_ = api->create(hostC_);
 }
@@ -188,23 +188,23 @@ PluginLoader::Result PluginLoader::scan(const std::string& directory,
       continue;
     }
     const auto entry =
-        reinterpret_cast<mynext_plugin_entry_fn>(findSymbol(handle, MYNEXT_PLUGIN_ENTRY));
+        reinterpret_cast<rainbow_plugin_entry_fn>(findSymbol(handle, RAINBOW_PLUGIN_ENTRY));
     if (entry == nullptr) {
-      result.errors.push_back(path + ": no " MYNEXT_PLUGIN_ENTRY " symbol");
+      result.errors.push_back(path + ": no " RAINBOW_PLUGIN_ENTRY " symbol");
       closeLibrary(handle);
       continue;
     }
-    const mynext_peripheral_v1* api = entry();
+    const rainbow_peripheral_v1* api = entry();
     if (api == nullptr) {
       result.errors.push_back(path + ": the entry point returned null");
       closeLibrary(handle);
       continue;
     }
-    if (api->abi_version != MYNEXT_PLUGIN_ABI_VERSION ||
+    if (api->abi_version != RAINBOW_PLUGIN_ABI_VERSION ||
         api->struct_size < kPeripheralMinimum) {
       result.errors.push_back(path + ": built for ABI " + std::to_string(api->abi_version) +
                               ", this emulator speaks " +
-                              std::to_string(MYNEXT_PLUGIN_ABI_VERSION));
+                              std::to_string(RAINBOW_PLUGIN_ABI_VERSION));
       closeLibrary(handle);
       continue;
     }
@@ -230,4 +230,4 @@ std::vector<std::string> PluginLoader::extensions() {
 #endif
 }
 
-} // namespace mynext
+} // namespace rainbow

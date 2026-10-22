@@ -22,7 +22,7 @@
 #include "core/ula.h"
 #include "core/z80.h"
 
-namespace mynext {
+namespace rainbow {
 
 namespace formats {
 struct NexFile;
@@ -338,4 +338,4 @@ private:
   u8 kempston_ = 0;
 };
 
-} // namespace mynext
+} // namespace rainbow

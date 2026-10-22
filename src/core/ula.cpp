@@ -1,6 +1,6 @@
 #include "core/ula.h"
 
-namespace mynext {
+namespace rainbow {
 
 void Ula::reset(bool is128) {
   (void)is128; // the Issue 2/3 difference is not modelled yet, see docs/ROADMAP.md
@@ -25,4 +25,4 @@ void Ula::write(u16 port, u8 value) {
   beeper_ = u8((value >> 4) & 0x01);
 }
 
-} // namespace mynext
+} // namespace rainbow

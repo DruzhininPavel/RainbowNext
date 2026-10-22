@@ -4,7 +4,7 @@
 
 #include "core/types.h"
 
-namespace mynext {
+namespace rainbow {
 
 // The Next's sprite hardware: 128 sprites of 16x16 pixels drawn over a
 // 320x256 surface (the ULA screen plus a 32 pixel border on every side). Each
@@ -190,4 +190,4 @@ private:
   bool overflow_ = false;
 };
 
-} // namespace mynext
+} // namespace rainbow

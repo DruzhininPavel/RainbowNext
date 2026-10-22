@@ -1,6 +1,6 @@
 #include "core/turbosound.h"
 
-namespace mynext {
+namespace rainbow {
 
 int TurboSound::clampIndex(int index) {
   if (index < 0) return 0;
@@ -76,4 +76,4 @@ float TurboSound::sampleRight() const {
   return sum;
 }
 
-} // namespace mynext
+} // namespace rainbow

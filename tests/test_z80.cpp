@@ -8,13 +8,13 @@
 
 namespace {
 
-using mynext::u16;
-using mynext::u32;
-using mynext::u8;
+using rainbow::u16;
+using rainbow::u32;
+using rainbow::u8;
 
 // A bus with flat 64K memory and no contention, so that the Z80 core can be
 // exercised independently of the ULA.
-class FlatBus : public mynext::Bus {
+class FlatBus : public rainbow::Bus {
 public:
   std::array<u8, 65536> mem{};
   std::array<u8, 65536> io{};
@@ -46,7 +46,7 @@ constexpr u8 PF = 0x04, NF = 0x02, CF = 0x01;
 TEST(z80_nop_timing) {
   FlatBus bus;
   load(bus, {0x00});
-  mynext::Z80 cpu(bus);
+  rainbow::Z80 cpu(bus);
   CHECK_EQ(cpu.step(), 4);
   CHECK_EQ(cpu.regs().pc, 1);
 }
@@ -54,7 +54,7 @@ TEST(z80_nop_timing) {
 TEST(z80_load_immediates) {
   FlatBus bus;
   load(bus, {0x3E, 0x42, 0x01, 0x34, 0x12});
-  mynext::Z80 cpu(bus);
+  rainbow::Z80 cpu(bus);
 
   CHECK_EQ(cpu.step(), 7);
   CHECK_EQ(cpu.regs().a, 0x42);
@@ -66,7 +66,7 @@ TEST(z80_load_immediates) {
 TEST(z80_store_immediate_through_hl) {
   FlatBus bus;
   load(bus, {0x21, 0x00, 0x80, 0x36, 0x55}); // LD HL,8000h : LD (HL),55h
-  mynext::Z80 cpu(bus);
+  rainbow::Z80 cpu(bus);
   cpu.step();
   CHECK_EQ(cpu.step(), 10);
   CHECK_EQ(bus.mem[0x8000], 0x55);
@@ -75,7 +75,7 @@ TEST(z80_store_immediate_through_hl) {
 TEST(z80_inc_dec_flags) {
   FlatBus bus;
   load(bus, {0x3E, 0x7F, 0x3C, 0x3D}); // LD A,7Fh : INC A : DEC A
-  mynext::Z80 cpu(bus);
+  rainbow::Z80 cpu(bus);
   cpu.regs().f = 0;
   cpu.step();
 
@@ -98,7 +98,7 @@ TEST(z80_inc_dec_flags) {
 TEST(z80_add_carry_flags) {
   FlatBus bus;
   load(bus, {0x3E, 0xFF, 0xC6, 0x01}); // LD A,FFh : ADD A,01h
-  mynext::Z80 cpu(bus);
+  rainbow::Z80 cpu(bus);
   cpu.step();
   cpu.step();
   CHECK_EQ(cpu.regs().a, 0x00);
@@ -111,7 +111,7 @@ TEST(z80_add_carry_flags) {
 TEST(z80_daa_after_add) {
   FlatBus bus;
   load(bus, {0x3E, 0x15, 0xC6, 0x27, 0x27}); // LD A,15h : ADD A,27h : DAA
-  mynext::Z80 cpu(bus);
+  rainbow::Z80 cpu(bus);
   cpu.step();
   cpu.step();
   CHECK_EQ(cpu.regs().a, 0x3C);
@@ -123,7 +123,7 @@ TEST(z80_daa_after_add) {
 TEST(z80_daa_after_sub) {
   FlatBus bus;
   load(bus, {0x3E, 0x42, 0xD6, 0x27, 0x27}); // LD A,42h : SUB 27h : DAA
-  mynext::Z80 cpu(bus);
+  rainbow::Z80 cpu(bus);
   cpu.step();
   cpu.step();
   CHECK_EQ(cpu.regs().a, 0x1B);
@@ -134,7 +134,7 @@ TEST(z80_daa_after_sub) {
 TEST(z80_cb_rotate) {
   FlatBus bus;
   load(bus, {0x06, 0x81, 0xCB, 0x00}); // LD B,81h : RLC B
-  mynext::Z80 cpu(bus);
+  rainbow::Z80 cpu(bus);
   cpu.step();
   CHECK_EQ(cpu.step(), 8);
   CHECK_EQ(cpu.regs().b, 0x03);
@@ -144,7 +144,7 @@ TEST(z80_cb_rotate) {
 TEST(z80_cb_sll_undocumented) {
   FlatBus bus;
   load(bus, {0x06, 0x81, 0xCB, 0x30}); // LD B,81h : SLL B
-  mynext::Z80 cpu(bus);
+  rainbow::Z80 cpu(bus);
   cpu.step();
   cpu.step();
   CHECK_EQ(cpu.regs().b, 0x03);
@@ -154,7 +154,7 @@ TEST(z80_cb_sll_undocumented) {
 TEST(z80_cb_bit) {
   FlatBus bus;
   load(bus, {0x06, 0x04, 0xCB, 0x58}); // LD B,04h : BIT 3,B
-  mynext::Z80 cpu(bus);
+  rainbow::Z80 cpu(bus);
   cpu.step();
   cpu.step();
   CHECK(cpu.regs().f & ZF);
@@ -164,7 +164,7 @@ TEST(z80_cb_bit) {
 TEST(z80_ed_neg) {
   FlatBus bus;
   load(bus, {0x3E, 0x01, 0xED, 0x44}); // LD A,01h : NEG
-  mynext::Z80 cpu(bus);
+  rainbow::Z80 cpu(bus);
   cpu.step();
   cpu.step();
   CHECK_EQ(cpu.regs().a, 0xFF);
@@ -175,7 +175,7 @@ TEST(z80_ed_neg) {
 TEST(z80_ed_adc_hl) {
   FlatBus bus;
   load(bus, {0x21, 0xFF, 0x0F, 0x01, 0x01, 0x00, 0xED, 0x4A});
-  mynext::Z80 cpu(bus); // LD HL,0FFFh : LD BC,0001h : ADC HL,BC
+  rainbow::Z80 cpu(bus); // LD HL,0FFFh : LD BC,0001h : ADC HL,BC
   cpu.regs().f = 0;
   cpu.step();
   cpu.step();
@@ -191,7 +191,7 @@ TEST(z80_ed_ldir) {
   bus.mem[0x8001] = 0x22;
   bus.mem[0x8002] = 0x33;
   load(bus, {0x21, 0x00, 0x80, 0x11, 0x00, 0x90, 0x01, 0x03, 0x00, 0xED, 0xB0});
-  mynext::Z80 cpu(bus);
+  rainbow::Z80 cpu(bus);
   cpu.step(); // LD HL,8000h
   cpu.step(); // LD DE,9000h
   cpu.step(); // LD BC,0003h
@@ -212,7 +212,7 @@ TEST(z80_ed_cpir) {
   bus.mem[0x8001] = 0x00;
   bus.mem[0x8002] = 0x99;
   load(bus, {0x21, 0x00, 0x80, 0x01, 0x08, 0x00, 0x3E, 0x99, 0xED, 0xB1});
-  mynext::Z80 cpu(bus);
+  rainbow::Z80 cpu(bus);
   cpu.step();
   cpu.step();
   cpu.step();
@@ -228,7 +228,7 @@ TEST(z80_dd_ix_offsets) {
   FlatBus bus;
   bus.mem[0x8005] = 0x42;
   load(bus, {0xDD, 0x21, 0x00, 0x80, 0xDD, 0x7E, 0x05}); // LD IX,8000h : LD A,(IX+5)
-  mynext::Z80 cpu(bus);
+  rainbow::Z80 cpu(bus);
   cpu.step();
   CHECK_EQ(cpu.regs().ix, 0x8000);
   cpu.step();
@@ -238,7 +238,7 @@ TEST(z80_dd_ix_offsets) {
 TEST(z80_dd_ld_ixh_imm) {
   FlatBus bus;
   load(bus, {0xDD, 0x26, 0x42, 0xDD, 0x2E, 0x17}); // LD IXH,42h : LD IXL,17h
-  mynext::Z80 cpu(bus);
+  rainbow::Z80 cpu(bus);
   cpu.step();
   cpu.step();
   CHECK_EQ(cpu.regs().ix, 0x4217);
@@ -248,7 +248,7 @@ TEST(z80_ddcb_rlc_memory) {
   FlatBus bus;
   bus.mem[0x8005] = 0x81;
   load(bus, {0xDD, 0x21, 0x00, 0x80, 0xDD, 0xCB, 0x05, 0x06});
-  mynext::Z80 cpu(bus);
+  rainbow::Z80 cpu(bus);
   cpu.step(); // LD IX,8000h
   cpu.step(); // RLC (IX+5)
   CHECK_EQ(bus.mem[0x8005], 0x03);
@@ -259,7 +259,7 @@ TEST(z80_ddcb_rlc_memory) {
 TEST(z80_ei_delay) {
   FlatBus bus;
   load(bus, {0xFB, 0x00, 0x00}); // EI : NOP : NOP
-  mynext::Z80 cpu(bus);
+  rainbow::Z80 cpu(bus);
 
   cpu.step(); // EI
   CHECK(cpu.regs().iff1);
@@ -271,7 +271,7 @@ TEST(z80_ei_delay) {
 
 TEST(z80_im1_interrupt) {
   FlatBus bus;
-  mynext::Z80 cpu(bus);
+  rainbow::Z80 cpu(bus);
   cpu.regs().pc = 0x8000;
   cpu.regs().sp = 0xFF00;
   cpu.regs().iff1 = true;
@@ -288,7 +288,7 @@ TEST(z80_im1_interrupt) {
 
 TEST(z80_im2_interrupt) {
   FlatBus bus;
-  mynext::Z80 cpu(bus);
+  rainbow::Z80 cpu(bus);
   cpu.regs().pc = 0x8000;
   cpu.regs().sp = 0xFF00;
   cpu.regs().i = 0x40;
@@ -301,7 +301,7 @@ TEST(z80_im2_interrupt) {
 
 TEST(z80_nmi) {
   FlatBus bus;
-  mynext::Z80 cpu(bus);
+  rainbow::Z80 cpu(bus);
   cpu.regs().pc = 0x8000;
   cpu.regs().sp = 0xFF00;
   cpu.regs().iff1 = true;
@@ -317,7 +317,7 @@ TEST(z80_nmi) {
 TEST(z80_halt) {
   FlatBus bus;
   load(bus, {0x76});
-  mynext::Z80 cpu(bus);
+  rainbow::Z80 cpu(bus);
   CHECK_EQ(cpu.step(), 4);
   CHECK(cpu.regs().halted);
   CHECK_EQ(cpu.step(), 4);
@@ -328,7 +328,7 @@ TEST(z80_out_and_in) {
   FlatBus bus;
   bus.io[0x1234] = 0x5A;
   load(bus, {0x01, 0x34, 0x12, 0x0E, 0x34, 0x3E, 0xAA, 0xED, 0x79, 0xED, 0x78});
-  mynext::Z80 cpu(bus); // LD BC,1234h : LD C,34h : LD A,AAh : OUT (C),A : IN A,(C)
+  rainbow::Z80 cpu(bus); // LD BC,1234h : LD C,34h : LD A,AAh : OUT (C),A : IN A,(C)
   cpu.step();
   cpu.step();
   cpu.step();
@@ -343,7 +343,7 @@ TEST(z80_out_and_in) {
 TEST(z80_push_pop) {
   FlatBus bus;
   load(bus, {0x01, 0x34, 0x12, 0xC5, 0xD1}); // LD BC,1234h : PUSH BC : POP DE
-  mynext::Z80 cpu(bus);
+  rainbow::Z80 cpu(bus);
   cpu.step();
   cpu.regs().sp = 0xFF00;
   cpu.step();
@@ -359,7 +359,7 @@ TEST(z80_push_pop) {
 TEST(z80_conditional_jump) {
   FlatBus bus;
   load(bus, {0xAF, 0xCA, 0x00, 0x80, 0x00}); // XOR A (Z=1) : JP Z,8000h : NOP
-  mynext::Z80 cpu(bus);
+  rainbow::Z80 cpu(bus);
   cpu.step();
   cpu.step();
   CHECK_EQ(cpu.regs().pc, 0x8000);
@@ -369,8 +369,8 @@ TEST(z80_jr_conditions) {
   // JR encodes only NZ/Z/NC/C, so the condition must be masked with 3 rather
   // than 7. Getting this wrong makes every JR behave like PO/PE/P/M.
   struct Case {
-    mynext::u8 op;
-    mynext::u8 flags;
+    rainbow::u8 op;
+    rainbow::u8 flags;
     bool taken;
   };
   const Case cases[] = {
@@ -386,9 +386,9 @@ TEST(z80_jr_conditions) {
   for (const Case& c : cases) {
     FlatBus bus;
     load(bus, {c.op, 0x02, 0x00}); // JR cc,+2 : NOP
-    mynext::Z80 cpu(bus);
+    rainbow::Z80 cpu(bus);
     cpu.regs().f = c.flags;
-    const mynext::u32 t = cpu.step();
+    const rainbow::u32 t = cpu.step();
     CHECK_EQ(t, c.taken ? 12u : 7u);
     CHECK_EQ(cpu.regs().pc, c.taken ? 0x0004 : 0x0002);
   }
@@ -397,8 +397,8 @@ TEST(z80_jr_conditions) {
 TEST(z80_jp_conditions) {
   // JP cc uses the full three-bit condition code, including PO/PE/P/M.
   struct Case {
-    mynext::u8 op;
-    mynext::u8 flags;
+    rainbow::u8 op;
+    rainbow::u8 flags;
     bool taken;
   };
   const Case cases[] = {
@@ -418,9 +418,9 @@ TEST(z80_jp_conditions) {
   for (const Case& c : cases) {
     FlatBus bus;
     load(bus, {c.op, 0x00, 0x80, 0x00}); // JP cc,8000h : NOP
-    mynext::Z80 cpu(bus);
+    rainbow::Z80 cpu(bus);
     cpu.regs().f = c.flags;
-    const mynext::u32 t = cpu.step();
+    const rainbow::u32 t = cpu.step();
     CHECK_EQ(t, 10u);
     CHECK_EQ(cpu.regs().pc, c.taken ? 0x8000 : 0x0003);
   }
@@ -431,7 +431,7 @@ TEST(z80_memory_operand_hl) {
   bus.mem[0x8000] = 0x42;
   // LD HL,8000h : LD A,(HL) : INC (HL) : LD (HL),A : ADD A,(HL) : LD (HL),55h
   load(bus, {0x21, 0x00, 0x80, 0x7E, 0x34, 0x77, 0x86, 0x36, 0x55});
-  mynext::Z80 cpu(bus);
+  rainbow::Z80 cpu(bus);
   cpu.step();
   CHECK_EQ(cpu.regs().pc, 0x0003);
 
@@ -460,7 +460,7 @@ TEST(z80_indexed_memory_operand) {
   // LD IX,8000h : LD A,(IX+2) : LD (IX+3),A : INC (IX+1)
   load(bus, {0xDD, 0x21, 0x00, 0x80, 0xDD, 0x7E, 0x02, 0xDD, 0x77, 0x03,
              0xDD, 0x34, 0x01});
-  mynext::Z80 cpu(bus);
+  rainbow::Z80 cpu(bus);
   CHECK_EQ(cpu.step(), 14); // LD IX,nn
   CHECK_EQ(cpu.regs().ix, 0x8000);
 

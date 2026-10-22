@@ -2,7 +2,7 @@
 
 #include "core/types.h"
 
-namespace mynext {
+namespace rainbow {
 
 // The CPU talks to the rest of the machine exclusively through this interface.
 // Keeping it virtual (rather than templated) keeps the core simple and makes it
@@ -47,4 +47,4 @@ public:
   virtual u8 interruptVector() { return 0xFF; }
 };
 
-} // namespace mynext
+} // namespace rainbow

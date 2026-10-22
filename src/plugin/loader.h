@@ -8,14 +8,14 @@
 #include "core/peripheral.h"
 #include "plugin/plugin_api.h"
 
-namespace mynext {
+namespace rainbow {
 
 // One plugin loaded from a shared library. It owns the library handle and
 // closes it only after the plugin's own destroy callback has run, so the code
 // stays mapped for as long as the instance exists.
 class PluginPeripheral final : public Peripheral {
 public:
-  PluginPeripheral(void* library, const mynext_peripheral_v1* api,
+  PluginPeripheral(void* library, const rainbow_peripheral_v1* api,
                    const HostServices& host);
   ~PluginPeripheral() override;
 
@@ -38,13 +38,13 @@ public:
 
 private:
   void* library_ = nullptr;
-  const mynext_peripheral_v1* api_ = nullptr;
+  const rainbow_peripheral_v1* api_ = nullptr;
   void* self_ = nullptr;
   PeripheralInfo info_;
   std::string path_;
   // The C mirror of HostServices that the plugin was created with. Its address
   // is handed to the plugin and must outlive it.
-  mynext_host_v1* hostC_ = nullptr;
+  rainbow_host_v1* hostC_ = nullptr;
 };
 
 // Scans a directory for plugin libraries and turns each one into a Peripheral.
@@ -65,4 +65,4 @@ public:
   static std::vector<std::string> extensions();
 };
 
-} // namespace mynext
+} // namespace rainbow

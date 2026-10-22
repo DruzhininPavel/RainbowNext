@@ -4,7 +4,7 @@
 
 #include "core/types.h"
 
-namespace mynext {
+namespace rainbow {
 
 // The Next's Copper: a small coprocessor that rewrites Next registers when a
 // chosen raster line comes round. Its program lives in 2K of its own RAM, so it
@@ -95,4 +95,4 @@ private:
   int waitHpos_ = 0;
 };
 
-} // namespace mynext
+} // namespace rainbow

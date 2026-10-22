@@ -18,20 +18,22 @@ std::string lowerExtension(const std::string& path) {
 
 void printUsage() {
   std::printf(
-      "usage: mynext [options] [file]\n"
+      "usage: rainbow [options] [file]\n"
       "\n"
-      "  file              .rom, .tap, .tzx, .sna, .z80, .dsk or .edsk, picked by extension\n"
+      "  file              .rom, .tap, .tzx, .sna, .z80, .nex, .dsk, .edsk or .img,\n"
+      "                    picked by extension\n"
       "  --rom FILE        Spectrum ROM image\n"
       "  --tape FILE       TAP or TZX image to insert into the tape deck\n"
-      "  --snapshot FILE   SNA or Z80 snapshot to restore at startup\n"
+      "  --snapshot FILE   SNA, Z80 snapshot or NEX program to load at startup\n"
       "  --disk FILE       DSK or EDSK image to insert into the +3 disk drive\n"
+      "  --sd FILE         SD card image for the DivMMC; NextZXOS boots from it\n"
       "  -h, --help        this message\n");
 }
 
 } // namespace
 
 int main(int argc, char** argv) {
-  mynext::frontend::App::Options options;
+  rainbow::frontend::App::Options options;
 
   for (int i = 1; i < argc; ++i) {
     const std::string argument = argv[i];
@@ -42,13 +44,14 @@ int main(int argc, char** argv) {
       return 0;
     }
     if ((argument == "--rom" || argument == "--tape" || argument == "--snapshot" ||
-         argument == "--disk") &&
+         argument == "--disk" || argument == "--sd") &&
         hasValue) {
       const std::string value = argv[++i];
       if (argument == "--rom") options.rom = value;
       if (argument == "--tape") options.tape = value;
       if (argument == "--snapshot") options.snapshot = value;
       if (argument == "--disk") options.disk = value;
+      if (argument == "--sd") options.sd = value;
       continue;
     }
 
@@ -58,18 +61,20 @@ int main(int argc, char** argv) {
       options.rom = argument;
     } else if (extension == ".tap" || extension == ".tzx") {
       options.tape = argument;
-    } else if (extension == ".sna" || extension == ".z80") {
+    } else if (extension == ".sna" || extension == ".z80" || extension == ".nex") {
       options.snapshot = argument;
     } else if (extension == ".dsk" || extension == ".edsk") {
       options.disk = argument;
+    } else if (extension == ".img") {
+      options.sd = argument;
     } else {
-      std::fprintf(stderr, "mynext: unsupported argument '%s'\n", argument.c_str());
+      std::fprintf(stderr, "rainbow: unsupported argument '%s'\n", argument.c_str());
       printUsage();
       return 2;
     }
   }
 
-  mynext::frontend::App app;
+  rainbow::frontend::App app;
   if (!app.init(options)) return 1;
 
   app.run();

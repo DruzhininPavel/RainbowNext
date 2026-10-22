@@ -2,7 +2,7 @@
 
 #include <cstring>
 
-namespace mynext::formats {
+namespace rainbow::formats {
 namespace {
 
 constexpr size_t HeaderSize = 512;
@@ -149,4 +149,4 @@ bool loadNex(const std::vector<u8>& data, NexFile& out, std::string& error) {
   return true;
 }
 
-} // namespace mynext::formats
+} // namespace rainbow::formats

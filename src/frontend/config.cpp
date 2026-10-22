@@ -5,7 +5,7 @@
 #include <fstream>
 #include <sstream>
 
-namespace mynext::frontend {
+namespace rainbow::frontend {
 namespace {
 
 std::string trim(const std::string& text) {
@@ -62,10 +62,10 @@ bool Config::save(const std::string& path) const {
 
   std::ofstream out(path, std::ios::trunc);
   if (!out) return false;
-  out << "# myNext settings\n";
+  out << "# RainbowNext settings\n";
   out << "plugin_dir = " << pluginDir << '\n';
   for (const std::string& id : enabledPeripherals) out << "peripheral = " << id << '\n';
   return out.good();
 }
 
-} // namespace mynext::frontend
+} // namespace rainbow::frontend

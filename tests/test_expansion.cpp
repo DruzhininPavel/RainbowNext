@@ -15,21 +15,21 @@
 #include "peripherals/printer.h"
 #include "plugin/loader.h"
 
-using mynext::Cartridge;
-using mynext::ExpansionBus;
-using mynext::HostServices;
-using mynext::KempstonJoystick;
-using mynext::KempstonMouse;
-using mynext::Machine;
-using mynext::MachineType;
-using mynext::Peripheral;
-using mynext::PeripheralInfo;
-using mynext::PluginLoader;
-using mynext::u16;
-using mynext::u32;
-using mynext::u8;
-using mynext::ZxPrinter;
-using mynext::frontend::Config;
+using rainbow::Cartridge;
+using rainbow::ExpansionBus;
+using rainbow::HostServices;
+using rainbow::KempstonJoystick;
+using rainbow::KempstonMouse;
+using rainbow::Machine;
+using rainbow::MachineType;
+using rainbow::Peripheral;
+using rainbow::PeripheralInfo;
+using rainbow::PluginLoader;
+using rainbow::u16;
+using rainbow::u32;
+using rainbow::u8;
+using rainbow::ZxPrinter;
+using rainbow::frontend::Config;
 
 namespace {
 
@@ -67,7 +67,7 @@ HostServices dummyHost() {
 
 std::string tempDir(const char* name) {
   const std::filesystem::path dir =
-      std::filesystem::temp_directory_path() / "mynext-tests" / name;
+      std::filesystem::temp_directory_path() / "rainbow-tests" / name;
   std::error_code ec;
   std::filesystem::remove_all(dir, ec);
   std::filesystem::create_directories(dir, ec);
@@ -292,17 +292,17 @@ TEST(expansion_plugin_loader_survives_a_broken_library) {
   CHECK_EQ(result.errors.size(), extensions.size());
 }
 
-#ifdef MYNEXT_PLUGIN_DIR
+#ifdef RAINBOW_PLUGIN_DIR
 TEST(expansion_plugin_loader_finds_the_example_plugin) {
   static int token = 0;
   HostServices host;
   host.host = &token;
   host.joystick = [](void*) -> u8 { return 0x05; };  // right + down
 
-  const auto result = PluginLoader::scan(MYNEXT_PLUGIN_DIR, host);
+  const auto result = PluginLoader::scan(RAINBOW_PLUGIN_DIR, host);
   CHECK_EQ(result.errors.size(), size_t(0));
 
-  mynext::Peripheral* fuller = nullptr;
+  rainbow::Peripheral* fuller = nullptr;
   for (const auto& module : result.modules) {
     if (module->info().id == "fuller") fuller = module.get();
   }
@@ -324,7 +324,7 @@ TEST(expansion_plugin_loader_finds_the_example_plugin) {
 // ---------------------------------------------------------------------------
 
 TEST(expansion_config_round_trips) {
-  const std::string path = tempDir("config") + "/mynext.cfg";
+  const std::string path = tempDir("config") + "/rainbow.cfg";
   Config saved;
   saved.pluginDir = "/tmp/peripherals";
   saved.enabledPeripherals = {"kempston", "printer"};
@@ -341,7 +341,7 @@ TEST(expansion_config_round_trips) {
 TEST(expansion_config_ignores_junk_and_missing_files) {
   const std::string dir = tempDir("config-junk");
   {
-    std::ofstream out(dir + "/mynext.cfg");
+    std::ofstream out(dir + "/rainbow.cfg");
     out << "# a comment\n";
     out << "\n";
     out << "not a setting\n";
@@ -350,7 +350,7 @@ TEST(expansion_config_ignores_junk_and_missing_files) {
   }
 
   Config config;
-  CHECK(config.load(dir + "/mynext.cfg"));
+  CHECK(config.load(dir + "/rainbow.cfg"));
   CHECK_EQ(config.enabledPeripherals.size(), size_t(2));
   CHECK(config.enabledPeripherals[1] == "fuller");
 

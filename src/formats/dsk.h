@@ -5,7 +5,7 @@
 
 #include "core/types.h"
 
-namespace mynext::formats {
+namespace rainbow::formats {
 
 // One sector as stored in a DSK image. `data` always holds 128 << n bytes, so
 // the controller can hand out a fixed-size block without knowing the geometry
@@ -57,4 +57,4 @@ struct DiskImage {
 bool parseDsk(const std::vector<u8>& bytes, DiskImage& out, std::string& error);
 bool loadDskFile(const std::string& path, DiskImage& out, std::string& error);
 
-} // namespace mynext::formats
+} // namespace rainbow::formats

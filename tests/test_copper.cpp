@@ -13,12 +13,12 @@
 #include "core/copper.h"
 #include "core/machine.h"
 
-using mynext::Copper;
-using mynext::Machine;
-using mynext::MachineType;
-using mynext::u16;
-using mynext::u32;
-using mynext::u8;
+using rainbow::Copper;
+using rainbow::Machine;
+using rainbow::MachineType;
+using rainbow::u16;
+using rainbow::u32;
+using rainbow::u8;
 
 namespace {
 

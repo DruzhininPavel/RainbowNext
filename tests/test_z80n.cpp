@@ -9,13 +9,13 @@
 
 namespace {
 
-using mynext::u16;
-using mynext::u32;
-using mynext::u8;
+using rainbow::u16;
+using rainbow::u32;
+using rainbow::u8;
 
 // Flat memory, plus a recorder for the Next register file, so that the Z80N
 // instructions can be checked without pulling in a whole machine.
-class NextBus : public mynext::Bus {
+class NextBus : public rainbow::Bus {
 public:
   std::array<u8, 65536> mem{};
   std::array<u8, 65536> io{};
@@ -40,8 +40,8 @@ void load(NextBus& bus, std::initializer_list<u8> bytes, u16 addr = 0) {
   for (u8 b : bytes) bus.mem[a++] = b;
 }
 
-mynext::Z80 makeCpu(NextBus& bus) {
-  mynext::Z80 cpu(bus);
+rainbow::Z80 makeCpu(NextBus& bus) {
+  rainbow::Z80 cpu(bus);
   cpu.setExtendedInstructions(true);
   return cpu;
 }
@@ -53,7 +53,7 @@ constexpr u8 ZF = 0x40, HF = 0x10, NF = 0x02;
 TEST(z80n_is_off_on_classic_machines) {
   NextBus bus;
   load(bus, {0xED, 0x30}); // MUL D,E is a NOP on a plain Z80
-  mynext::Z80 cpu(bus);
+  rainbow::Z80 cpu(bus);
   cpu.setBc(0x1234);
   cpu.setDe(0x0203);
   cpu.setHl(0xFFFF);
@@ -459,9 +459,9 @@ TEST(z80n_ldpirx_reads_from_an_aligned_pattern) {
 }
 
 TEST(z80n_is_enabled_only_on_the_next) {
-  mynext::Machine next(mynext::MachineType::Next);
-  mynext::Machine plus3(mynext::MachineType::Plus3);
-  mynext::Machine classic(mynext::MachineType::Spectrum48);
+  rainbow::Machine next(rainbow::MachineType::Next);
+  rainbow::Machine plus3(rainbow::MachineType::Plus3);
+  rainbow::Machine classic(rainbow::MachineType::Spectrum48);
 
   CHECK(next.cpu().extendedInstructions());
   CHECK(!plus3.cpu().extendedInstructions());

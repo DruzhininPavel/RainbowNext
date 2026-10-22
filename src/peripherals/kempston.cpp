@@ -1,12 +1,12 @@
 #include "peripherals/kempston.h"
 
-namespace mynext {
+namespace rainbow {
 
 KempstonJoystick::KempstonJoystick() {
   info_.id = "kempston";
   info_.name = "Kempston Joystick";
   info_.version = "1.0";
-  info_.author = "myNext";
+  info_.author = "RainbowNext";
   info_.description =
       "The standard joystick interface. Reads port 0x1F; bits 5-7 stay clear, "
       "which is how software detects that it is plugged in.";
@@ -19,4 +19,4 @@ bool KempstonJoystick::ioRead(u16 port, u32, u8& value) {
   return true;
 }
 
-} // namespace mynext
+} // namespace rainbow

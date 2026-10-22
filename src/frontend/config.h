@@ -3,13 +3,13 @@
 #include <string>
 #include <vector>
 
-namespace mynext::frontend {
+namespace rainbow::frontend {
 
 // What survives between runs: which peripherals are plugged in and where the
 // plugin folder lives. Deliberately a flat `key = value` file so it can be read
 // and edited without a tool:
 //
-//   plugin_dir = /Users/me/Library/Application Support/myNext/peripherals
+//   plugin_dir = /Users/me/Library/Application Support/RainbowNext/peripherals
 //   peripheral = kempston
 //   peripheral = printer
 //
@@ -23,4 +23,4 @@ struct Config {
   bool save(const std::string& path) const;
 };
 
-} // namespace mynext::frontend
+} // namespace rainbow::frontend

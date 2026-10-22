@@ -9,10 +9,10 @@
 
 #include "core/machine.h"
 
-using mynext::Machine;
-using mynext::MachineType;
-using mynext::u16;
-using mynext::u8;
+using rainbow::Machine;
+using rainbow::MachineType;
+using rainbow::u16;
+using rainbow::u8;
 
 namespace {
 
@@ -34,7 +34,7 @@ std::vector<u8> readFile(const std::string& path) {
 bool loadRomSet(Machine& machine, std::initializer_list<const char*> banks) {
   std::vector<u8> image;
   for (const char* name : banks) {
-    const std::vector<u8> bank = readFile(std::string(MYNEXT_SOURCE_DIR) + "/roms/" + name);
+    const std::vector<u8> bank = readFile(std::string(RAINBOW_SOURCE_DIR) + "/roms/" + name);
     if (bank.size() != 0x4000) return false;
     image.insert(image.end(), bank.begin(), bank.end());
   }
@@ -95,7 +95,7 @@ void cursorDown(Machine& machine) { holdKeys(machine, {{0, 0}, {4, 4}}, 12); }
 TEST(boot_real_128k_rom_shows_the_menu) {
   Machine machine(MachineType::Spectrum128);
   if (!loadRomSet(machine, {"128-0.rom", "128-1.rom"})) return;
-  const std::vector<u8> fontRom = readFile(std::string(MYNEXT_SOURCE_DIR) + "/roms/48.rom");
+  const std::vector<u8> fontRom = readFile(std::string(RAINBOW_SOURCE_DIR) + "/roms/48.rom");
   if (fontRom.size() != 0x4000) return;
 
   for (int i = 0; i < 300; ++i) machine.runFrame();
@@ -112,7 +112,7 @@ TEST(boot_real_128k_rom_shows_the_menu) {
 TEST(boot_real_128k_rom_enters_48_basic_through_rom_paging) {
   Machine machine(MachineType::Spectrum128);
   if (!loadRomSet(machine, {"128-0.rom", "128-1.rom"})) return;
-  const std::vector<u8> fontRom = readFile(std::string(MYNEXT_SOURCE_DIR) + "/roms/48.rom");
+  const std::vector<u8> fontRom = readFile(std::string(RAINBOW_SOURCE_DIR) + "/roms/48.rom");
   if (fontRom.size() != 0x4000) return;
 
   for (int i = 0; i < 300; ++i) machine.runFrame();
@@ -130,7 +130,7 @@ TEST(boot_real_128k_rom_enters_48_basic_through_rom_paging) {
 TEST(boot_real_plus3_rom_shows_the_amstrad_menu) {
   Machine machine(MachineType::Plus3);
   if (!loadRomSet(machine, {"plus3-0.rom", "plus3-1.rom", "plus3-2.rom", "plus3-3.rom"})) return;
-  const std::vector<u8> fontRom = readFile(std::string(MYNEXT_SOURCE_DIR) + "/roms/48.rom");
+  const std::vector<u8> fontRom = readFile(std::string(RAINBOW_SOURCE_DIR) + "/roms/48.rom");
   if (fontRom.size() != 0x4000) return;
 
   for (int i = 0; i < 300; ++i) machine.runFrame();

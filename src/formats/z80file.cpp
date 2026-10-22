@@ -2,7 +2,7 @@
 
 #include <cstring>
 
-namespace mynext::formats {
+namespace rainbow::formats {
 namespace {
 
 constexpr size_t HeaderSize = 30;
@@ -138,4 +138,4 @@ bool loadZ80(const std::vector<u8>& data, Snapshot& out, std::string& error) {
   return true;
 }
 
-} // namespace mynext::formats
+} // namespace rainbow::formats

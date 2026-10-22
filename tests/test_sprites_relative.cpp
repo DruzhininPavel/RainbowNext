@@ -12,11 +12,11 @@
 #include "core/machine.h"
 #include "core/sprites.h"
 
-using mynext::Machine;
-using mynext::MachineType;
-using mynext::Sprites;
-using mynext::u32;
-using mynext::u8;
+using rainbow::Machine;
+using rainbow::MachineType;
+using rainbow::Sprites;
+using rainbow::u32;
+using rainbow::u8;
 
 namespace {
 
@@ -225,9 +225,9 @@ TEST(sprite_unified_relative_draws_next_to_its_anchor) {
   // The part lands one cell to the right of the anchor and paints the same
   // pattern, so its top row carries colour 2.
   CHECK_EQ(surfacePixel(m, 32, 32), m.palette().colour(
-                                        mynext::NextPalette::SpritesFirst, 2));
+                                        rainbow::NextPalette::SpritesFirst, 2));
   CHECK_EQ(surfacePixel(m, 48, 32), m.palette().colour(
-                                        mynext::NextPalette::SpritesFirst, 2));
+                                        rainbow::NextPalette::SpritesFirst, 2));
 }
 
 TEST(sprite_anchor_without_byte_4_is_never_relative) {

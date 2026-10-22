@@ -7,7 +7,7 @@
 
 #include "core/peripheral.h"
 
-namespace mynext {
+namespace rainbow {
 
 // The edge connector. Modules are offered the bus in the order they were added,
 // which is the order of a real daisy chain: the first module that claims an
@@ -79,4 +79,4 @@ private:
   std::function<void()> observer_;
 };
 
-} // namespace mynext
+} // namespace rainbow

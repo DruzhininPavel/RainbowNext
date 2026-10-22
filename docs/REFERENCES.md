@@ -1,6 +1,6 @@
 # References
 
-myNext is written from scratch. The projects below were read to learn *what*
+RainbowNext is written from scratch. The projects below were read to learn *what*
 the hardware does and *how* other emulators structure the work. **No GPL code
 was copied**; where a file is GPL, only the observable behaviour (timing tables,
 port semantics, memory layouts) was reimplemented.

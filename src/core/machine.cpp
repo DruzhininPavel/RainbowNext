@@ -19,7 +19,7 @@
 #include "formats/snapshot.h"
 #include "formats/z80file.h"
 
-namespace mynext {
+namespace rainbow {
 
 // ===========================================================================
 // Machine descriptions
@@ -1461,4 +1461,4 @@ void Machine::renderSpriteRow(int r) {
   }
 }
 
-} // namespace mynext
+} // namespace rainbow

@@ -1,6 +1,6 @@
 #include "peripherals/printer.h"
 
-namespace mynext {
+namespace rainbow {
 
 namespace {
 constexpr int BytesPerRow = ZxPrinter::Width / 8;
@@ -10,7 +10,7 @@ ZxPrinter::ZxPrinter() {
   info_.id = "printer";
   info_.name = "ZX Printer";
   info_.version = "1.0";
-  info_.author = "myNext";
+  info_.author = "RainbowNext";
   info_.description =
       "The Sinclair spark printer on port 0xFB. Captures the dots and can save "
       "the printout as a PBM image.";
@@ -76,7 +76,7 @@ bool ZxPrinter::pixel(int x, int y) const {
 }
 
 std::string ZxPrinter::toPbm() const {
-  std::string out = "P1\n# myNext ZX Printer\n256 " + std::to_string(height_) + "\n";
+  std::string out = "P1\n# RainbowNext ZX Printer\n256 " + std::to_string(height_) + "\n";
   for (int y = 0; y < height_; ++y) {
     for (int x = 0; x < Width; ++x) {
       out += pixel(x, y) ? '1' : '0';
@@ -87,4 +87,4 @@ std::string ZxPrinter::toPbm() const {
   return out;
 }
 
-} // namespace mynext
+} // namespace rainbow

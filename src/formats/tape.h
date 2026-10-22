@@ -5,7 +5,7 @@
 
 #include "core/types.h"
 
-namespace mynext::formats {
+namespace rainbow::formats {
 
 // A tape block reduced to what the emulator actually needs: a pulse pattern
 // (tone, pause, direct recording) or a data block described by the pilot,
@@ -78,4 +78,4 @@ bool parseTzx(const std::vector<u8>& bytes, TapeImage& out, std::string& error);
 // Sniffs the container and dispatches: TZX by its magic, TAP otherwise.
 bool loadTapeFile(const std::string& path, TapeImage& out, std::string& error);
 
-} // namespace mynext::formats
+} // namespace rainbow::formats

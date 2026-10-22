@@ -3,7 +3,7 @@
 #include "core/bus.h"
 #include "core/types.h"
 
-namespace mynext {
+namespace rainbow {
 
 // A complete Z80 interpreter: documented and undocumented instructions,
 // IX/IY prefix quirks, MEMPTR (WZ), interrupt modes 0/1/2, NMI and HALT.
@@ -131,4 +131,4 @@ private:
   bool z80n_ = false;
 };
 
-} // namespace mynext
+} // namespace rainbow

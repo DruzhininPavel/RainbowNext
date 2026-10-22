@@ -3,7 +3,7 @@
 #include "core/keyboard.h"
 #include "core/types.h"
 
-namespace mynext {
+namespace rainbow {
 
 // The ULA's externally visible state: border colour, beeper level and the
 // EAR/MIC bits. Rendering and contention live in Machine because they need
@@ -27,4 +27,4 @@ private:
   u8 defaultValue_ = 0xBF;
 };
 
-} // namespace mynext
+} // namespace rainbow

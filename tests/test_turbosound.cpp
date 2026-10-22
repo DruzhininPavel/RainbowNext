@@ -4,13 +4,13 @@
 #include "core/machine.h"
 #include "core/turbosound.h"
 
-using mynext::Ay38912;
-using mynext::Machine;
-using mynext::MachineType;
-using mynext::SpecDrum;
-using mynext::TurboSound;
-using mynext::u16;
-using mynext::u8;
+using rainbow::Ay38912;
+using rainbow::Machine;
+using rainbow::MachineType;
+using rainbow::SpecDrum;
+using rainbow::TurboSound;
+using rainbow::u16;
+using rainbow::u8;
 
 namespace {
 

@@ -5,7 +5,7 @@
 #include "core/keyboard.h"
 #include "core/types.h"
 
-namespace mynext::frontend {
+namespace rainbow::frontend {
 
 // Maps the host keyboard onto the Spectrum's 8x5 matrix and reads a gamepad as
 // a Kempston joystick.
@@ -23,4 +23,4 @@ private:
   u8 arrowMask_ = 0;
 };
 
-} // namespace mynext::frontend
+} // namespace rainbow::frontend

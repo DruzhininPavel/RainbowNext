@@ -1,6 +1,6 @@
 #include "core/copper.h"
 
-namespace mynext {
+namespace rainbow {
 
 void Copper::reset() {
   program_.fill(0);
@@ -37,4 +37,4 @@ void Copper::writeControl(u8 value) {
   if (mode == 1 || mode == 3) cpc_ = 0;
 }
 
-} // namespace mynext
+} // namespace rainbow

@@ -2,7 +2,7 @@
 
 #include <cstring>
 
-namespace mynext::formats {
+namespace rainbow::formats {
 namespace {
 
 constexpr size_t SnaHeaderSize = 27;
@@ -88,4 +88,4 @@ bool loadSna(const std::vector<u8>& data, Snapshot& out, std::string& error) {
   return true;
 }
 
-} // namespace mynext::formats
+} // namespace rainbow::formats

@@ -6,7 +6,7 @@
 #include "core/types.h"
 #include "formats/tape.h"
 
-namespace mynext {
+namespace rainbow {
 
 // The virtual cassette: a list of pulse blocks played back against the
 // machine's T-state clock, plus the shortcut that serves the ROM's LD-BYTES
@@ -64,4 +64,4 @@ private:
   bool fastLoad_ = true;
 };
 
-} // namespace mynext
+} // namespace rainbow

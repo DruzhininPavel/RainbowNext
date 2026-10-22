@@ -7,12 +7,12 @@
 #include "core/upd765.h"
 #include "formats/dsk.h"
 
-using mynext::Upd765;
-using mynext::formats::DiskImage;
-using mynext::formats::DskSector;
-using mynext::formats::DskTrack;
-using mynext::u16;
-using mynext::u8;
+using rainbow::Upd765;
+using rainbow::formats::DiskImage;
+using rainbow::formats::DskSector;
+using rainbow::formats::DskTrack;
+using rainbow::u16;
+using rainbow::u8;
 
 namespace {
 
@@ -29,7 +29,7 @@ std::vector<u8> makeDsk(bool extended, int tracks, int sides, int sectorCount, i
   const char* magic =
       extended ? "EXTENDED CPC DSK File\r\nDisk-Info\r\n" : "MV - CPCEMU Disk-File\r\nDisk-Info\r\n";
   std::memcpy(bytes.data(), magic, 34);
-  std::memcpy(bytes.data() + 0x22, "myNext", 6);
+  std::memcpy(bytes.data() + 0x22, "RainbowNext", 11);
   bytes[0x30] = u8(tracks);
   bytes[0x31] = u8(sides);
 
@@ -78,7 +78,7 @@ struct Controller {
 
   bool insert(std::vector<u8> image) {
     std::string error;
-    if (!mynext::formats::parseDsk(image, disk, error)) return false;
+    if (!rainbow::formats::parseDsk(image, disk, error)) return false;
     fdc.reset();
     fdc.setDisk(&disk);
     fdc.setMotor(true);
@@ -107,12 +107,12 @@ TEST(dsk_parses_a_standard_image) {
   DiskImage disk;
   std::string error;
 
-  CHECK(mynext::formats::parseDsk(bytes, disk, error));
+  CHECK(rainbow::formats::parseDsk(bytes, disk, error));
   CHECK(error.empty());
   CHECK_EQ(disk.tracks, 2);
   CHECK_EQ(disk.sides, 1);
   CHECK(!disk.extended);
-  CHECK(disk.creator == "myNext");
+  CHECK(disk.creator == "RainbowNext");
 
   const DskTrack* track = disk.findTrack(1, 0);
   CHECK(track != nullptr);
@@ -131,7 +131,7 @@ TEST(dsk_parses_an_extended_image_with_a_per_track_table) {
   DiskImage disk;
   std::string error;
 
-  CHECK(mynext::formats::parseDsk(bytes, disk, error));
+  CHECK(rainbow::formats::parseDsk(bytes, disk, error));
   CHECK(disk.extended);
   CHECK_EQ(disk.tracks, 3);
   CHECK_EQ(disk.sides, 2);
@@ -153,7 +153,7 @@ TEST(dsk_skips_unformatted_tracks) {
 
   DiskImage disk;
   std::string error;
-  CHECK(mynext::formats::parseDsk(bytes, disk, error));
+  CHECK(rainbow::formats::parseDsk(bytes, disk, error));
   CHECK(disk.findTrack(0, 0) != nullptr);
   CHECK(disk.findTrack(0, 0)->formatted);
   CHECK_EQ(disk.findTrack(0, 0)->sectors.size(), 4);
@@ -168,11 +168,11 @@ TEST(dsk_rejects_files_that_are_not_images) {
   DiskImage disk;
   std::string error;
 
-  CHECK(!mynext::formats::parseDsk(std::vector<u8>(0x200, 0xAA), disk, error));
+  CHECK(!rainbow::formats::parseDsk(std::vector<u8>(0x200, 0xAA), disk, error));
   CHECK(!error.empty());
 
   error.clear();
-  CHECK(!mynext::formats::parseDsk(std::vector<u8>(16, 0), disk, error));
+  CHECK(!rainbow::formats::parseDsk(std::vector<u8>(16, 0), disk, error));
   CHECK(!error.empty());
 }
 
@@ -182,7 +182,7 @@ TEST(dsk_rejects_a_truncated_track) {
 
   DiskImage disk;
   std::string error;
-  CHECK(!mynext::formats::parseDsk(bytes, disk, error));
+  CHECK(!rainbow::formats::parseDsk(bytes, disk, error));
   CHECK(!error.empty());
 }
 

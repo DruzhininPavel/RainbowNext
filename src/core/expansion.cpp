@@ -4,7 +4,7 @@
 #include <sstream>
 #include <utility>
 
-namespace mynext {
+namespace rainbow {
 
 void ExpansionBus::add(std::unique_ptr<Peripheral> module, bool enabled) {
   if (!module) return;
@@ -176,4 +176,4 @@ void ExpansionBus::changed() {
   if (observer_) observer_();
 }
 
-} // namespace mynext
+} // namespace rainbow

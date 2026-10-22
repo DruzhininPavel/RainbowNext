@@ -4,10 +4,10 @@
 #include "core/machine.h"
 #include "core/ula.h"
 
-using mynext::Keyboard;
-using mynext::Machine;
-using mynext::MachineType;
-using mynext::Ula;
+using rainbow::Keyboard;
+using rainbow::Machine;
+using rainbow::MachineType;
+using rainbow::Ula;
 
 TEST(keyboard_matrix) {
   Keyboard kb;
@@ -63,7 +63,7 @@ TEST(machine_runs_exactly_one_frame) {
 
 TEST(machine_contention_window) {
   Machine m(MachineType::Spectrum48);
-  const mynext::u32 insideScreen = 48 * 224 + 24;
+  const rainbow::u32 insideScreen = 48 * 224 + 24;
   CHECK(m.contention(0x4000, insideScreen) > 0);
   CHECK_EQ(m.contention(0x4000, 0), 0);        // above the screen
   CHECK_EQ(m.contention(0x8000, insideScreen), 0); // not the screen bank on 48K
@@ -101,7 +101,7 @@ TEST(machine_paging_128k) {
 
 TEST(machine_rom_mapping) {
   Machine m(MachineType::Spectrum48);
-  const mynext::u8 rom[4] = {0xDE, 0xAD, 0xBE, 0xEF};
+  const rainbow::u8 rom[4] = {0xDE, 0xAD, 0xBE, 0xEF};
   CHECK(m.loadRomData(rom, sizeof rom, 0));
   CHECK(m.romLoaded());
   CHECK_EQ(m.memRead(0x0000, 0), 0xDE);

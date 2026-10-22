@@ -5,7 +5,7 @@
 
 #include "core/peripheral.h"
 
-namespace mynext {
+namespace rainbow {
 
 // ZX Printer: a one-bit-per-dot spark printer on port 0xFB. Bit 7 is the dot,
 // bit 2 runs the motor and the falling edge of bit 1 clocks it, so the printer
@@ -46,4 +46,4 @@ private:
   bool strobe_ = false;
 };
 
-} // namespace mynext
+} // namespace rainbow
