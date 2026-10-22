@@ -1,0 +1,152 @@
+name: Release
+
+# A tag produces a GitHub release with a runnable archive per platform; a manual
+# run only builds the same archives as workflow artifacts, so the packaging can
+# be tried out without publishing anything.
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: macOS (Apple Silicon)
+            os: macos-14
+            slug: macos-arm64
+            setup: ""
+          # The oldest runner still supported, so the archive also runs on newer
+          # distributions: glibc is forward compatible, not backward.
+          - name: Linux (x86_64)
+            os: ubuntu-22.04
+            slug: linux-x86_64
+            setup: |
+              sudo apt-get update
+              sudo apt-get install -y build-essential ninja-build zip curl
+              # SDL3 is always built from source here, and it needs the
+              # X11/Wayland/audio headers to compile its backends.
+              sudo apt-get install -y \
+                libasound2-dev libpulse-dev libdbus-1-dev libudev-dev \
+                libdrm-dev libgbm-dev libegl1-mesa-dev libgles2-mesa-dev \
+                libx11-dev libxext-dev libxrandr-dev libxcursor-dev libxi-dev \
+                libxfixes-dev libxss-dev libxtst-dev libxkbcommon-dev \
+                libwayland-dev libdecor-0-dev libibus-1.0-dev
+              # Ubuntu 22.04 ships CMake 3.22, the project needs 3.24.
+              curl -sSL \
+                https://github.com/Kitware/CMake/releases/download/v3.31.6/cmake-3.31.6-linux-x86_64.tar.gz \
+                | sudo tar -xz --strip-components=1 -C /usr/local
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install dependencies
+        run: ${{ matrix.setup }}
+
+      - name: Configure
+        # RAINBOW_STATIC_SDL3 links SDL3 into the binary, so the archive needs
+        # nothing installed on the user's machine beyond the system libraries.
+        run: >
+          cmake -B build -G Ninja
+          -DCMAKE_BUILD_TYPE=Release
+          -DRAINBOW_STATIC_SDL3=ON
+
+      - name: Build
+        run: cmake --build build
+
+      - name: Test
+        run: ctest --test-dir build --output-on-failure
+
+      - name: Smoke test
+        run: |
+          ./build/rainbow --help
+          if ldd build/rainbow 2>/dev/null | grep -qi sdl; then
+            echo "rainbow still depends on a shared SDL library"; exit 1
+          fi
+          if otool -L build/rainbow 2>/dev/null | grep -qi sdl; then
+            echo "rainbow still depends on a shared SDL library"; exit 1
+          fi
+
+      - name: Package
+        run: |
+          version=$(sed -n 's/^project(RainbowNext VERSION \([0-9.]*\).*/\1/p' CMakeLists.txt)
+          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
+            version="${GITHUB_REF_NAME#v}"
+          else
+            version="${version}-dev.${GITHUB_SHA:0:7}"
+          fi
+          name="rainbow-${version}-${{ matrix.slug }}"
+          stage="dist/${name}"
+          mkdir -p "${stage}/peripherals" "${stage}/roms" "${stage}/docs"
+          cp build/rainbow "${stage}/"
+          cp build/peripherals/* "${stage}/peripherals/"
+          cp roms/README.md "${stage}/roms/"
+          cp README.md LICENSE THIRD-PARTY-NOTICES.md "${stage}/"
+          cp docs/*.md "${stage}/docs/"
+          if [ "${{ runner.os }}" = "macOS" ]; then
+            # Finder cannot start a bare executable, and a downloaded one is
+            # quarantined anyway, so ship a double-clickable wrapper as well.
+            printf '#!/bin/sh\ncd "$(dirname "$0")" && exec ./rainbow "$@"\n' \
+              > "${stage}/run-rainbow.command"
+            chmod +x "${stage}/run-rainbow.command"
+          fi
+          (cd dist && zip -r -9 "${name}.zip" "${name}" >/dev/null)
+          echo "PACKAGE=dist/${name}.zip" >> "${GITHUB_ENV}"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist-${{ matrix.slug }}
+          path: ${{ env.PACKAGE }}
+          if-no-files-found: error
+
+  release:
+    name: Publish
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Create the release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          cat > notes.md <<'NOTES'
+          Ready-to-run builds of RainbowNext. Download the archive for your
+          platform, unpack it anywhere and start the emulator from that folder:
+
+          ```sh
+          ./rainbow
+          ```
+
+          On macOS `run-rainbow.command` does the same thing from Finder. If the
+          system refuses to run the downloaded binary, clear the quarantine flag
+          once with `xattr -d com.apple.quarantine rainbow`.
+
+          **The Spectrum ROMs are not included** — they are still under copyright.
+          Put your own dumps into the `roms/` folder next to the executable (see
+          `roms/README.md` for the file names), or open a ROM with
+          *File -> Open ROM*.
+
+          RainbowNext itself is BSD Zero Clause (0BSD): use it, change it, ship
+          it, no conditions. SDL3 and Dear ImGui keep their own licenses, both
+          reproduced in `THIRD-PARTY-NOTICES.md` inside the archive.
+
+          The Linux build needs a running X11 or Wayland session and the usual
+          audio libraries (`libasound2`, `libpulse`); SDL3 itself is linked in.
+          NOTES
+          gh release create "${GITHUB_REF_NAME}" dist/*.zip \
+            --title "RainbowNext ${GITHUB_REF_NAME}" \
+            --notes-file notes.md

@@ -172,7 +172,10 @@ a multicolour demo renders correctly; `z80test` passes.
 * [ ] RZX replay and recording, rewind buffer
 * [ ] Save states in a versioned binary format
 * [ ] CRT/scanline shaders (SDL_GPU backend)
-* [ ] CI releases: macOS universal + SteamOS/Linux AppImage
+* [x] CI releases: a tagged build of macOS arm64 and Linux x86_64, packaged as a
+      self-contained zip (SDL3 linked in, `peripherals/` and `roms/` beside the
+      executable) and attached to a GitHub release
+* [ ] macOS universal (arm64 + Intel) and a SteamOS/Linux AppImage
 * [ ] Steam Deck controller profiles, 1280×800 default scaling
 
 ## Known gaps
@@ -250,8 +253,11 @@ These are deliberate simplifications, tracked here so they are not forgotten:
 
 ## Open decisions
 
-* **License.** MIT/Apache-2.0 keeps the option of reading GPL projects as
-  reference only. GPL-3.0 would allow lifting code from JNEXT/ZEsarUX/MAME.
+* **License.** Decided: BSD Zero Clause (0BSD), the most permissive option —
+  no conditions at all, only the warranty disclaimer. It keeps the project to
+  reading GPL emulators as behavioural references; lifting their code would
+  require relicensing, which 0BSD permits but the GPL does not allow in the
+  other direction.
 * **NextZXOS distribution.** Likely user-supplied SD image only, as JNEXT does.
 * **Renderer.** SDL_Renderer is enough for M0-M2; SDL_GPU is the target for
   shaders in M3.

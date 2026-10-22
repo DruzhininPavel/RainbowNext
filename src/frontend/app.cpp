@@ -85,6 +85,16 @@ bool loadRomFor(Machine& machine, MachineType type, const std::string& dir, std:
   return false;
 }
 
+// A downloaded build keeps `roms/` next to the executable, while a development
+// build keeps it in the working directory, so both are searched.
+bool loadRomFromAnywhere(Machine& machine, MachineType type, std::string* used) {
+  if (loadRomFor(machine, type, "roms/", used)) return true;
+  if (const char* base = SDL_GetBasePath()) {
+    if (loadRomFor(machine, type, std::string(base) + "roms/", used)) return true;
+  }
+  return loadRomFor(machine, type, "", used);
+}
+
 float chipWidth(const char* text) { return ImGui::CalcTextSize(text).x + ui::kChipPadX * 2.0f; }
 
 void drawChip(ImDrawList* drawList, ImVec2 pos, const char* text, ImU32 background, ImU32 foreground,
@@ -154,8 +164,7 @@ bool App::init(const Options& options) {
     romPath_ = options.rom;
     loaded = true;
   }
-  if (!loaded) loaded = loadRomFor(*machine_, machine_->type(), "roms/", &romPath_);
-  if (!loaded) loaded = loadRomFor(*machine_, machine_->type(), "", &romPath_);
+  if (!loaded) loaded = loadRomFromAnywhere(*machine_, machine_->type(), &romPath_);
   if (loaded) {
     status_ = "ROM loaded: " + romPath_;
   }
@@ -378,8 +387,7 @@ void App::setMachine(MachineType type) {
 
   // A 48K ROM is not a valid 128K ROM and vice versa, so pick the matching set
   // instead of reusing whatever happened to be loaded before.
-  bool loaded = loadRomFor(*machine_, type, "roms/", &romPath_);
-  if (!loaded) loaded = loadRomFor(*machine_, type, "", &romPath_);
+  bool loaded = loadRomFromAnywhere(*machine_, type, &romPath_);
   status_ = std::string("Machine: ") + machineName(type) +
             (loaded ? "  ROM: " + romPath_ : "  (no ROM found)");
 

@@ -8,7 +8,8 @@ Runs on macOS and Linux (including SteamOS / Steam Deck).
 Status: M1 — 48K and 128K/+2/+3 boot with AY sound, tape loading, disk images
         and snapshots.
         M2 in progress: the Z80N instruction set, the Next's MMU/NextREG file,
-        its palette hardware, Layer 2, sprites and the tilemap are implemented
+        its palette hardware, Layer 2, sprites, the tilemap and the video
+        pipeline (Timex, ULA+, ULANext, blending) are implemented
         (docs/ROADMAP.md).
 ```
 
@@ -94,10 +95,30 @@ Status: M1 — 48K and 128K/+2/+3 boot with AY sound, tape loading, disk images
   SDL gamepad (Steam Deck controls work out of the box), Kempston mouse when the
   module is plugged in.
 
+## Download
+
+Every tagged release carries a ready-to-run archive per platform on the
+[releases page](../../releases): `rainbow-<version>-macos-arm64.zip` and
+`rainbow-<version>-linux-x86_64.zip`. Unpack it anywhere and start the emulator
+from that folder:
+
+```sh
+./rainbow
+```
+
+On macOS `run-rainbow.command` does the same thing from Finder; if Gatekeeper
+refuses the downloaded binary, clear the flag once with
+`xattr -d com.apple.quarantine rainbow`. SDL3 is linked into the binary, so
+nothing has to be installed; the Linux build still needs an X11 or Wayland
+session and the usual audio libraries. The ROMs are **not** included — see
+[`roms/README.md`](roms/README.md).
+
 ## Build
 
 Requirements: CMake ≥ 3.24, a C++20 compiler, SDL3 ≥ 3.2. If SDL3 is missing it
 is downloaded and built automatically (`-DRAINBOW_FETCH_SDL3=OFF` to disable).
+Pass `-DRAINBOW_STATIC_SDL3=ON` to build a static SDL3 even when a system copy is
+installed, which is what the release archives do.
 
 ### macOS
 
@@ -127,7 +148,7 @@ ctest --test-dir build --output-on-failure
 ROM images are not bundled — see [`roms/README.md`](roms/README.md).
 
 ```sh
-./build/rainbow                      # searches roms/48.rom, roms/48.ROM, 48.rom
+./build/rainbow                      # searches roms/ next to the binary, then 48.rom
 ./build/rainbow roms/48.rom          # explicit ROM
 ./build/rainbow game.tap             # ROM from roms/, tape inserted
 ./build/rainbow --rom 48.rom --tape game.tzx --snapshot save.z80
@@ -237,6 +258,16 @@ skip themselves on a clean checkout.
 
 ## License
 
-Not decided yet — see the open questions in [`docs/ROADMAP.md`](docs/ROADMAP.md).
-Until then no third-party emulator code is included; other projects are used as
-behavioural references only (see [`docs/REFERENCES.md`](docs/REFERENCES.md)).
+[BSD Zero Clause (0BSD)](LICENSE) — do whatever you want with it: use it, change
+it, sell it, ship it closed, no attribution needed. The software comes with no
+warranty of any kind.
+
+The archive ships SDL3 (zlib) and Dear ImGui (MIT) linked in; their notices are
+reproduced in [`THIRD-PARTY-NOTICES.md`](THIRD-PARTY-NOTICES.md) and travel with
+the release archives. No emulator code was copied from other projects — Fuse,
+ZEsarUX, JNEXT and MAME were read as behavioural references only
+([`docs/REFERENCES.md`](docs/REFERENCES.md)).
+
+**No ROMs, no NextZXOS and no games are distributed**, here or in the release
+archives: those are still under copyright by Amstrad plc and SpecNext Ltd. See
+[`roms/README.md`](roms/README.md).
