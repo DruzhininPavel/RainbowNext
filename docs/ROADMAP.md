@@ -42,7 +42,8 @@ a multicolour demo renders correctly; `z80test` passes.
 * [ ] Exact 128K contention (`offset` 1 vs 4, `line_times[]`)
 * [x] +3 disk controller (µPD765) and `.dsk`/`.edsk`: SPECIFY, SENSE DRIVE,
       SENSE INTERRUPT, RECALIBRATE, SEEK, READ ID, READ DATA/DELETED/TRACK,
-      WRITE DATA/DELETED, FORMAT TRACK; standard CPCEMU and extended images
+      WRITE DATA/DELETED, FORMAT TRACK; standard CPCEMU, extended and raw TR-DOS
+      images
 * [ ] Pentagon ULA+ attributes and `0xDFFD`/`0xEFF7` magic ports
 * [ ] Real-time tape playback tuning for protected loaders (turbo blocks, custom pilots)
 

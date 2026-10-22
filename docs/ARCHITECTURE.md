@@ -383,6 +383,14 @@ length), which is exactly the CHRN tuple the controller reports in READ ID and
 searches for in READ/WRITE DATA. Sectors are stored with `128 << n` bytes so a
 read can hand out a fixed-size block regardless of how the image was written.
 
+A raw TR-DOS `.trd` needs no decoder at all: it carries no header, so the
+geometry is fixed at 80 cylinders, two sides and sixteen 256-byte sectors per
+track, and the file is exactly those sectors in physical order. `parseTrd`
+synthesises the same `DiskImage` with sector ids 1..16, which is what the
+controller reports and the TR-DOS ROM asks for. `loadDiskFile` dispatches on the
+extension so the rest of the code never has to know which container it was
+handed.
+
 `Upd765` borrows the image instead of owning it: `Machine` holds the
 `DiskImage` and re-points the controller after a load or a reset, which keeps
 the controller free of I/O and lets tests construct one on the stack.

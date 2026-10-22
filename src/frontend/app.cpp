@@ -466,7 +466,7 @@ void App::handleEvent(const SDL_Event& event) {
         loadRom(path);
       } else if (extension == ".tap" || extension == ".tzx") {
         loadTape(path);
-      } else if (extension == ".dsk" || extension == ".edsk") {
+      } else if (extension == ".dsk" || extension == ".edsk" || extension == ".trd") {
         loadDisk(path);
       } else if (extension == ".img") {
         loadDivMmcCard(path);
@@ -597,7 +597,7 @@ void App::openFileDialog(DialogKind kind) {
   static const SDL_DialogFileFilter tapeFilters[] = {
       {"Tape images", "tap;tzx"}, {"All files", "*"}};
   static const SDL_DialogFileFilter diskFilters[] = {
-      {"Disk images", "dsk;edsk"}, {"All files", "*"}};
+      {"Disk images", "dsk;edsk;trd"}, {"All files", "*"}};
   static const SDL_DialogFileFilter cartridgeFilters[] = {
       {"Cartridge images", "rom;bin;cart"}, {"All files", "*"}};
   static const SDL_DialogFileFilter divMmcRomFilters[] = {

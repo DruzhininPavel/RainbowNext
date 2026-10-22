@@ -1,6 +1,8 @@
 #include "formats/dsk.h"
 
 #include <algorithm>
+#include <cctype>
+#include <cstddef>
 #include <cstring>
 #include <fstream>
 #include <iterator>
@@ -204,6 +206,75 @@ bool loadDskFile(const std::string& path, DiskImage& out, std::string& error) {
   if (!parseDsk(bytes, out, error)) return false;
   out.path = path;
   return true;
+}
+
+namespace {
+
+// TR-DOS always uses the same geometry, which is why the container needs no
+// header: 80 cylinders, two sides, sixteen 256-byte sectors per track.
+constexpr int TrdTracks = 80;
+constexpr int TrdSides = 2;
+constexpr int TrdSectors = 16;
+constexpr size_t TrdSectorSize = 256;
+constexpr size_t TrdSize = size_t(TrdTracks) * TrdSides * TrdSectors * TrdSectorSize;
+
+} // namespace
+
+bool parseTrd(const std::vector<u8>& bytes, DiskImage& out, std::string& error) {
+  if (bytes.size() != TrdSize) {
+    error = "TRD image must be exactly " + std::to_string(TrdSize) + " bytes";
+    return false;
+  }
+
+  out = DiskImage{};
+  out.creator = "TR-DOS";
+  out.tracks = TrdTracks;
+  out.sides = TrdSides;
+  out.extended = false;
+  out.trackList.resize(size_t(TrdTracks) * size_t(TrdSides));
+
+  // The file order is the physical order of a formatted track, and the sector
+  // ids run 1..16 in that same order: the interleave TR-DOS uses lives in the
+  // ROM's read loop, not in the image.
+  size_t offset = 0;
+  for (size_t index = 0; index < out.trackList.size(); ++index) {
+    DskTrack& track = out.trackList[index];
+    track.track = int(index / size_t(TrdSides));
+    track.side = int(index % size_t(TrdSides));
+    track.formatted = true;
+    track.dataRate = 0;
+    track.sectors.reserve(TrdSectors);
+    for (int sector = 0; sector < TrdSectors; ++sector) {
+      DskSector entry;
+      entry.c = u8(track.track);
+      entry.h = u8(track.side);
+      entry.r = u8(sector + 1);
+      entry.n = 1; // 256 bytes
+      entry.data.assign(bytes.begin() + std::ptrdiff_t(offset),
+                        bytes.begin() + std::ptrdiff_t(offset + TrdSectorSize));
+      offset += TrdSectorSize;
+      track.sectors.push_back(std::move(entry));
+    }
+  }
+  return true;
+}
+
+bool loadTrdFile(const std::string& path, DiskImage& out, std::string& error) {
+  std::vector<u8> bytes;
+  if (!readFile(path, bytes, error)) return false;
+  if (!parseTrd(bytes, out, error)) return false;
+  out.path = path;
+  return true;
+}
+
+bool loadDiskFile(const std::string& path, DiskImage& out, std::string& error) {
+  std::string extension;
+  const size_t dot = path.find_last_of('.');
+  if (dot != std::string::npos) extension = path.substr(dot);
+  std::transform(extension.begin(), extension.end(), extension.begin(),
+                 [](unsigned char ch) { return char(std::tolower(ch)); });
+  if (extension == ".trd") return loadTrdFile(path, out, error);
+  return loadDskFile(path, out, error);
 }
 
 } // namespace rainbow::formats

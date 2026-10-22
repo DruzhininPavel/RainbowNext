@@ -72,9 +72,9 @@ Status: v0.1.3 — M1 and M2 done: 48K and 128K/+2/+3 boot with AY sound, tape
   the ROM loader trap at `0x0556`.
 * **ROM sets** — banked ROM images (`128-0.rom`…, `plus3-0.rom`…) are assembled
   into a single image, so the machine can page through all four banks.
-* **Disk** — +3 µPD765 on ports `0x2FFD`/`0x3FFD` with standard CPCEMU `.dsk`
-  and extended `.edsk` images (SPECIFY, SEEK, READ ID, READ/WRITE DATA, FORMAT
-  TRACK), driven by the real +3 ROM.
+* **Disk** — +3 µPD765 on ports `0x2FFD`/`0x3FFD` with standard CPCEMU `.dsk`,
+  extended `.edsk` and raw TR-DOS `.trd` images (SPECIFY, SEEK, READ ID,
+  READ/WRITE DATA, FORMAT TRACK), driven by the real +3 ROM.
 * **Snapshots** — `.sna` (48K/128K) and `.z80` (v1, v2, v3 with RLE).
 * **RZX** — record and replay the RZX container: the input block holds the value
   every port read returned, so a replay reproduces the run regardless of what
@@ -191,7 +191,7 @@ ROM images are not bundled — see [`roms/README.md`](roms/README.md).
 ```
 
 A bare path is routed by extension: `.rom`, `.tap`/`.tzx`, `.sna`/`.z80`,
-`.nex`, `.dsk`/`.edsk`, `.img`, `.rbn`. The same files can be dropped onto the
+`.nex`, `.dsk`/`.edsk`/`.trd`, `.img`, `.rbn`. The same files can be dropped onto the
 window.
 
 `--esxdos DIR` points the program's `RST 8` calls at a host directory instead of
@@ -305,7 +305,7 @@ src/peripherals/   built-in modules: kempston, kempston mouse, printer,
                    cartridge, divmmc (SPI SD card shared from src/core/sdcard)
 src/plugin/        the C ABI and the loader for out-of-tree modules
 plugins/           example plugin: a Fuller Audio Box joystick interface
-src/formats/       SNA / Z80 / NEX images, TAP / TZX tapes, DSK / EDSK disks
+src/formats/       SNA / Z80 / NEX images, TAP / TZX tapes, DSK / EDSK / TRD disks
 src/frontend/      SDL3 + Dear ImGui host: app, audio, input, debugger, config
 tests/             unit tests, incl. an end-to-end boot test (no ROM required)
 docs/              ARCHITECTURE.md, REFERENCES.md, ROADMAP.md

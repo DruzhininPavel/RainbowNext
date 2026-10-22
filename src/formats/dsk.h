@@ -57,4 +57,13 @@ struct DiskImage {
 bool parseDsk(const std::vector<u8>& bytes, DiskImage& out, std::string& error);
 bool loadDskFile(const std::string& path, DiskImage& out, std::string& error);
 
+// A `.trd` is the raw TR-DOS disk layout: 80 cylinders, two sides, sixteen
+// 256-byte sectors per track, in that order. It carries no geometry header at
+// all, so it only parses when the file is exactly the expected size.
+bool parseTrd(const std::vector<u8>& bytes, DiskImage& out, std::string& error);
+bool loadTrdFile(const std::string& path, DiskImage& out, std::string& error);
+// Dispatches on the extension, so the caller does not have to care which of
+// the two disk containers it was handed.
+bool loadDiskFile(const std::string& path, DiskImage& out, std::string& error);
+
 } // namespace rainbow::formats

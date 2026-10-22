@@ -394,3 +394,44 @@ TEST(fdc_write_without_a_disk_reports_no_data) {
   CHECK_EQ(fdc.readData() & 0xC0, 0x40);
   CHECK_EQ(fdc.readData() & 0x04, 0x04);
 }
+
+// A `.trd` is the raw TR-DOS layout with no header at all, so the parser has to
+// derive the whole geometry from the file size.
+TEST(trd_parses_the_fixed_tr_dos_geometry) {
+  std::vector<u8> bytes(size_t(80) * 2 * 16 * 256);
+  for (size_t i = 0; i < bytes.size(); ++i) bytes[i] = rainbow::u8(i * 13 + 7);
+
+  DiskImage disk;
+  std::string error;
+  CHECK(rainbow::formats::parseTrd(bytes, disk, error));
+  CHECK_EQ(disk.tracks, 80);
+  CHECK_EQ(disk.sides, 2);
+  CHECK_EQ(disk.trackList.size(), size_t(160));
+
+  // Sector ids run 1..16 in file order, which is the order TR-DOS reads them.
+  const DskTrack* first = disk.findTrack(0, 0);
+  CHECK(first != nullptr);
+  CHECK_EQ(first->sectors.size(), size_t(16));
+  CHECK_EQ(first->sectors[0].r, 1);
+  CHECK_EQ(first->sectors[15].r, 16);
+  CHECK_EQ(first->sectors[0].n, 1);
+  CHECK_EQ(first->sectors[0].data.size(), size_t(256));
+  CHECK_EQ(first->sectors[0].data[0], bytes[0]);
+  CHECK_EQ(first->sectors[1].data[0], bytes[256]);
+
+  // Side 1 of track 0 follows the sixteen sectors of side 0.
+  const DskTrack* second = disk.findTrack(0, 1);
+  CHECK(second != nullptr);
+  CHECK_EQ(second->sectors[0].data[0], bytes[16 * 256]);
+
+  const DskTrack* last = disk.findTrack(79, 1);
+  CHECK(last != nullptr);
+  CHECK_EQ(last->sectors[15].data[255], bytes[bytes.size() - 1]);
+}
+
+TEST(trd_rejects_a_file_of_the_wrong_size) {
+  DiskImage disk;
+  std::string error;
+  CHECK(!rainbow::formats::parseTrd(std::vector<u8>(1024), disk, error));
+  CHECK(!error.empty());
+}

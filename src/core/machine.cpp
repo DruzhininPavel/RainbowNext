@@ -213,7 +213,7 @@ bool Machine::loadDisk(const std::string& path, std::string& error) {
     return false;
   }
   formats::DiskImage image;
-  if (!formats::loadDskFile(path, image, error)) return false;
+  if (!formats::loadDiskFile(path, image, error)) return false;
   disk_ = std::move(image);
   fdc_.reset();
   fdc_.setDisk(&disk_);
