@@ -182,6 +182,10 @@ bool App::init(const Options& options) {
   scanPeripherals();
   applyPeripheralConfig();
   if (!options.sd.empty()) loadDivMmcCard(options.sd);
+  if (options.debugger) {
+    showDebugger_ = true;
+    paused_ = true;
+  }
   // Write the file on the first run too, so the plugin folder is recorded even
   // if the emulator is killed rather than closed.
   saveConfig();
@@ -258,7 +262,14 @@ void App::run() {
     machine_->setKempston(kempston);
 
     if (!paused_) {
-      for (int i = 0; i < speedMultiplier_; ++i) machine_->runFrame();
+      for (int i = 0; i < speedMultiplier_; ++i) {
+        // A breakpoint stops the frame early, so the machine is left with the
+        // registers the user wants to look at.
+        if (machine_->runFrame().has_value()) {
+          paused_ = true;
+          break;
+        }
+      }
     }
 
     pushAudio();
@@ -280,7 +291,11 @@ void App::run() {
 
     if (toolbarVisible_) drawToolbar();
     updateLayout();
-    if (showDebugger_) showDebugger_ = drawDebugger(*machine_, &showDebugger_);
+    if (showDebugger_) {
+      const DebuggerRequest request = drawDebugger(*machine_, debuggerUi_, &showDebugger_);
+      showDebugger_ = request.visible;
+      if (request.resume) paused_ = false;
+    }
     drawStatusOverlay();
 
     ImGui::Render();
@@ -315,6 +330,14 @@ void App::handleEvent(const SDL_Event& event) {
           break;
         case SDLK_F2:
           paused_ = !paused_;
+          break;
+        case SDLK_F3:
+          paused_ = true;
+          machine_->stepInstruction();
+          break;
+        case SDLK_F4:
+          paused_ = true;
+          stepOverInstruction(*machine_);
           break;
         case SDLK_F5:
           reset();
@@ -867,6 +890,14 @@ void App::drawToolbar() {
   menu("View", [this] {
     ImGui::MenuItem("Debugger", "F1", &showDebugger_);
     ImGui::MenuItem("Pause", "F2", &paused_);
+    if (ImGui::MenuItem("Step", "F3")) {
+      paused_ = true;
+      machine_->stepInstruction();
+    }
+    if (ImGui::MenuItem("Step over", "F4")) {
+      paused_ = true;
+      stepOverInstruction(*machine_);
+    }
     ImGui::Separator();
     ImGui::MenuItem("Toolbar", "Tab", &toolbarPinned_);
     if (ImGui::MenuItem("Fullscreen", "F11", fullscreen_)) toggleFullscreen();

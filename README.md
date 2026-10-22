@@ -9,7 +9,7 @@ Status: v0.1.0 — M1 and M2 done: 48K and 128K/+2/+3 boot with AY sound, tape
         loading, disk images and snapshots, plus the Z80N instruction set, the
         Next's MMU/NextREG file, its palette hardware, Layer 2, sprites, the
         tilemap and the video pipeline (Timex, ULA+, ULANext, blending).
-        M3 — the debugger, replay, save states and shaders — is next
+        M3 — replay, save states and shaders — is under way
         (docs/ROADMAP.md).
 ```
 
@@ -90,7 +90,8 @@ Status: v0.1.0 — M1 and M2 done: 48K and 128K/+2/+3 boot with AY sound, tape
   an SPI SD card that talks to a plain sector image. Load `esxdos.rom` and a
   card image from `Peripherals`; both are yours to supply.
 * **Frontend** — resizable window, integer scaling, speed 1×/2×/4×/8×,
-  drag & drop loading, Dear ImGui menus and a debugger overlay.
+  drag & drop loading, Dear ImGui menus and a debugger with breakpoints, a
+  disassembly listing, a memory editor and a profiler.
 * **Input** — Spectrum keyboard mapping, Kempston joystick on arrow keys or any
   SDL gamepad (Steam Deck controls work out of the box), Kempston mouse when the
   module is plugged in.
@@ -175,6 +176,7 @@ instant loading; turn it off to hear and debug the actual tape signal.
 | Kempston | arrow keys, or gamepad stick + A/B |
 | Debugger | `F1` |
 | Pause | `F2` |
+| Step / step over | `F3` / `F4` |
 | Reset | `F5` |
 | Tape play / stop | `F6` |
 | Tape rewind | `F7` |
@@ -241,8 +243,9 @@ peripheral = printer
 ctest --test-dir build --output-on-failure
 ```
 
-379 tests cover the Z80 core (timings, flags, undocumented opcodes,
-interrupts), the Z80N extension, the Next MMU, palette, Layer 2, the Timex
+399 tests cover the Z80 core (timings, flags, undocumented opcodes,
+interrupts), the disassembler (base, CB, ED, indexed and Z80N forms, lengths and
+flow), the debugger's breakpoints and profiler, the Z80N extension, the Next MMU, palette, Layer 2, the Timex
 modes and the ULA+/ULANext attribute paths, the blending priority modes,
 sprites (including relative and unified sprites and the collision flags), the
 tilemap, the Copper and the zxnDMA, ULA behaviour, contention, floating bus,

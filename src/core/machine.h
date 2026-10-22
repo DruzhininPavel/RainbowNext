@@ -1,6 +1,7 @@
 #pragma once
 
 #include <array>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -98,9 +99,29 @@ public:
   bool loadDisk(const std::string& path, std::string& error);
   void ejectDisk() { disk_ = formats::DiskImage{}; fdc_.eject(); }
 
-  void runFrame();
+  // Runs one frame. With breakpoints armed the run stops before the
+  // instruction at the breakpoint executes, so the registers still show the
+  // state to inspect, and the address that stopped it is returned.
+  std::optional<u16> runFrame();
   void runCycles(u32 cycles);
   void stepInstruction();
+
+  // --- debugger -----------------------------------------------------------
+  // Breakpoints are addresses; the check costs nothing while none are armed.
+  void setBreakpoint(u16 address);
+  void clearBreakpoint(u16 address);
+  bool hasBreakpoint(u16 address) const;
+  void clearBreakpoints();
+  const std::vector<u16>& breakpoints() const { return breakpoints_; }
+
+  // PC sampling for the profiler. Off by default because it costs a store per
+  // instruction, so a frontend only turns it on while someone is looking.
+  void setProfiling(bool on);
+  bool profiling() const { return profiling_; }
+  void resetProfile();
+  // How often an instruction started at `address` since the last reset.
+  u32 sampleCount(u16 address) const { return samples_[address]; }
+  u64 sampleTotal() const { return sampleTotal_; }
 
   // Bus interface
   u8 memRead(u16 addr, u32 t) override;
@@ -337,6 +358,11 @@ private:
   u64 frames_ = 0;
   bool irqLine_ = false;
   u32 irqEnd_ = 0;
+
+  std::vector<u16> breakpoints_;  // sorted, so the per-instruction test is a search
+  bool profiling_ = false;
+  std::array<u32, 65536> samples_{};
+  u64 sampleTotal_ = 0;
 
   int sampleRate_ = 44100;
   u64 audioAccum_ = 0;
