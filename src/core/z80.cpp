@@ -18,6 +18,7 @@ void Z80::reset() {
   wz_ = 0;
   cycles_ = 0;
   eiDelay_ = 0;
+  q_ = false;
 }
 
 // ===========================================================================
@@ -149,69 +150,69 @@ u16 Z80::indexAddr(int idx) {
 void Z80::add8(u8 value, u8 carry) {
   const u16 sum = u16(regs_.a) + value + carry;
   const u8 r = u8(sum);
-  regs_.f = u8(szxy(r) |
+  setF(u8(szxy(r) |
                ((regs_.a ^ value ^ r) & HF) |
                (((~(regs_.a ^ value) & (regs_.a ^ r)) >> 5) & PF) |
-               ((sum >> 8) & CF));
+               ((sum >> 8) & CF)));
   regs_.a = r;
 }
 
 void Z80::sub8(u8 value, u8 carry) {
   const u16 diff = u16(regs_.a) - value - carry;
   const u8 r = u8(diff);
-  regs_.f = u8(szxy(r) | NF |
+  setF(u8(szxy(r) | NF |
                ((regs_.a ^ value ^ r) & HF) |
                ((((regs_.a ^ value) & (regs_.a ^ r)) >> 5) & PF) |
-               ((diff >> 8) & CF));
+               ((diff >> 8) & CF)));
   regs_.a = r;
 }
 
 void Z80::and8(u8 value) {
   regs_.a &= value;
-  regs_.f = u8(szxyp(regs_.a) | HF);
+  setF(u8(szxyp(regs_.a) | HF));
 }
 
 void Z80::or8(u8 value) {
   regs_.a |= value;
-  regs_.f = szxyp(regs_.a);
+  setF(szxyp(regs_.a));
 }
 
 void Z80::xor8(u8 value) {
   regs_.a ^= value;
-  regs_.f = szxyp(regs_.a);
+  setF(szxyp(regs_.a));
 }
 
 void Z80::cp8(u8 value) {
   const u16 diff = u16(regs_.a) - value;
   const u8 r = u8(diff);
-  regs_.f = u8((r & SF) | (r == 0 ? ZF : 0) | (value & (YF | XF)) | NF |
+  setF(u8((r & SF) | (r == 0 ? ZF : 0) | (value & (YF | XF)) | NF |
                ((regs_.a ^ value ^ r) & HF) |
                ((((regs_.a ^ value) & (regs_.a ^ r)) >> 5) & PF) |
-               ((diff >> 8) & CF));
+               ((diff >> 8) & CF)));
 }
 
 void Z80::inc8(u8& r) {
   const u8 before = r;
   r = u8(before + 1);
-  regs_.f = u8((regs_.f & CF) | szxy(r) |
+  setF(u8((regs_.f & CF) | szxy(r) |
                ((before & 0x0F) == 0x0F ? HF : 0) |
-               (before == 0x7F ? PF : 0));
+               (before == 0x7F ? PF : 0)));
 }
 
 void Z80::dec8(u8& r) {
   const u8 before = r;
   r = u8(before - 1);
-  regs_.f = u8((regs_.f & CF) | szxy(r) | NF |
+  setF(u8((regs_.f & CF) | szxy(r) | NF |
                ((before & 0x0F) == 0x00 ? HF : 0) |
-               (before == 0x80 ? PF : 0));
+               (before == 0x80 ? PF : 0)));
 }
 
 void Z80::add16(u16& dest, u16 value) {
   const u32 sum = u32(dest) + value;
-  regs_.f = u8((regs_.f & (SF | ZF | PF)) |
+  setF(u8((regs_.f & (SF | ZF | PF)) |
                (((dest ^ value ^ u16(sum)) >> 8) & HF) |
                ((sum >> 16) & CF) |
-               (((sum >> 8) & (YF | XF))));
+               (((sum >> 8) & (YF | XF)))));
   dest = u16(sum);
   wz_ = dest;
 }
@@ -219,10 +220,10 @@ void Z80::add16(u16& dest, u16 value) {
 void Z80::adc16(u16& dest, u16 value) {
   const u32 sum = u32(dest) + value + (regs_.f & CF);
   const u16 r = u16(sum);
-  regs_.f = u8(((r >> 8) & (SF | YF | XF)) | (r == 0 ? ZF : 0) |
+  setF(u8(((r >> 8) & (SF | YF | XF)) | (r == 0 ? ZF : 0) |
                (((dest ^ value ^ r) >> 8) & HF) |
                (((~(dest ^ value) & (dest ^ r)) >> 13) & PF) |
-               ((sum >> 16) & CF));
+               ((sum >> 16) & CF)));
   dest = r;
   wz_ = dest;
 }
@@ -230,10 +231,10 @@ void Z80::adc16(u16& dest, u16 value) {
 void Z80::sbc16(u16& dest, u16 value) {
   const u32 diff = u32(dest) - value - (regs_.f & CF);
   const u16 r = u16(diff);
-  regs_.f = u8(((r >> 8) & (SF | YF | XF)) | (r == 0 ? ZF : 0) | NF |
+  setF(u8(((r >> 8) & (SF | YF | XF)) | (r == 0 ? ZF : 0) | NF |
                (((dest ^ value ^ r) >> 8) & HF) |
                ((((dest ^ value) & (dest ^ r)) >> 13) & PF) |
-               ((diff >> 16) & CF));
+               ((diff >> 16) & CF)));
   dest = r;
   wz_ = dest;
 }
@@ -250,7 +251,7 @@ void Z80::daa() {
     carry = true;
   }
   const u8 a = (regs_.f & NF) ? u8(old - correction) : u8(old + correction);
-  regs_.f = u8(szxyp(a) | (regs_.f & NF) | ((old ^ a) & HF) | (carry ? CF : 0));
+  setF(u8(szxyp(a) | (regs_.f & NF) | ((old ^ a) & HF) | (carry ? CF : 0)));
   regs_.a = a;
 }
 
@@ -260,32 +261,32 @@ void Z80::daa() {
 void Z80::blockIoFlags(u8 value, u8 addend) {
   const u8 b = regs_.b;
   const u16 sum = u16(u16(addend) + value);
-  regs_.f = u8(szxy(b) | (value & SF ? NF : 0) | u8(sum & 0x100 ? (HF | CF) : 0) |
-               (parity(u8((sum & 0x07) ^ b)) ? PF : 0));
+  setF(u8(szxy(b) | (value & SF ? NF : 0) | u8(sum & 0x100 ? (HF | CF) : 0) |
+               (parity(u8((sum & 0x07) ^ b)) ? PF : 0)));
 }
 
 void Z80::rlca() {
   const u8 c = u8(regs_.a >> 7);
   regs_.a = u8(regs_.a << 1 | c);
-  regs_.f = u8((regs_.f & (SF | ZF | PF)) | (regs_.a & (YF | XF)) | c);
+  setF(u8((regs_.f & (SF | ZF | PF)) | (regs_.a & (YF | XF)) | c));
 }
 
 void Z80::rrca() {
   const u8 c = u8(regs_.a & 1);
   regs_.a = u8(regs_.a >> 1 | c << 7);
-  regs_.f = u8((regs_.f & (SF | ZF | PF)) | (regs_.a & (YF | XF)) | c);
+  setF(u8((regs_.f & (SF | ZF | PF)) | (regs_.a & (YF | XF)) | c));
 }
 
 void Z80::rla() {
   const u8 c = u8(regs_.a >> 7);
   regs_.a = u8(regs_.a << 1 | (regs_.f & CF));
-  regs_.f = u8((regs_.f & (SF | ZF | PF)) | (regs_.a & (YF | XF)) | c);
+  setF(u8((regs_.f & (SF | ZF | PF)) | (regs_.a & (YF | XF)) | c));
 }
 
 void Z80::rra() {
   const u8 c = u8(regs_.a & 1);
   regs_.a = u8(regs_.a >> 1 | ((regs_.f & CF) << 7));
-  regs_.f = u8((regs_.f & (SF | ZF | PF)) | (regs_.a & (YF | XF)) | c);
+  setF(u8((regs_.f & (SF | ZF | PF)) | (regs_.a & (YF | XF)) | c));
 }
 
 // ===========================================================================
@@ -305,7 +306,7 @@ void Z80::executeRot(int group, u8& r) {
     case 7: c = u8(r & 1); r = u8(r >> 1); break;                 // SRL
     default: break;
   }
-  regs_.f = u8(szxyp(r) | c);
+  setF(u8(szxyp(r) | c));
 }
 
 void Z80::executeBit(int bit, u8 value, bool memory) {
@@ -316,7 +317,7 @@ void Z80::executeBit(int bit, u8 value, bool memory) {
   else f |= u8(masked & SF);
   if (memory) f |= u8((wz_ >> 8) & (YF | XF));
   else f |= u8(value & (YF | XF));
-  regs_.f = f;
+  setF(f);
 }
 
 void Z80::executeAlu(int group, u8 value) {
@@ -453,7 +454,7 @@ void Z80::executeEd() {
     const int r = (op >> 3) & 7;
     const u8 v = in8(bc());
     if (r != 6) setReg(r, 0, v);
-    regs_.f = u8((regs_.f & CF) | szxyp(v));
+    setF(u8((regs_.f & CF) | szxyp(v)));
     return;
   }
 
@@ -534,12 +535,12 @@ void Z80::executeEd() {
     case 0x57:                                                     // LD A,I
       regs_.a = regs_.i;
       tick(1);
-      regs_.f = u8((regs_.f & CF) | szxy(regs_.a) | (regs_.iff2 ? PF : 0));
+      setF(u8((regs_.f & CF) | szxy(regs_.a) | (regs_.iff2 ? PF : 0)));
       return;
     case 0x5F:                                                     // LD A,R
       regs_.a = regs_.r;
       tick(1);
-      regs_.f = u8((regs_.f & CF) | szxy(regs_.a) | (regs_.iff2 ? PF : 0));
+      setF(u8((regs_.f & CF) | szxy(regs_.a) | (regs_.iff2 ? PF : 0)));
       return;
     case 0x67: {                                                   // RRD
       const u16 addr = hlValue(0);
@@ -549,7 +550,7 @@ void Z80::executeEd() {
       regs_.a = u8((a & 0xF0) | (v & 0x0F));
       write8(addr, u8(v >> 4 | (a << 4)));
       tick(3);
-      regs_.f = u8((regs_.f & CF) | szxyp(regs_.a));
+      setF(u8((regs_.f & CF) | szxyp(regs_.a)));
       return;
     }
     case 0x6F: {                                                   // RLD
@@ -560,7 +561,7 @@ void Z80::executeEd() {
       regs_.a = u8((a & 0xF0) | (v >> 4));
       write8(addr, u8(v << 4 | (a & 0x0F)));
       tick(3);
-      regs_.f = u8((regs_.f & CF) | szxyp(regs_.a));
+      setF(u8((regs_.f & CF) | szxyp(regs_.a)));
       return;
     }
     default: break;
@@ -585,8 +586,8 @@ void Z80::executeEd() {
       setDe(u16(de() + (decrement ? -1 : 1)));
       setBc(u16(bc() - 1));
       const u8 sum = u8(v + regs_.a);
-      regs_.f = u8((regs_.f & (SF | ZF | CF)) | (bc() ? PF : 0) |
-                   (sum & XF) | ((sum & 0x02) ? YF : 0));
+      setF(u8((regs_.f & (SF | ZF | CF)) | (bc() ? PF : 0) |
+                   (sum & XF) | ((sum & 0x02) ? YF : 0)));
       tick(2);
       if (repeat && bc() != 0) {
         regs_.pc = u16(regs_.pc - 2);
@@ -603,8 +604,8 @@ void Z80::executeEd() {
       setBc(u16(bc() - 1));
       const u8 hf = u8((regs_.a ^ v ^ r) & HF);
       const u8 sum = u8(r - (hf ? 1 : 0));
-      regs_.f = u8((regs_.f & CF) | NF | (r & SF) | (r == 0 ? ZF : 0) | hf |
-                   (bc() ? PF : 0) | (sum & XF) | ((sum & 0x02) ? YF : 0));
+      setF(u8((regs_.f & CF) | NF | (r & SF) | (r == 0 ? ZF : 0) | hf |
+                   (bc() ? PF : 0) | (sum & XF) | ((sum & 0x02) ? YF : 0)));
       tick(5);
       if (repeat && bc() != 0 && r != 0) {
         regs_.pc = u16(regs_.pc - 2);
@@ -817,8 +818,8 @@ bool Z80::executeZ80n(u8 op) {
       regs_.l = u8(regs_.l + 1);
       const u8 d = u8(regs_.d + 1);
       regs_.d = d;
-      regs_.f = u8((regs_.f & CF) | (d & (SF | YF | XF)) | (d == 0 ? ZF : 0) |
-                   ((d & 0x0F) == 0 ? HF : 0) | (d == 0x80 ? PF : 0));
+      setF(u8((regs_.f & CF) | (d & (SF | YF | XF)) | (d == 0 ? ZF : 0) |
+                   ((d & 0x0F) == 0 ? HF : 0) | (d == 0x80 ? PF : 0)));
       return true;
     }
 
@@ -1007,8 +1008,8 @@ void Z80::execute(u8 op, int idx) {
     case 0x2B: setHlValue(idx, u16(hlValue(idx) - 1)); break;      // DEC HL
     case 0x2F:                                                     // CPL
       regs_.a = u8(~regs_.a);
-      regs_.f = u8((regs_.f & (SF | ZF | PF | CF)) | HF | NF |
-                   (regs_.a & (YF | XF)));
+      setF(u8((regs_.f & (SF | ZF | PF | CF)) | HF | NF |
+                   (regs_.a & (YF | XF))));
       break;
 
     // --- 0x30-0x3F ------------------------------------------------------
@@ -1021,7 +1022,7 @@ void Z80::execute(u8 op, int idx) {
     }
     case 0x33: ++regs_.sp; break;                                  // INC SP
     case 0x37:                                                     // SCF
-      regs_.f = u8((regs_.f & (SF | ZF | PF)) | CF | (regs_.a & (YF | XF)));
+      setF(u8((regs_.f & (SF | ZF | PF)) | CF | scfXY()));
       break;
     case 0x3A: {                                                   // LD A,(nn)
       const u16 nn = fetchImm16();
@@ -1032,8 +1033,7 @@ void Z80::execute(u8 op, int idx) {
     case 0x3B: --regs_.sp; break;                                  // DEC SP
     case 0x3F: {                                                   // CCF
       const u8 c = u8(regs_.f & CF);
-      regs_.f = u8((regs_.f & (SF | ZF | PF)) | (c ? HF : CF) |
-                   (regs_.a & (YF | XF)));
+      setF(u8((regs_.f & (SF | ZF | PF)) | (c ? HF : CF) | scfXY()));
       break;
     }
 
@@ -1181,6 +1181,9 @@ u32 Z80::step() {
     return u32(cycles_ - start);
   }
 
+  // Q is per instruction: only the immediately preceding one matters. A DD/FD
+  // prefix swallows the flag state, which matches the real chip.
+  q_ = false;
   const u8 op = fetch();
   if (op == 0xDD || op == 0xFD) {
     int idx = (op == 0xDD) ? 1 : 2;

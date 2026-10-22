@@ -481,3 +481,50 @@ TEST(z80_indexed_memory_operand) {
   CHECK_EQ(bus.mem[0x8001], 0x11);
   CHECK_EQ(cpu.regs().pc, 0x000D);
 }
+
+// SCF and CCF take the undocumented F3/F5 bits from A when the previous
+// instruction wrote the flags, and OR them with the existing bits otherwise.
+// That second half is what separates a Zilog NMOS part from the NEC and ST
+// clones, and it is exactly what the SCF/CCF cases of z80test check.
+TEST(z80_scf_takes_f3_f5_from_a_after_a_flag_write) {
+  FlatBus bus;
+  load(bus, {0x3E, 0xAA, 0xB7, 0x37}); // LD A,AAh : OR A : SCF
+  rainbow::Z80 cpu(bus);
+  cpu.step();
+  cpu.step();
+  cpu.step();
+  CHECK_EQ(cpu.regs().f, 0xAD);
+}
+
+TEST(z80_scf_ors_f3_f5_when_the_flags_were_left_alone) {
+  FlatBus bus;
+  load(bus, {0x3E, 0xD7, 0x37}); // LD A,D7h : SCF
+  rainbow::Z80 cpu(bus);
+  cpu.step();
+  cpu.step();
+  CHECK_EQ(cpu.regs().a, 0xD7);
+  // A.5 and A.3 are clear, so F3/F5 can only come from the old F (0xFF).
+  CHECK_EQ(cpu.regs().f, 0xED);
+}
+
+TEST(z80_pop_af_does_not_count_as_a_flag_write) {
+  FlatBus bus;
+  bus.mem[0x8000] = 0x28; // F
+  bus.mem[0x8001] = 0xD7; // A
+  load(bus, {0x31, 0x00, 0x80, 0xF1, 0x37}); // LD SP,8000h : POP AF : SCF
+  rainbow::Z80 cpu(bus);
+  cpu.step();
+  cpu.step();
+  cpu.step();
+  CHECK_EQ(cpu.regs().a, 0xD7);
+  CHECK_EQ(cpu.regs().f, 0x29);
+}
+
+TEST(z80_ccf_uses_the_same_f3_f5_rule) {
+  FlatBus bus;
+  load(bus, {0x3E, 0xD7, 0x3F}); // LD A,D7h : CCF
+  rainbow::Z80 cpu(bus);
+  cpu.step();
+  cpu.step();
+  CHECK_EQ(cpu.regs().f, 0xFC);
+}

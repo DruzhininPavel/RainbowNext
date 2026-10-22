@@ -22,8 +22,14 @@ done by loading a ROM or a snapshot.
 * [x] `48.rom` boots to the BASIC prompt: the copyright message is printed and
       `PRINT 42` evaluates to `42` with the `0 OK, 0:1` report
 * [x] `z80test` conformance suite runs as part of the unit tests: `z80doc` and
-      `z80docflags` pass 160 of 160, `z80full` 152 of 160 (the remaining eight
-      are the CPU-dependent SCF/CCF variants and the MEMPTR-sensitive block cases)
+      `z80docflags` pass 160 of 160, `z80full` 154 of 160. The remaining six are
+      the two `SCF`+`CCF` sequences, whose vectors the suite derives from a
+      pseudo-random mix of both instructions, and the four `->NOP'` block cases
+      that depend on how an undefined `ED 00` behaves
+* [x] Zilog NMOS `SCF`/`CCF` undocumented-flag rule: F3/F5 come from `A` when
+      the previous instruction wrote the flags and are ORed with the old bits
+      otherwise. `POP AF` does not count as a flag write, and an intervening
+      `DD`/`FD` prefix forgets that a flag write happened
 * [x] Synthetic test ROM (`tools/make_test_rom.py` → `tests/data/test48.rom`) so
       the suites run without the copyrighted Spectrum ROM
 * [ ] `zexall` conformance run

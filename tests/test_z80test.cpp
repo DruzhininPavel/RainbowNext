@@ -231,18 +231,18 @@ TEST(z80test_documented_and_undocumented_flags_all_pass) {
 }
 
 // The full suite compares registers as well and checks the undocumented flags
-// of every instruction. Eight of its 160 cases are still off: SCF and CCF carry
-// the Zilog variant of the F3/F5 rule, which needs the CPU to remember whether
-// the previous instruction wrote the flags, while the four `->NOP'` block
-// instruction cases copy over their own opcode and then depend on how an
-// undefined `ED 00` behaves. The test guards against regressions outside that
-// set.
+// of every instruction. Six of its 160 cases are still off: the two SCF+CCF
+// and CCF+SCF sequences, where the suite derives its vectors from a
+// pseudo-random combination of both instructions, and the four `->NOP'` block
+// instruction cases, which copy over their own opcode and then depend on how
+// an undefined `ED 00` behaves. The test guards against regressions outside
+// that set.
 TEST(z80test_full_flag_suite_has_no_new_regressions) {
   const RunResult result = runSuiteOrFail("z80full.tap");
   if (result.skipped || !result.finished || result.passed) return;
-  if (result.failures > 8) {
+  if (result.failures > 6) {
     ::testing::fail(__FILE__, __LINE__,
                     "z80full reported " + std::to_string(result.failures) +
-                        " failing test(s), more than the 8 known gaps:\n" + screenDump(result));
+                        " failing test(s), more than the 6 known gaps:\n" + screenDump(result));
   }
 }

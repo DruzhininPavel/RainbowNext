@@ -31,17 +31,6 @@ constexpr u16 kCursorCol = 0x5B01;
 constexpr u16 kKeyRow6 = 0x5B02;
 constexpr u16 kFrameCount = 0x5B04;
 
-Machine* bootRom() {
-  auto* machine = new Machine(MachineType::Spectrum48);
-  if (!machine->loadRom(RAINBOW_SOURCE_DIR "/tests/data/test48.rom")) {
-    delete machine;
-    return nullptr;
-  }
-  // The banner is printed during boot, before interrupts are enabled.
-  for (int frame = 0; frame < 8; ++frame) machine->runFrame();
-  return machine;
-}
-
 // Pixel address of a character cell, using the Spectrum's interleaved layout.
 u16 cellBase(int row, int column) {
   const int y = row * 8;

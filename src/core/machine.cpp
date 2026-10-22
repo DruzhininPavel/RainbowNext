@@ -512,7 +512,7 @@ namespace {
 constexpr u8 kStateMagic[8] = {'R', 'B', 'N', 'S', 'T', 'A', 'T', 'E'};
 // Bump whenever the field order or the set of fields changes. An older build
 // refuses a newer state instead of reading it as garbage.
-constexpr u32 kStateVersion = 1;
+constexpr u32 kStateVersion = 2;
 constexpr size_t kStateHeader = sizeof(kStateMagic) + 4 + 1 + 1 + 8;
 
 } // namespace

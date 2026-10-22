@@ -73,6 +73,7 @@ public:
     ar(cycles_);
     ar(eiDelay_);
     ar(z80n_);
+    ar(q_);
   }
 
 private:
@@ -102,6 +103,18 @@ private:
   // --- flags and ALU ------------------------------------------------------
   static constexpr u8 SF = 0x80, ZF = 0x40, YF = 0x20, HF = 0x10;
   static constexpr u8 XF = 0x08, PF = 0x04, NF = 0x02, CF = 0x01;
+
+  // Every instruction that writes F goes through setF(). The resulting Q flag
+  // remembers that the previous instruction changed the flags, which is the
+  // only thing that tells the three SCF/CCF variants apart. POP AF and
+  // EX AF,AF' write F directly: the real chip does not count them.
+  void setF(u8 value) { regs_.f = value; q_ = true; }
+  // Zilog NMOS takes F3/F5 from A when the previous instruction wrote the
+  // flags and ORs them with the existing bits otherwise; the NEC part always
+  // uses A, the ST part only does so for F5.
+  u8 scfXY() const {
+    return q_ ? u8(regs_.a & (YF | XF)) : u8((regs_.f | regs_.a) & (YF | XF));
+  }
 
   static u8 parity(u8 v) {
     v ^= u8(v >> 4);
@@ -147,6 +160,7 @@ private:
   u64 cycles_ = 0;
   int eiDelay_ = 0;
   bool z80n_ = false;
+  bool q_ = false;
 };
 
 } // namespace rainbow
