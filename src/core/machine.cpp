@@ -1454,7 +1454,6 @@ void Machine::renderFrame() {
 
       bool l2Priority = false;
       const u32 l2Rgb = inWindow ? layer2Pixel(layer2, ux, y, l2Priority) : Transparent;
-
       u32 rgb = border;
       u8 occluder = 0;
       bool blended = false;
@@ -1484,14 +1483,21 @@ void Machine::renderFrame() {
       }
 
       if (!blended) {
-        for (int depth = 0; depth < 3; ++depth) {
-          const int layer = order[size_t(depth)];
-          if (layer == LayerSprites) continue; // sprites are a second pass
-          const u32 colour = layer == LayerLayer2 ? l2Rgb : uRgb;
-          if (colour == Transparent) continue;
-          if (depth < spriteDepth) occluder = 1;
-          rgb = colour;
-          break;
+        // A Layer 2 colour flagged as a priority colour in the palette is drawn
+        // above every other layer, whatever order 0x15 asks for.
+        if (l2Priority && l2Rgb != Transparent) {
+          rgb = l2Rgb;
+          occluder = 1;
+        } else {
+          for (int depth = 0; depth < 3; ++depth) {
+            const int layer = order[size_t(depth)];
+            if (layer == LayerSprites) continue; // sprites are a second pass
+            const u32 colour = layer == LayerLayer2 ? l2Rgb : uRgb;
+            if (colour == Transparent) continue;
+            if (depth < spriteDepth) occluder = 1;
+            rgb = colour;
+            break;
+          }
         }
       }
       row[x] = rgb;

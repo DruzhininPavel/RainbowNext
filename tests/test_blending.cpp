@@ -37,6 +37,7 @@ const u32 Red = 0xFFFF0000u;    // RRRGGGBB 0xE0
 const u32 Green = 0xFF00FF00u;  // RRRGGGBB 0x1C
 const u32 Yellow = 0xFFFFFF00u; // red plus green
 const u32 DarkGrey = 0xFF484800u;
+const u32 Blue = 0xFF0000FFu;   // RRRGGGBB 0x03
 
 // The ULA draws red over the whole screen and Layer 2 holds a single green
 // pixel in the top left corner, which the blend modes then mix.
@@ -97,6 +98,21 @@ TEST(blending_mode_01_falls_back_to_the_priority_order) {
   m.writeNextReg(0x68, 0x20); // bits 6:5 = 01 disables the blend
   renderOneFrame(m);
   CHECK_EQ(pixelAt(m, 0, 0), Green);
+}
+
+TEST(layer2_priority_colour_sits_above_every_layer) {
+  Machine m(MachineType::Next);
+  setupLayers(m, 0x05);
+  setPriority(m, 4, false); // U S L: the ULA covers Layer 2
+  renderOneFrame(m);
+  CHECK_EQ(pixelAt(m, 0, 0), Red);
+
+  // A colour from the top half of the Layer 2 palette carries the priority
+  // bit, which moves Layer 2 above all layers whatever 0x15 asks for.
+  writePalette8(m, 0x85, 0x03);
+  m.memWrite(0xC000, 0x85, 0);
+  renderOneFrame(m);
+  CHECK_EQ(pixelAt(m, 0, 0), Blue);
 }
 
 TEST(blending_with_the_tilemap_as_the_colour_keeps_the_ula_in_front) {
