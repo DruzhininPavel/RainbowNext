@@ -74,7 +74,12 @@ class Upd765 {
   void finishCommand();
   void startExecution();
   void endExecution();
-  void pushResult(u8 status0, u8 status1, u8 status2, u8 c, u8 h, u8 r, u8 n);
+  // `count` is how many bytes the real chip hands back for this command: seven
+  // for the data/ID/format commands, two for SENSE INTERRUPT STATUS, one for
+  // SENSE DRIVE STATUS and for an invalid command. Getting this wrong leaves
+  // the +3 ROM reading padding as status and retrying forever.
+  void pushResult(u8 status0, u8 status1, u8 status2, u8 c, u8 h, u8 r, u8 n,
+                  size_t count = 7);
   void failNoDisk(u8 c, u8 h, u8 r, u8 n);
   void readSectors(u8 cylinder, u8 head, u8 first, u8 sizeCode, u8 last);
   void writeSectors();

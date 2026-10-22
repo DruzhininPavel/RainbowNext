@@ -146,6 +146,30 @@ TEST(dsk_parses_an_extended_image_with_a_per_track_table) {
   CHECK_EQ(track->sectors[1].data.size(), 256);
 }
 
+TEST(dsk_accepts_the_plus3_magic_and_track_size_variant) {
+  // RealSpectrum writes "MV - CPCEMU +3 Disk Image" and keeps the fixed track
+  // size at 0x32 instead of 0x34.
+  std::vector<u8> bytes = makeDsk(false, 2, 1, 9, 2);
+  const u8 low = bytes[0x34];
+  const u8 high = bytes[0x35];
+  std::memset(bytes.data(), 0, 34);
+  std::memcpy(bytes.data(), "MV - CPCEMU +3 Disk Image", 25);
+  bytes[0x32] = low;
+  bytes[0x33] = high;
+  bytes[0x34] = 0;
+  bytes[0x35] = 0;
+
+  DiskImage disk;
+  std::string error;
+  CHECK(rainbow::formats::parseDsk(bytes, disk, error));
+  CHECK(error.empty());
+  CHECK_EQ(disk.tracks, 2);
+  const DskTrack* track = disk.findTrack(1, 0);
+  CHECK(track != nullptr);
+  CHECK_EQ(track->sectors.size(), 9);
+  CHECK_EQ(track->sectors.front().data.size(), 512u);
+}
+
 TEST(dsk_skips_unformatted_tracks) {
   std::vector<u8> bytes = makeDsk(true, 2, 1, 4, 2);
   // Zero the size of the second track: the format uses that for "never written".
@@ -235,10 +259,12 @@ TEST(fdc_sense_drive_status_reports_ready_and_track_zero) {
   CHECK(c.insert(makeDsk(false, 2, 1, 9, 2)));
 
   c.command({0x04, 0x00}); // SENSE DRIVE STATUS, unit 0
-  const std::vector<u8> result = {c.fdc.readData(), c.fdc.readData()};
-  CHECK_EQ(result[0] & 0x03, 0x00);
-  CHECK_EQ(result[1] & 0x20, 0x20); // ready
-  CHECK_EQ(result[1] & 0x10, 0x10); // at track 0
+  // The chip answers with ST3 alone, so a second read finds the controller idle.
+  const u8 st3 = c.fdc.readData();
+  CHECK_EQ(st3 & 0x03, 0x00);       // unit 0
+  CHECK_EQ(st3 & 0x20, 0x20);       // ready
+  CHECK_EQ(st3 & 0x10, 0x10);       // at track 0
+  CHECK_EQ(c.fdc.readData(), 0xFF); // nothing left in the result phase
 }
 
 TEST(fdc_seek_moves_the_head_and_sense_interrupt_confirms_it) {
@@ -250,15 +276,17 @@ TEST(fdc_seek_moves_the_head_and_sense_interrupt_confirms_it) {
   CHECK_EQ(c.fdc.cylinder(), 2);
 
   c.command({0x08}); // SENSE INTERRUPT STATUS
-  std::vector<u8> result;
-  for (int i = 0; i < 7; ++i) result.push_back(c.fdc.readData());
+  // ST0 then the present cylinder number, and then the controller goes idle.
+  const std::vector<u8> result = c.readBytes(2);
   CHECK_EQ(result[0] & 0x20, 0x20); // seek end
-  CHECK_EQ(result[3], 2);           // present cylinder number
+  CHECK_EQ(result[1], 2);           // present cylinder number
   CHECK(!c.fdc.busy());
+  CHECK_EQ(c.fdc.readData(), 0xFF);
 
-  // A second SENSE INTERRUPT has nothing to report.
+  // A second SENSE INTERRUPT has nothing to report and answers with ST0 only.
   c.command({0x08});
   CHECK_EQ(c.fdc.readData() & 0xC0, 0x80);
+  CHECK_EQ(c.fdc.readData(), 0xFF);
 }
 
 TEST(fdc_recalibrate_returns_to_track_zero) {
@@ -283,6 +311,44 @@ TEST(fdc_read_id_returns_the_first_sector_header) {
   CHECK_EQ(result[5], 0x41);        // R
   CHECK_EQ(result[6], 2);           // N
   CHECK(!c.fdc.busy());
+}
+
+// The +3 ROM's result validator (ROM 0x204A) XORs ST0 with the unit it asked
+// for and treats a non-zero answer as a failure, so a data command that
+// succeeds must not set the seek-end bit that belongs to SENSE INTERRUPT.
+TEST(fdc_read_id_clears_the_seek_end_bit) {
+  Controller c;
+  CHECK(c.insert(makeDsk(false, 2, 1, 9, 2)));
+
+  c.command({0x4A, 0x00}); // READ ID with MF set, unit 0
+  const std::vector<u8> result = c.result();
+  CHECK_EQ(result[0], 0x00);
+  CHECK_EQ(result[5], 0x41); // R
+}
+
+TEST(fdc_read_data_clears_the_seek_end_bit) {
+  Controller c;
+  CHECK(c.insert(makeDsk(false, 1, 1, 9, 2)));
+
+  c.command({0x46, 0x00, 0x00, 0x00, 0x41, 0x02, 0x41, 0x2A, 0xFF});
+  c.readBytes(512);
+  const std::vector<u8> result = c.result();
+  CHECK_EQ(result[0], 0x00);
+}
+
+TEST(fdc_takes_the_unit_from_the_hd_byte_not_the_opcode) {
+  Controller c;
+  CHECK(c.insert(makeDsk(false, 3, 1, 9, 2)));
+
+  // RECALIBRATE is 0x07, so its low bits are part of the opcode; the unit is
+  // the low bits of the following byte.
+  c.command({0x07, 0x00});
+  CHECK_EQ(c.fdc.cylinder(), 0);
+
+  c.command({0x08}); // SENSE INTERRUPT STATUS
+  const std::vector<u8> result = c.readBytes(2);
+  CHECK_EQ(result[0] & 0x03, 0x00); // unit 0, not 3
+  CHECK_EQ(result[0] & 0x20, 0x20); // seek end
 }
 
 TEST(fdc_read_data_streams_the_sector_bytes) {

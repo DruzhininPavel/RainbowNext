@@ -74,7 +74,10 @@ Status: v0.1.3 — M1 and M2 done: 48K and 128K/+2/+3 boot with AY sound, tape
   into a single image, so the machine can page through all four banks.
 * **Disk** — +3 µPD765 on ports `0x2FFD`/`0x3FFD` with standard CPCEMU `.dsk`,
   extended `.edsk` and raw TR-DOS `.trd` images (SPECIFY, SEEK, READ ID,
-  READ/WRITE DATA, FORMAT TRACK), driven by the real +3 ROM.
+  READ/WRITE DATA, FORMAT TRACK), driven by the real +3 ROM, so the +3 `Loader`
+  boots programs straight off the image. Both the `MV - CPCEMU Disk-File` and
+  the `MV - CPCEMU +3 Disk Image` headers are accepted, including the writers
+  that keep the track size at `0x32`.
 * **Snapshots** — `.sna` (48K/128K) and `.z80` (v1, v2, v3 with RLE).
 * **RZX** — record and replay the RZX container: the input block holds the value
   every port read returned, so a replay reproduces the run regardless of what

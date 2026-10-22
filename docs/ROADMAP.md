@@ -54,7 +54,8 @@ a multicolour demo renders correctly; `z80test` passes.
 * [x] +3 disk controller (µPD765) and `.dsk`/`.edsk`: SPECIFY, SENSE DRIVE,
       SENSE INTERRUPT, RECALIBRATE, SEEK, READ ID, READ DATA/DELETED/TRACK,
       WRITE DATA/DELETED, FORMAT TRACK; standard CPCEMU, extended and raw TR-DOS
-      images
+      images, plus the `MV - CPCEMU +3 Disk Image` header variant; the +3 ROM
+      `Loader` boots programs from a `.dsk`
 * [ ] Pentagon ULA+ attributes and `0xDFFD`/`0xEFF7` magic ports
 * [ ] Real-time tape playback tuning for protected loaders (turbo blocks, custom pilots)
 

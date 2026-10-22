@@ -10,9 +10,15 @@
 namespace rainbow::formats {
 namespace {
 
-constexpr char StandardMagic[] = "MV - CPCEMU Disk-File\r\nDisk-Info\r\n";
-constexpr char ExtendedMagic[] = "EXTENDED CPC DSK File\r\nDisk-Info\r\n";
-constexpr size_t MagicSize = 34;
+// Disk images in the wild spell the header ID differently: the original
+// CPCEMU uses "MV - CPCEMU Disk-File\r\nDisk-Info\r\n", while +3 tooling
+// (RealSpectrum, Spectaculator) writes "MV - CPCEMU +3 Disk Image" padded with
+// NULs instead. Both share the "MV - CPC" prefix, so match on that rather than
+// on the full 34-byte string.
+constexpr char StandardMagicPrefix[] = "MV - CPC";
+constexpr size_t StandardMagicPrefixSize = sizeof(StandardMagicPrefix) - 1;
+constexpr char ExtendedMagicPrefix[] = "EXTENDED ";
+constexpr size_t ExtendedMagicPrefixSize = sizeof(ExtendedMagicPrefix) - 1;
 constexpr size_t TrackInfoSize = 0x100;
 constexpr size_t SectorInfoSize = 8;
 
@@ -149,8 +155,8 @@ bool parseDsk(const std::vector<u8>& bytes, DiskImage& out, std::string& error) 
     return false;
   }
 
-  const bool extended = std::memcmp(bytes.data(), ExtendedMagic, MagicSize) == 0;
-  if (!extended && std::memcmp(bytes.data(), StandardMagic, MagicSize) != 0) {
+  const bool extended = std::memcmp(bytes.data(), ExtendedMagicPrefix, ExtendedMagicPrefixSize) == 0;
+  if (!extended && std::memcmp(bytes.data(), StandardMagicPrefix, StandardMagicPrefixSize) != 0) {
     error = "not a CPCEMU or extended DSK image";
     return false;
   }
@@ -167,8 +173,16 @@ bool parseDsk(const std::vector<u8>& bytes, DiskImage& out, std::string& error) 
 
   const size_t trackCount = size_t(out.tracks) * size_t(out.sides);
   // Extended images keep a per-track size table where the standard format has
-  // one fixed size for every track.
-  const u16 fixedSize = readLe16(bytes, 0x34);
+  // one fixed size for every track. That size normally sits at 0x34, but some
+  // writers (notably RealSpectrum's "+3 Disk Image" variant) place it at 0x32
+  // instead, so fall back to deriving it from the file length.
+  u16 fixedSize = readLe16(bytes, 0x34);
+  if (!extended && fixedSize < TrackInfoSize) fixedSize = readLe16(bytes, 0x32);
+  if (!extended && fixedSize < TrackInfoSize && bytes.size() > TrackInfoSize &&
+      (bytes.size() - TrackInfoSize) % trackCount == 0) {
+    const size_t derived = (bytes.size() - TrackInfoSize) / trackCount;
+    if (derived >= TrackInfoSize && derived <= 0xFFFF) fixedSize = u16(derived);
+  }
   if (!extended && fixedSize < TrackInfoSize) {
     error = "invalid track size in the disk header";
     return false;
