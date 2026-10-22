@@ -174,7 +174,9 @@ a multicolour demo renders correctly; `z80test` passes.
 * [ ] CRT/scanline shaders (SDL_GPU backend)
 * [x] CI releases: a tagged build of macOS arm64 and Linux x86_64, packaged as a
       self-contained zip (SDL3 linked in, `peripherals/` and `roms/` beside the
-      executable) and attached to a GitHub release
+      executable) and attached to a GitHub release. `v0.1.0` is the first
+      release cut this way; `workflow_dispatch` builds the same archives as
+      workflow artifacts without publishing them
 * [ ] macOS universal (arm64 + Intel) and a SteamOS/Linux AppImage
 * [ ] Steam Deck controller profiles, 1280×800 default scaling
 
