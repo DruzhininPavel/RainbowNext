@@ -60,6 +60,32 @@ const char* machineName(MachineType type) {
   return "Unknown";
 }
 
+const char* machineId(MachineType type) {
+  switch (type) {
+    case MachineType::Spectrum48: return "48";
+    case MachineType::Spectrum128: return "128";
+    case MachineType::Plus2: return "plus2";
+    case MachineType::Plus3: return "plus3";
+    case MachineType::Pentagon: return "pentagon";
+    case MachineType::Next: return "next";
+  }
+  return "48";
+}
+
+std::optional<MachineType> machineTypeFromId(const std::string& id) {
+  for (MachineType type : {MachineType::Spectrum48, MachineType::Spectrum128, MachineType::Plus2,
+                           MachineType::Plus3, MachineType::Pentagon, MachineType::Next}) {
+    if (id == machineId(type)) return type;
+  }
+  // A few spellings people reach for that are not the ids themselves.
+  if (id == "48k") return MachineType::Spectrum48;
+  if (id == "128k") return MachineType::Spectrum128;
+  if (id == "plus2a" || id == "+2a") return MachineType::Plus3;
+  if (id == "+2") return MachineType::Plus2;
+  if (id == "+3") return MachineType::Plus3;
+  return std::nullopt;
+}
+
 u32 tstatesPerLine(const Timings& t) {
   return u32(t.leftBorder) + t.horizontalScreen + t.rightBorder + t.horizontalRetrace;
 }

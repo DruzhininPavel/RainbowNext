@@ -57,6 +57,11 @@ struct Timings {
 
 const Timings& timingsFor(MachineType type);
 const char* machineName(MachineType type);
+// The short id a command line or a config file uses: `48`, `128`, `plus2`,
+// `plus3`, `pentagon`, `next`. Returns nothing for an unknown id.
+std::optional<MachineType> machineTypeFromId(const std::string& id);
+// The id for a type, i.e. the inverse of machineTypeFromId.
+const char* machineId(MachineType type);
 u32 tstatesPerLine(const Timings& t);
 u32 tstatesPerFrame(const Timings& t);
 

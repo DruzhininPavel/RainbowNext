@@ -10,6 +10,7 @@
 #include "core/rewind.h"
 #include "core/rzx_session.h"
 #include "frontend/audio.h"
+#include "frontend/autoload.h"
 #include "frontend/config.h"
 #include "frontend/debugger.h"
 #include "frontend/input.h"
@@ -30,6 +31,7 @@ public:
   // are probed and the emulator still starts (with a warning) if none are found.
   struct Options {
     std::string rom;
+    std::string machine;  // short id: 48, 128, plus2, plus3, pentagon, next
     std::string tape;
     std::string snapshot;
     std::string disk;
@@ -98,6 +100,8 @@ private:
   void openFileDialog(DialogKind kind);
   void openSaveDialog(DialogKind kind);
   void reset();
+  // Types the ROM's load command and starts the deck; see Autoload.
+  void autoloadTape();
 
   // Settings that outlive a run: which peripherals are plugged in and where
   // plugin libraries are looked for.
@@ -163,6 +167,7 @@ private:
   // Declared after machine_ so it detaches from the machine before the machine
   // is destroyed.
   RzxSession rzx_;
+  Autoload autoload_;
   std::string status_;
 };
 

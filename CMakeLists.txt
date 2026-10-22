@@ -149,6 +149,7 @@ endif()
 add_executable(rainbow
   src/frontend/main.cpp
   src/frontend/app.cpp
+  src/frontend/autoload.cpp
   src/frontend/config.cpp
   src/frontend/audio.cpp
   src/frontend/input.cpp
@@ -193,6 +194,7 @@ if(RAINBOW_BUILD_TESTS)
     tests/test_divmmc.cpp
     tests/test_nex.cpp
     src/frontend/config.cpp
+    src/frontend/autoload.cpp
   tests/test_turbosound.cpp
     tests/test_tilemap.cpp
     tests/test_nextreg.cpp

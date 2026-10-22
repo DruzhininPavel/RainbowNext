@@ -1,5 +1,6 @@
 #include "test_framework.h"
 
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -7,6 +8,8 @@
 
 using rainbow::Machine;
 using rainbow::MachineType;
+using rainbow::machineId;
+using rainbow::machineTypeFromId;
 using rainbow::u32;
 using rainbow::u64;
 using rainbow::u8;
@@ -205,4 +208,18 @@ TEST(boot_real_48k_rom_runs_basic_program) {
 
   // The report "0 OK, 0:1" goes to the lower screen; 0:1 is line 0, statement 1.
   CHECK(screenRowText(machine, 23).rfind("0 OK, 0:1", 0) == 0);
+}
+
+TEST(machine_ids_round_trip) {
+  const MachineType all[] = {MachineType::Spectrum48, MachineType::Spectrum128,
+                             MachineType::Plus2,      MachineType::Plus3,
+                             MachineType::Pentagon,   MachineType::Next};
+  for (MachineType type : all) {
+    const std::optional<MachineType> parsed = machineTypeFromId(machineId(type));
+    CHECK(parsed.has_value());
+    CHECK_EQ(int(*parsed), int(type));
+  }
+  CHECK(!machineTypeFromId("spectrum").has_value());
+  CHECK_EQ(int(*machineTypeFromId("48k")), int(MachineType::Spectrum48));
+  CHECK_EQ(int(*machineTypeFromId("+3")), int(MachineType::Plus3));
 }

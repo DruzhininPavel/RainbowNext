@@ -6,6 +6,7 @@
 #include "core/machine.h"
 #include "core/tape.h"
 #include "formats/tape.h"
+#include "frontend/autoload.h"
 
 using rainbow::Machine;
 using rainbow::MachineType;
@@ -439,4 +440,55 @@ TEST(rom_loads_a_basic_program_from_a_tap) {
   // runs it: that proves the loaded bytes are a real listing, not just RAM.
   CHECK(screenRowText(machine, 1).rfind("Program: HELLO", 0) == 0);
   CHECK(screenRowText(machine, 2).rfind("HELLO", 0) == 0);
+}
+
+// The Autoload helper is what the frontend uses for `--tape` and the Tape menu,
+// so it is checked against the same real ROM the test above drives by hand: the
+// only difference is that the key presses come from the sequence instead of
+// from the test.
+TEST(autoload_types_the_load_command_for_a_48k_machine) {
+  Machine machine(MachineType::Spectrum48);
+  if (!machine.loadRom(RAINBOW_SOURCE_DIR "/roms/48.rom")) return;
+
+  TapeImage image;
+  std::string error;
+  CHECK(rainbow::formats::parseTap(makeHelloTap(), image, error));
+  image.title = "hello.tap";
+  machine.tape().loadImage(image);
+
+  rainbow::frontend::Autoload autoload;
+  autoload.start(machine);
+  CHECK(autoload.active());
+  while (autoload.active()) {
+    machine.runFrame();
+    autoload.tick();
+  }
+  CHECK(!autoload.active());
+  // The sequence starts the deck on its own, because the ROM is only listening
+  // for pulses once LOAD "" has been entered.
+  CHECK(machine.tape().playing());
+
+  for (int i = 0; i < 40; ++i) machine.runFrame();
+
+  const u16 program = u16(machine.memRead(0x5C53, 0)) | u16(machine.memRead(0x5C54, 0) << 8);
+  CHECK_EQ(program, 0x5CCB);
+}
+
+TEST(autoload_cancel_stops_the_sequence) {
+  Machine machine(MachineType::Spectrum48);
+  if (!machine.loadRom(RAINBOW_SOURCE_DIR "/roms/48.rom")) return;
+
+  rainbow::frontend::Autoload autoload;
+  autoload.start(machine);
+  // Step up to the first key press, which is the LOAD keyword.
+  for (int i = 0; i < 400 && !machine.keyboard().isDown(6, 3); ++i) {
+    machine.runFrame();
+    autoload.tick();
+  }
+  CHECK_EQ(machine.keyboard().isDown(6, 3), true);
+
+  autoload.cancel();
+  CHECK(!autoload.active());
+  // Cancelling must not leave a key stuck down.
+  CHECK_EQ(machine.keyboard().isDown(6, 3), false);
 }
