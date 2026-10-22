@@ -61,6 +61,20 @@ The Next also takes an SD card image, which is where NextZXOS and its ROMs live:
 An `.img` dropped onto the window is mounted as the card as well; the card is
 owned by the frontend, so it survives a machine change.
 
+The official distribution ships as a directory tree rather than an image, so
+`tools/make_sd_image.py` turns it into a card. It writes the partition table,
+the FAT32 volume and every file by hand, which means it needs no privileges and
+works the same on macOS and Linux:
+
+```sh
+python3 tools/make_sd_image.py /path/to/sn-complete-24.11 roms/nextsd.img
+./build/rainbow --sd roms/nextsd.img
+```
+
+The default size is 512 MB; `--size-mb` changes it and the image is refused if
+the tree does not fit. Names are stored in their original case and the
+Mac bookkeeping files are left out.
+
 Snapshots can be dropped onto the window (`.sna`, `.z80`) or opened from the
 *File* menu; a snapshot carries its own memory image and does not need a ROM
 for the RAM contents, but the ROM is still required for `RST` handlers and
