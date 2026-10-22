@@ -39,7 +39,13 @@ done by loading a ROM or a snapshot.
       the suites run without the copyrighted Spectrum ROM
 * [ ] `zexall` conformance run
 * [x] TAP/TZX tape loading
-* [ ] Golden-frame image hashes
+* [x] Golden-frame hashes: `tests/test_golden.cpp` renders eight scenes and
+      compares an FNV-1a hash of the whole 320×256 surface against a recorded
+      value. The scenes build their own memory contents, so no ROM is needed:
+      the classic screen with per-cell ink/paper/bright, flash blinking, Timex
+      hi-res, ULA+, a Layer 2 gradient, two sprites, and the tilemap. Every
+      scene also asserts a few named pixels first, so a hash cannot record a
+      renderer that draws the wrong picture
 
 **Exit criteria:** `48.rom` boots to the BASIC prompt and executes BASIC (done);
 a multicolour demo renders correctly; `z80test` passes.

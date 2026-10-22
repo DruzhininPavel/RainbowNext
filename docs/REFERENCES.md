@@ -69,7 +69,10 @@ port semantics, memory layouts) was reimplemented.
   use other variant, so don't bother" — the three `SCF`/`CCF` chip variants it
   distinguishes are a hardware question, not an emulation bug.
 * VHDL-derived per-instruction tests from the Next core.
-* Golden-frame PNG hashes for a small set of demos.
+* Golden-frame hashes: `tests/test_golden.cpp` hashes the finished frame of
+  eight hand-built scenes. They are not PNG comparisons — the scenes are
+  synthetic, so the test needs neither a demo file nor a ROM, and the hash is
+  computed over the framebuffer rather than over an encoded image.
 
 ## Legal notes
 

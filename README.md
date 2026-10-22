@@ -381,9 +381,12 @@ the SpecDrum and SoundDrive DAC ports, 128K/+3 paging and timings, tape blocks,
 the µPD765 and the DSK parser, the expansion bus with its modules and plugin
 loader, the DivMMC and its SPI SD card (single- and multi-block reads and
 writes, and that the module ships unplugged), the settings file, and end-to-end
-runs of hand-assembled programs through the machine. Golden tests also boot the
-real `roms/128-0.rom` and `roms/plus3-0.rom` sets when those files are present;
-they skip themselves on a clean checkout.
+runs of hand-assembled programs through the machine. Golden-frame tests hash
+the finished picture for the classic screen, flash, Timex hi-res, ULA+, Layer 2,
+sprites and the tilemap, so an unintended change to the renderer fails the run
+with the scene named. Golden boot tests also drive the real `roms/128-0.rom` and
+`roms/plus3-0.rom` sets when those files are present; they skip themselves on a
+clean checkout.
 
 ## License
 
