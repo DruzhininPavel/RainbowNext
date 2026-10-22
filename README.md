@@ -28,7 +28,8 @@ Status: M1 — 48K and 128K/+2/+3 boot with AY sound, tape loading, disk images
   colours written through `0x40`-`0x44`, and a Layer 2 with 256×192, 320×256 and
   640×256×4 modes, hardware scroll, a clip window, a transparency index and the
   layer priority order of register `0x15`, composited over the ULA every
-  scanline.
+  scanline. Bit 7 of a colour lifts its pixel above the sprites in the blending
+  modes.
 * **Next sprites** — all 128 sprites of 16×16 with 8-bit or 4-bit patterns from
   a separate 16K pattern RAM, palette offsets, mirror, rotate, 1×-8× scaling,
   per-sprite transparency, a clip window, over-border drawing and the full
@@ -56,7 +57,11 @@ Status: M1 — 48K and 128K/+2/+3 boot with AY sound, tape loading, disk images
 * **Paging** — `0x7FFD` RAM/screen/ROM bank + lock, `0x1FFD` CP/M special paging
   and the +3 ROM bit, contention following the paged bank.
 * **Video** — 256×192 screen with correct Spectrum addressing and flashing,
-  rendered into a 320×256 ARGB8888 framebuffer with border.
+  rendered into a 320×256 ARGB8888 framebuffer with border. On the Next the ULA
+  also answers the Timex SCLD port (`ALTDFILE`, `EXTCOLOUR` and 512-pixel
+  `HIRES`), the ULA+ palettes of ports `0xBF3B`/`0xFF3B` and ULANext, and the
+  compositor implements the blending priority modes 110 and 111 of register
+  `0x15`, where Layer 2 is added to the ULA or added and darkened.
 * **Audio** — beeper plus a TurboSound Next of three AY-3-8912 (3 tone
   channels, noise, envelope, stereo mono/ABC/ACB per chip, `0xFFFD` chip
   select with per-chip left/right enables) and four 8-bit DACs on the SpecDrum
@@ -215,18 +220,18 @@ peripheral = printer
 ctest --test-dir build --output-on-failure
 ```
 
-358 tests cover the Z80 core (timings, flags, undocumented opcodes,
-interrupts), the Z80N extension, the Next MMU, palette, Layer 2, sprites
-(including relative and unified sprites and the collision flags), the tilemap,
-the Copper and the zxnDMA, ULA behaviour, contention, floating bus, frame
-length, audio rate, both snapshot formats, the NEX parser and its application
-to the machine, the AY, the TurboSound chip select
-and stereo bits, the SpecDrum and SoundDrive DAC ports, 128K/+3 paging and
-timings, tape blocks, the µPD765 and the DSK parser, the expansion bus with its
-modules and plugin loader, the DivMMC and its SPI SD card (single- and
-multi-block reads and writes), the settings file,
-and end-to-end runs of
-hand-assembled programs through the machine. Golden tests also boot the real
+379 tests cover the Z80 core (timings, flags, undocumented opcodes,
+interrupts), the Z80N extension, the Next MMU, palette, Layer 2, the Timex
+modes and the ULA+/ULANext attribute paths, the blending priority modes,
+sprites (including relative and unified sprites and the collision flags), the
+tilemap, the Copper and the zxnDMA, ULA behaviour, contention, floating bus,
+frame length, audio rate, both snapshot formats, the NEX parser and its
+application to the machine, the AY, the TurboSound chip select and stereo bits,
+the SpecDrum and SoundDrive DAC ports, 128K/+3 paging and timings, tape blocks,
+the µPD765 and the DSK parser, the expansion bus with its modules and plugin
+loader, the DivMMC and its SPI SD card (single- and multi-block reads and
+writes), the settings file, and end-to-end runs of hand-assembled programs
+through the machine. Golden tests also boot the real
 `roms/128-0.rom` and `roms/plus3-0.rom` sets when those files are present; they
 skip themselves on a clean checkout.
 
