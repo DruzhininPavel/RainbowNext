@@ -213,6 +213,7 @@ if(RAINBOW_BUILD_TESTS)
     tests/test_boot.cpp
     tests/test_z80test.cpp
     tests/test_rom_selftest.cpp
+    tests/test_next_boot.cpp
   )
   target_link_libraries(rainbow_tests PRIVATE rainbow_core rainbow_plugin)
   target_compile_options(rainbow_tests PRIVATE -Wall -Wextra -Wpedantic)

@@ -29,10 +29,26 @@ roms/next.rom      (65 536 bytes)
 roms/next-0.rom … next-3.rom
 ```
 
+The Next needs a **second** image: the 8 KiB divMMC / esxDOS ROM that ships
+beside the board ROM in the official distribution (`enNxtmmc.rom`):
+
+```
+roms/nxtmmc.rom    (8 192 bytes)
+```
+
+The board ROM does not contain the divMMC code. While booting it loads `0x1F01`
+into `BC` and jumps through `RST 0x38`, expecting the module to be mapped in at
+that address; without the image the CPU walks off into empty RAM and the machine
+restarts forever. The frontend therefore loads the divMMC ROM automatically for
+the Next (and only for the Next), looking for `nxtmmc`, `nextmmc`, `divmmc` and
+`esxdos` with a `.rom` or `.bin` extension in `roms/`, next to the executable,
+and in the working directory. On the other machines the divMMC stays the user's
+choice and is not touched.
+
 If no `next` set is found the Next falls back to the `128` set, so a Next without
-its own ROM still boots the 128K machine. The ROM only covers the board ROM;
-NextZXOS lives on the SD card image and is loaded separately with `--sd` (see
-below).
+its own ROM still boots the 128K machine. The ROMs only cover the board and
+divMMC; NextZXOS lives on the SD card image and is loaded separately with `--sd`
+(see below).
 
 ### How banked ROM sets are loaded
 

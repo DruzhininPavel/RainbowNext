@@ -99,6 +99,36 @@ bool loadRomFromAnywhere(Machine& machine, MachineType type, std::string* used) 
   return loadRomFor(machine, type, "", used);
 }
 
+// The Next's board ROM hands control to the divMMC ROM while it boots: its
+// RST 0x38 stub writes 0x80 to port 0xE3 to map the module in and then falls
+// into the esxDOS code at 0x0048, which is not in the board ROM at all. A Next
+// without that image restarts forever, so it is looked up next to the main ROM
+// set and skipped when it is missing. Only the Next needs it - on the other
+// machines the divMMC is the user's choice and is left alone.
+bool loadDivMmcRomFor(Machine& machine, const std::string& dir) {
+  if (machine.type() != MachineType::Next) return false;
+  auto* div = static_cast<DivMmc*>(machine.expansion().find("divmmc"));
+  if (div == nullptr) return false;
+  std::string error;
+  for (const char* base : {"nxtmmc", "nextmmc", "divmmc", "esxdos"}) {
+    for (const char* ext : {".rom", ".bin"}) {
+      if (div->loadRomFile(dir + base + ext, error)) {
+        machine.expansion().setEnabled("divmmc", true);
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+bool loadDivMmcRomFromAnywhere(Machine& machine) {
+  if (loadDivMmcRomFor(machine, "roms/")) return true;
+  if (const char* base = SDL_GetBasePath()) {
+    if (loadDivMmcRomFor(machine, std::string(base) + "roms/")) return true;
+  }
+  return loadDivMmcRomFor(machine, "");
+}
+
 float chipWidth(const char* text) { return ImGui::CalcTextSize(text).x + ui::kChipPadX * 2.0f; }
 
 void drawChip(ImDrawList* drawList, ImVec2 pos, const char* text, ImU32 background, ImU32 foreground,
@@ -223,6 +253,7 @@ bool App::init(const Options& options) {
   loadConfig();
   scanPeripherals();
   applyPeripheralConfig();
+  loadDivMmcRomFromAnywhere(*machine_);
   if (!options.sd.empty()) loadDivMmcCard(options.sd);
   if (!options.esxdos.empty()) mountEsxDos(options.esxdos);
   if (!options.state.empty()) loadStateFile(options.state);
@@ -520,6 +551,9 @@ void App::setMachine(MachineType type) {
   // the user's choices replayed.
   scanPeripherals();
   applyPeripheralConfig();
+  // The Next cannot boot without its divMMC image, so a machine switch has to
+  // look for it again rather than keep the previous bus's choice.
+  loadDivMmcRomFromAnywhere(*machine_);
   // The card lives in the frontend, so it goes back in whichever bus exists now.
   insertSdCard();
 }
