@@ -214,7 +214,7 @@ void Z80::add16(u16& dest, u16 value) {
                ((sum >> 16) & CF) |
                (((sum >> 8) & (YF | XF)))));
   dest = u16(sum);
-  wz_ = dest;
+  wz_ = u16(dest + 1);
 }
 
 void Z80::adc16(u16& dest, u16 value) {
@@ -225,7 +225,7 @@ void Z80::adc16(u16& dest, u16 value) {
                (((~(dest ^ value) & (dest ^ r)) >> 13) & PF) |
                ((sum >> 16) & CF)));
   dest = r;
-  wz_ = dest;
+  wz_ = u16(dest + 1);
 }
 
 void Z80::sbc16(u16& dest, u16 value) {
@@ -236,7 +236,7 @@ void Z80::sbc16(u16& dest, u16 value) {
                ((((dest ^ value) & (dest ^ r)) >> 13) & PF) |
                ((diff >> 16) & CF)));
   dest = r;
-  wz_ = dest;
+  wz_ = u16(dest + 1);
 }
 
 void Z80::daa() {
@@ -453,6 +453,7 @@ void Z80::executeEd() {
   if ((op & 0xC7) == 0x40) {
     const int r = (op >> 3) & 7;
     const u8 v = in8(bc());
+    wz_ = u16(bc() + 1);
     if (r != 6) setReg(r, 0, v);
     setF(u8((regs_.f & CF) | szxyp(v)));
     return;
@@ -462,6 +463,7 @@ void Z80::executeEd() {
   if ((op & 0xC7) == 0x41) {
     const int r = (op >> 3) & 7;
     out8(bc(), r == 6 ? u8(0) : getReg(r, 0));
+    wz_ = u16(bc() + 1);
     return;
   }
 
@@ -585,6 +587,7 @@ void Z80::executeEd() {
       setHlValue(0, u16(hlValue(0) + (decrement ? -1 : 1)));
       setDe(u16(de() + (decrement ? -1 : 1)));
       setBc(u16(bc() - 1));
+      wz_ = u16(de());
       const u8 sum = u8(v + regs_.a);
       setF(u8((regs_.f & (SF | ZF | CF)) | (bc() ? PF : 0) |
                    (sum & XF) | ((sum & 0x02) ? YF : 0)));
@@ -602,6 +605,7 @@ void Z80::executeEd() {
       const u8 r = u8(regs_.a - v);
       setHlValue(0, u16(hlValue(0) + (decrement ? -1 : 1)));
       setBc(u16(bc() - 1));
+      wz_ = u16(hlValue(0));
       const u8 hf = u8((regs_.a ^ v ^ r) & HF);
       const u8 sum = u8(r - (hf ? 1 : 0));
       setF(u8((regs_.f & CF) | NF | (r & SF) | (r == 0 ? ZF : 0) | hf |
@@ -884,7 +888,10 @@ void Z80::execute(u8 op, int idx) {
     // --- 0x00-0x0F ------------------------------------------------------
     case 0x00: break;                                              // NOP
     case 0x01: setBc(fetchImm16()); break;                         // LD BC,nn
-    case 0x02: write8(bc(), regs_.a); break;                       // LD (BC),A
+    case 0x02:                                                     // LD (BC),A
+      write8(bc(), regs_.a);
+      wz_ = u16((u16(regs_.a) << 8 | regs_.c) + 1);
+      break;
     case 0x03: setBc(u16(bc() + 1)); break;                        // INC BC
     case 0x04: case 0x0C: case 0x14: case 0x1C:
     case 0x24: case 0x2C: case 0x34: case 0x3C: {                  // INC r
@@ -959,6 +966,7 @@ void Z80::execute(u8 op, int idx) {
     case 0x10: {                                                   // DJNZ d
       regs_.b = u8(regs_.b - 1);
       const i8 d = i8(fetchImm());
+      wz_ = u16(regs_.pc + u16(i16(d)));
       tick(1);
       if (regs_.b != 0) {
         tick(5);
@@ -967,11 +975,15 @@ void Z80::execute(u8 op, int idx) {
       break;
     }
     case 0x11: setDe(fetchImm16()); break;                         // LD DE,nn
-    case 0x12: write8(de(), regs_.a); break;                       // LD (DE),A
+    case 0x12:                                                     // LD (DE),A
+      write8(de(), regs_.a);
+      wz_ = u16((u16(regs_.a) << 8 | regs_.e) + 1);
+      break;
     case 0x13: setDe(u16(de() + 1)); break;                        // INC DE
     case 0x17: rla(); break;
     case 0x18: {                                                   // JR d
       const i8 d = i8(fetchImm());
+      wz_ = u16(regs_.pc + u16(i16(d)));
       tick(5);
       regs_.pc = u16(regs_.pc + u16(i16(d)));
       break;
@@ -983,6 +995,7 @@ void Z80::execute(u8 op, int idx) {
     // --- 0x20-0x2F ------------------------------------------------------
     case 0x20: case 0x28: case 0x30: case 0x38: {                  // JR cc,d
       const i8 d = i8(fetchImm());
+      wz_ = u16(regs_.pc + u16(i16(d)));
       // JR only encodes NZ/Z/NC/C, i.e. condition codes 0-3.
       if (condition((op >> 3) & 3)) {
         tick(5);

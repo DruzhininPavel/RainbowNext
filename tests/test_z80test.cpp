@@ -246,3 +246,34 @@ TEST(z80test_full_flag_suite_has_no_new_regressions) {
                         " failing test(s), more than the 6 known gaps:\n" + screenDump(result));
   }
 }
+
+// Same vectors as z80full but comparing the flags only. It fails on the same
+// six cases, so it adds nothing the suite above does not already cover — it is
+// kept because it is the cheap way to tell a flag regression from a register
+// one when z80full starts reporting something new.
+TEST(z80test_flag_only_suite_has_no_new_regressions) {
+  const RunResult result = runSuiteOrFail("z80flags.tap");
+  if (result.skipped || !result.finished || result.passed) return;
+  if (result.failures > 6) {
+    ::testing::fail(__FILE__, __LINE__,
+                    "z80flags reported " + std::to_string(result.failures) +
+                        " failing test(s), more than the 6 known gaps:\n" + screenDump(result));
+  }
+}
+
+// The MEMPTR suite repeats every case with a `BIT n,(HL)` right after it, which
+// is the only way to observe the internal WZ register: BIT takes F3/F5 from the
+// high half of WZ. Seventeen cases are still off. Four are the `->NOP' block
+// instructions that share the undefined `ED 00` behaviour with z80full, two are
+// SCF+CCF/CCF+SCF, and the rest are WZ values the emulator does not model yet:
+// ADD/ADC/SBC HL,rr and ADD IX/IY,rr, LDIR/LDDR, CPIR/CPDR, OUTI/OUTD, the
+// conditional JR and DJNZ.
+TEST(z80test_memptr_suite_has_no_new_regressions) {
+  const RunResult result = runSuiteOrFail("z80memptr.tap");
+  if (result.skipped || !result.finished || result.passed) return;
+  if (result.failures > 17) {
+    ::testing::fail(__FILE__, __LINE__,
+                    "z80memptr reported " + std::to_string(result.failures) +
+                        " failing test(s), more than the 17 known gaps:\n" + screenDump(result));
+  }
+}

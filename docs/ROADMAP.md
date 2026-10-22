@@ -22,10 +22,15 @@ done by loading a ROM or a snapshot.
 * [x] `48.rom` boots to the BASIC prompt: the copyright message is printed and
       `PRINT 42` evaluates to `42` with the `0 OK, 0:1` report
 * [x] `z80test` conformance suite runs as part of the unit tests: `z80doc` and
-      `z80docflags` pass 160 of 160, `z80full` 154 of 160. The remaining six are
-      the two `SCF`+`CCF` sequences, whose vectors the suite derives from a
-      pseudo-random mix of both instructions, and the four `->NOP'` block cases
-      that depend on how an undefined `ED 00` behaves
+      `z80docflags` pass 160 of 160, `z80full` and `z80flags` 154 of 160. The
+      remaining six are the two `SCF`+`CCF` sequences, whose vectors the suite
+      derives from a pseudo-random mix of both instructions, and the four
+      `->NOP'` block cases that depend on how an undefined `ED 00` behaves.
+      `z80memptr`, which observes the internal WZ register through `BIT n,(HL)`,
+      is wired in as a regression guard at 143 of 160: `JR`, `DJNZ`,
+      `IN r,(C)`/`OUT (C),r`, `LD (BC),A`/`LD (DE),A` and the `ADD HL,rr`
+      family now leave the documented WZ behind, the rest is listed in
+      `docs/REFERENCES.md`
 * [x] Zilog NMOS `SCF`/`CCF` undocumented-flag rule: F3/F5 come from `A` when
       the previous instruction wrote the flags and are ORed with the old bits
       otherwise. `POP AF` does not count as a flag write, and an intervening
