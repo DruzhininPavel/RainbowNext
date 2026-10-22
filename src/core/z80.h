@@ -124,6 +124,7 @@ private:
   void adc16(u16& dest, u16 value);
   void sbc16(u16& dest, u16 value);
   void daa();
+  void blockIoFlags(u8 value, u8 addend);
   void rlca();
   void rrca();
   void rla();

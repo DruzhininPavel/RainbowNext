@@ -210,7 +210,8 @@ void Z80::add16(u16& dest, u16 value) {
   const u32 sum = u32(dest) + value;
   regs_.f = u8((regs_.f & (SF | ZF | PF)) |
                (((dest ^ value ^ u16(sum)) >> 8) & HF) |
-               ((sum >> 16) & CF));
+               ((sum >> 16) & CF) |
+               (((sum >> 8) & (YF | XF))));
   dest = u16(sum);
   wz_ = dest;
 }
@@ -251,6 +252,16 @@ void Z80::daa() {
   const u8 a = (regs_.f & NF) ? u8(old - correction) : u8(old + correction);
   regs_.f = u8(szxyp(a) | (regs_.f & NF) | ((old ^ a) & HF) | (carry ? CF : 0));
   regs_.a = a;
+}
+
+// INI/IND/OUTI/OUTD take N from the transferred byte and get H, C and P/V from
+// adding that byte to the port or memory register. The manual only documents
+// S and Z, but the silicon does all of them, and programs rely on it.
+void Z80::blockIoFlags(u8 value, u8 addend) {
+  const u8 b = regs_.b;
+  const u16 sum = u16(u16(addend) + value);
+  regs_.f = u8(szxy(b) | (value & SF ? NF : 0) | u8(sum & 0x100 ? (HF | CF) : 0) |
+               (parity(u8((sum & 0x07) ^ b)) ? PF : 0));
 }
 
 void Z80::rlca() {
@@ -604,12 +615,17 @@ void Z80::executeEd() {
     case 0xA2: case 0xAA: case 0xB2: case 0xBA: {                  // INI/IND/INIR/INDR
       const bool decrement = (op == 0xAA || op == 0xBA);
       const bool repeat = (op == 0xB2 || op == 0xBA);
-      const u8 v = in8(bc());
+      const u16 port = bc();
+      const u8 v = in8(port);
       write8(hlValue(0), v);
-      setBc(u16(bc() - 1));
+      // Only B counts down; C is the low half of the port address and must
+      // survive, so BC is not decremented as a pair.
+      --regs_.b;
       setHlValue(0, u16(hlValue(0) + (decrement ? -1 : 1)));
+      wz_ = u16(port + (decrement ? -1 : 1));
+      blockIoFlags(v, u8(regs_.c + (decrement ? -1 : 1)));
       tick(2);
-      if (repeat && bc() != 0) {
+      if (repeat && regs_.b != 0) {
         regs_.pc = u16(regs_.pc - 2);
         tick(5);
       }
@@ -618,12 +634,15 @@ void Z80::executeEd() {
     case 0xA3: case 0xAB: case 0xB3: case 0xBB: {                  // OUTI/OUTD/OTIR/OTDR
       const bool decrement = (op == 0xAB || op == 0xBB);
       const bool repeat = (op == 0xB3 || op == 0xBB);
+      const u16 port = bc();
       const u8 v = read8(hlValue(0));
-      out8(bc(), v);
-      setBc(u16(bc() - 1));
+      out8(port, v);
+      --regs_.b;
       setHlValue(0, u16(hlValue(0) + (decrement ? -1 : 1)));
+      wz_ = u16(port + (decrement ? -1 : 1));
+      blockIoFlags(v, regs_.l);
       tick(2);
-      if (repeat && bc() != 0) {
+      if (repeat && regs_.b != 0) {
         regs_.pc = u16(regs_.pc - 2);
         tick(5);
       }
