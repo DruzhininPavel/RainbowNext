@@ -191,22 +191,40 @@ def directory_entries(node: Node) -> bytes:
     return bytes(out)
 
 
+# FAT32 is only legal from this many clusters up; below it the volume has to be
+# FAT16, which this writer does not emit.
+FAT32_MIN_CLUSTERS = 65525
+
+
+def fat32_geometry(total_sectors: int) -> tuple[int, int]:
+    """Returns the (fat_sectors, clusters) pair for a volume of total_sectors."""
+    fat_sectors = 1
+    while True:
+        data = total_sectors - RESERVED_SECTORS - NUM_FATS * fat_sectors
+        clusters = data // SECTORS_PER_CLUSTER
+        need = ((clusters + 2) * 4 + SECTOR - 1) // SECTOR
+        if need <= fat_sectors:
+            return fat_sectors, clusters
+        fat_sectors = need
+
+
+def minimum_size_mb() -> int:
+    """Smallest --size-mb that still clears the FAT32 cluster floor."""
+    sectors = FAT32_MIN_CLUSTERS * SECTORS_PER_CLUSTER + RESERVED_SECTORS
+    while fat32_geometry(sectors)[1] < FAT32_MIN_CLUSTERS:
+        sectors += SECTORS_PER_CLUSTER
+    # The volume starts PARTITION_START sectors into the card, so round up.
+    return -(-(sectors + PARTITION_START) // 2048)
+
+
 class Fat32:
     def __init__(self, total_sectors: int):
         self.total = total_sectors
-        fat_sectors = 1
-        while True:
-            data = total_sectors - RESERVED_SECTORS - NUM_FATS * fat_sectors
-            clusters = data // SECTORS_PER_CLUSTER
-            need = ((clusters + 2) * 4 + SECTOR - 1) // SECTOR
-            if need <= fat_sectors:
-                break
-            fat_sectors = need
-        self.fat_sectors = fat_sectors
-        self.data_start = RESERVED_SECTORS + NUM_FATS * fat_sectors
-        self.clusters = (total_sectors - self.data_start) // SECTORS_PER_CLUSTER
-        if self.clusters < 65525:
-            raise SystemExit("image too small for FAT32; ask for at least 64 MB")
+        self.fat_sectors, self.clusters = fat32_geometry(total_sectors)
+        if self.clusters < FAT32_MIN_CLUSTERS:
+            raise SystemExit(
+                f"image too small for FAT32; ask for at least {minimum_size_mb()} MB")
+        self.data_start = RESERVED_SECTORS + NUM_FATS * self.fat_sectors
         self.cluster_bytes = SECTORS_PER_CLUSTER * SECTOR
         self.fat = [0] * (self.clusters + 2)
         self.fat[0] = 0x0FFFFFF8
@@ -318,8 +336,8 @@ def main() -> int:
 
     if not args.source.is_dir():
         raise SystemExit(f"{args.source}: not a directory")
-    if args.size_mb < 64:
-        raise SystemExit("--size-mb must be at least 64")
+    if args.size_mb < minimum_size_mb():
+        raise SystemExit(f"--size-mb must be at least {minimum_size_mb()}")
 
     total_sectors = args.size_mb * 2048 - PARTITION_START
     fat = Fat32(total_sectors)
