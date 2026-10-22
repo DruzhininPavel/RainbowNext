@@ -30,6 +30,26 @@ constexpr u8 KempstonDown = 0x04;
 constexpr u8 KempstonUp = 0x08;
 constexpr u8 KempstonFire = 0x10;
 
+struct PadKeyMapping {
+  SDL_GamepadButton button;
+  int row;
+  int column;
+};
+
+// Plenty of Spectrum software only ever reads the matrix, so a pad that offers
+// nothing but Kempston cannot play it. These four turn the face and shoulder
+// buttons into the keys those games wait for.
+constexpr PadKeyMapping PadKeys[] = {
+    {SDL_GAMEPAD_BUTTON_WEST, 7, 0},           // X -> SPACE
+    {SDL_GAMEPAD_BUTTON_NORTH, 6, 0},          // Y -> ENTER
+    {SDL_GAMEPAD_BUTTON_LEFT_SHOULDER, 0, 0},  // LB -> CAPS SHIFT
+    {SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER, 7, 1}, // RB -> SYMBOL SHIFT
+};
+
+// The left stick has to travel well past a thumb resting on it before it counts
+// as a direction, which is why a pad sits idle instead of walking left.
+constexpr float StickThreshold = 16000.0f;
+
 u8 arrowBit(SDL_Keycode key) {
   switch (key) {
     case SDLK_RIGHT: return KempstonRight;
@@ -91,19 +111,54 @@ bool Input::handleKey(SDL_Keycode key, bool down, Keyboard& keyboard) {
   return false;
 }
 
-void Input::pollGamepads(u8& kempston) {
+void Input::releasePadKeys(Keyboard& keyboard) {
+  for (const PadKeyMapping& m : PadKeys) keyboard.setPadKey(m.row, m.column, false);
+}
+
+PadAction Input::pollGamepads(u8& kempston, Keyboard& keyboard) {
   u8 bits = arrowMask_;
-  if (pad_ != nullptr) {
-    const float x = SDL_GetGamepadAxis(pad_, SDL_GAMEPAD_AXIS_LEFTX);
-    const float y = SDL_GetGamepadAxis(pad_, SDL_GAMEPAD_AXIS_LEFTY);
-    if (x < -16000.0f) bits |= KempstonLeft;
-    if (x > 16000.0f) bits |= KempstonRight;
-    if (y < -16000.0f) bits |= KempstonUp;
-    if (y > 16000.0f) bits |= KempstonDown;
-    if (SDL_GetGamepadButton(pad_, SDL_GAMEPAD_BUTTON_SOUTH)) bits |= KempstonFire;
-    if (SDL_GetGamepadButton(pad_, SDL_GAMEPAD_BUTTON_EAST)) bits |= KempstonFire;
+  PadAction action = PadAction::None;
+
+  if (pad_ == nullptr) {
+    // The pad went away while a button was down, so its keys have to come up.
+    releasePadKeys(keyboard);
+    menuDown_ = false;
+    pauseDown_ = false;
+    kempston = bits;
+    return action;
   }
+
+  const float x = SDL_GetGamepadAxis(pad_, SDL_GAMEPAD_AXIS_LEFTX);
+  const float y = SDL_GetGamepadAxis(pad_, SDL_GAMEPAD_AXIS_LEFTY);
+  if (x < -StickThreshold) bits |= KempstonLeft;
+  if (x > StickThreshold) bits |= KempstonRight;
+  if (y < -StickThreshold) bits |= KempstonUp;
+  if (y > StickThreshold) bits |= KempstonDown;
+
+  if (SDL_GetGamepadButton(pad_, SDL_GAMEPAD_BUTTON_DPAD_LEFT)) bits |= KempstonLeft;
+  if (SDL_GetGamepadButton(pad_, SDL_GAMEPAD_BUTTON_DPAD_RIGHT)) bits |= KempstonRight;
+  if (SDL_GetGamepadButton(pad_, SDL_GAMEPAD_BUTTON_DPAD_UP)) bits |= KempstonUp;
+  if (SDL_GetGamepadButton(pad_, SDL_GAMEPAD_BUTTON_DPAD_DOWN)) bits |= KempstonDown;
+
+  if (SDL_GetGamepadButton(pad_, SDL_GAMEPAD_BUTTON_SOUTH)) bits |= KempstonFire;
+  if (SDL_GetGamepadButton(pad_, SDL_GAMEPAD_BUTTON_EAST)) bits |= KempstonFire;
+
+  for (const PadKeyMapping& m : PadKeys) {
+    keyboard.setPadKey(m.row, m.column, SDL_GetGamepadButton(pad_, m.button));
+  }
+
+  const bool menu = SDL_GetGamepadButton(pad_, SDL_GAMEPAD_BUTTON_START);
+  const bool pause = SDL_GetGamepadButton(pad_, SDL_GAMEPAD_BUTTON_BACK);
+  if (menu && !menuDown_) {
+    action = PadAction::Menu;
+  } else if (pause && !pauseDown_) {
+    action = PadAction::Pause;
+  }
+  menuDown_ = menu;
+  pauseDown_ = pause;
+
   kempston = bits;
+  return action;
 }
 
 } // namespace rainbow::frontend

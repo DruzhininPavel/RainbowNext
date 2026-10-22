@@ -130,3 +130,30 @@ TEST(machine_border_rendering) {
   CHECK_EQ(m.framebuffer()[Machine::FrameWidth * Machine::FrameHeight - 1],
            Machine::Palette[2]);
 }
+
+TEST(keyboard_pad_layer_is_separate_from_the_matrix) {
+  rainbow::Keyboard kb;
+  kb.setKey(7, 0, true); // SPACE held on the host keyboard
+  kb.setPadKey(7, 0, true);
+  kb.setPadKey(7, 0, false);
+  // Letting go of the pad must not clear the key the keyboard still holds.
+  CHECK(kb.isDown(7, 0));
+  CHECK_EQ(kb.read(0x7F), 0xFE);
+
+  kb.setKey(7, 0, false);
+  CHECK(!kb.isDown(7, 0));
+  CHECK_EQ(kb.read(0x7F), 0xFF);
+}
+
+TEST(keyboard_pad_layer_reads_like_a_pressed_key) {
+  rainbow::Keyboard kb;
+  kb.setPadKey(6, 0, true); // ENTER
+  // Row 6 is selected by pulling A14 low.
+  CHECK_EQ(kb.read(0xBF), 0xFE);
+  // A row that is not selected still reads as untouched.
+  CHECK_EQ(kb.read(0x7F), 0xFF);
+
+  kb.reset();
+  CHECK(!kb.isDown(6, 0));
+  CHECK_EQ(kb.read(0xBF), 0xFF);
+}

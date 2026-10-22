@@ -119,6 +119,39 @@ std::string lowerExtension(const std::string& path) {
 
 bool isNexPath(const std::string& path) { return lowerExtension(path) == ".nex"; }
 
+// A handheld reports a 1280x800 panel and runs under a compositor that gives a
+// window no decorations to drag it by, so the picture starts fullscreen there.
+// Steam also exports SteamDeck=1 for everything it launches, which catches the
+// case where a monitor of another size is plugged in.
+bool isHandheldDisplay(const SDL_Rect& bounds) {
+  const char* deck = SDL_getenv("SteamDeck");
+  if (deck != nullptr && *deck != '\0') return true;
+  return bounds.w == 1280 && bounds.h == 800;
+}
+
+struct WindowPlan {
+  int width = Machine::FrameWidth * 3;
+  int height = Machine::FrameHeight * 3;
+  bool fullscreen = false;
+};
+
+// Whole-number zoom of the 320x256 frame keeps every Spectrum pixel square and
+// the same size, so the window is sized to the largest scale that fits the
+// screen instead of a fixed 960x768 that overflows a small panel.
+WindowPlan planWindow() {
+  WindowPlan plan;
+  SDL_Rect bounds{};
+  if (!SDL_GetDisplayUsableBounds(SDL_GetPrimaryDisplay(), &bounds)) return plan;
+  if (bounds.w <= 0 || bounds.h <= 0) return plan;
+
+  int scale = std::min(bounds.w / Machine::FrameWidth, bounds.h / Machine::FrameHeight);
+  scale = std::clamp(scale, 1, 3);
+  plan.width = Machine::FrameWidth * scale;
+  plan.height = Machine::FrameHeight * scale;
+  plan.fullscreen = isHandheldDisplay(bounds);
+  return plan;
+}
+
 } // namespace
 
 App::~App() { shutdown(); }
@@ -130,19 +163,24 @@ void SDLCALL App::onFileDialog(void* userdata, const char* const* filelist, int)
 }
 
 bool App::init(const Options& options) {
-  SDL_SetAppMetadata("RainbowNext", "0.1.0", "com.rainbownext.emulator");
+#ifndef RAINBOW_VERSION
+#define RAINBOW_VERSION "0.0.0"
+#endif
+  SDL_SetAppMetadata("RainbowNext", RAINBOW_VERSION, "com.rainbownext.emulator");
 
   if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO | SDL_INIT_GAMEPAD)) {
     std::fprintf(stderr, "SDL_Init failed: %s\n", SDL_GetError());
     return false;
   }
 
-  window_ = SDL_CreateWindow("RainbowNext", Machine::FrameWidth * 3, Machine::FrameHeight * 3,
+  const WindowPlan plan = planWindow();
+  window_ = SDL_CreateWindow("RainbowNext", plan.width, plan.height,
                              SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY);
   if (window_ == nullptr) {
     std::fprintf(stderr, "SDL_CreateWindow failed: %s\n", SDL_GetError());
     return false;
   }
+  if (plan.fullscreen) toggleFullscreen();
 
   if (!screen_.init(window_, Machine::FrameWidth, Machine::FrameHeight)) {
     std::fprintf(stderr, "GPU initialisation failed\n");
@@ -262,7 +300,11 @@ void App::run() {
     }
 
     u8 kempston = 0;
-    input_.pollGamepads(kempston);
+    switch (input_.pollGamepads(kempston, machine_->keyboard())) {
+      case PadAction::Menu: revealToolbar(); break;
+      case PadAction::Pause: paused_ = !paused_; break;
+      case PadAction::None: break;
+    }
     machine_->setKempston(kempston);
 
     if (!paused_ && rewindEnabled_) {
@@ -1264,6 +1306,14 @@ void App::toggleFullscreen() {
   toolbarRevealUntilNs_ = SDL_GetTicksNS() + 2'500'000'000ull;
   status_ = target ? "Fullscreen - F11 or Esc to leave, pointer to the top edge for the menu"
                    : "Windowed";
+}
+
+void App::revealToolbar() {
+  // A pad has no pointer to push against the top edge, so its menu button does
+  // what the pointer would: it brings the toolbar back and holds it there long
+  // enough to reach the trackpad.
+  toolbarRevealUntilNs_ = SDL_GetTicksNS() + 10'000'000'000ull;
+  if (!fullscreen_) toolbarPinned_ = true;
 }
 
 void App::updateLayout() {

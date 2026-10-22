@@ -16,6 +16,11 @@ public:
 
   void reset();
   void setKey(int row, int column, bool down);
+  // A second layer for the keys a gamepad stands in for. It is kept apart from
+  // the matrix so that letting go of the pad never clears a key the keyboard is
+  // still holding, and it stays out of the save state: like the Kempston byte it
+  // is live host input rather than machine state.
+  void setPadKey(int row, int column, bool down);
   bool isDown(int row, int column) const;
 
   // `high` is the high byte of the I/O port address. Returns 0xFF for bits
@@ -26,6 +31,7 @@ public:
 
 private:
   std::array<std::array<bool, Columns>, Rows> keys_{};
+  std::array<std::array<bool, Columns>, Rows> padKeys_{};
 };
 
 } // namespace rainbow
