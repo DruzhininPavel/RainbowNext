@@ -210,7 +210,15 @@ a multicolour demo renders correctly; `z80test` passes.
       macOS job cross-compile both slices, and the Linux job packs the same
       binary into an AppDir that `appimagetool` turns into a single runnable
       file. `v0.1.1` is the first release that ships both
-* [ ] Steam Deck controller profiles, 1280×800 default scaling
+* [x] Steam Deck controller profiles and 1280×800 default scaling. The window
+      opens at the largest whole-number zoom of the 320×256 frame that fits the
+      screen (3x on the Deck's 1280×800 panel), and a 1280×800 panel or an
+      inherited `SteamDeck=1` starts fullscreen. The pad drives Kempston from
+      both the stick and the d-pad, and its face and shoulder buttons press
+      SPACE, ENTER, CAPS SHIFT and SYMBOL SHIFT through `Keyboard::setPadKey`, a
+      layer that sits beside the matrix so releasing the pad cannot clear a key
+      the keyboard holds. `Start` summons the toolbar for a pad with no pointer,
+      `Back` pauses. See `docs/ARCHITECTURE.md`, "Input and handhelds"
 
 ## Known gaps
 

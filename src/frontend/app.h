@@ -51,6 +51,7 @@ private:
   void updateLayout();
   void computeToolbarMetrics();
   void toggleFullscreen();
+  void revealToolbar();
   void pushAudio();
 
   void setMachine(MachineType type);

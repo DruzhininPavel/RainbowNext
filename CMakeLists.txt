@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.24)
-project(RainbowNext VERSION 0.1.3 LANGUAGES CXX)
+project(RainbowNext VERSION 0.1.4 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -157,6 +157,9 @@ add_executable(rainbow
   src/frontend/screen.cpp
 )
 target_link_libraries(rainbow PRIVATE rainbow_core rainbow_plugin SDL3::SDL3 imgui Threads::Threads)
+# SDL puts the version in the app metadata, which is what a launcher and the
+# About box show, so it comes from the project version rather than a literal.
+target_compile_definitions(rainbow PRIVATE RAINBOW_VERSION="${PROJECT_VERSION}")
 # The example plugin is built into build/peripherals, where the emulator looks.
 add_dependencies(rainbow rainbow_fuller)
 target_compile_options(rainbow PRIVATE -Wall -Wextra -Wpedantic)

@@ -587,6 +587,29 @@ overlay is composited by the GPU instead of a second renderer. Note that
 SDL_GPU's clip space has +Y up while the layout maths works in viewport pixels
 with +Y down, so `crt.vert` flips the vertical axis itself.
 
+## Input and handhelds
+
+`frontend/input.cpp` is the only place the host's devices meet the machine. The
+host keyboard is translated into row/column pairs of the 8x5 matrix by a static
+table, and the arrow keys and Ctrl are merged into the Kempston byte, which the
+main loop pushes with `Machine::setKempston` once a frame. The Kempston value is
+live host input and is deliberately not part of a save state.
+
+A gamepad feeds both paths at once: the left stick and the d-pad set Kempston
+directions, A and B fire, and four buttons press matrix keys (`X` SPACE, `Y`
+ENTER, `LB` CAPS SHIFT, `RB` SYMBOL SHIFT), because plenty of Spectrum software
+only ever reads the matrix. Those keys go through `Keyboard::setPadKey`, a layer
+kept apart from the matrix so that letting go of the pad cannot clear a key the
+keyboard is still holding. `Start` and `Back` are not machine buttons: they come
+back from `Input::pollGamepads` as a one-shot `PadAction` that the loop turns
+into "summon the toolbar" and "pause".
+
+The window is sized from `SDL_GetDisplayUsableBounds` to the largest whole-number
+zoom of the 320x256 frame that fits (capped at 3x), which keeps every Spectrum
+pixel the same size and square. A panel that reports 1280x800, or a process that
+inherits `SteamDeck=1`, starts fullscreen instead: a handheld has no window
+manager to place a window with, and Esc or F11 brings it back.
+
 ## Adding a machine
 
 1. Add an entry to `MachineType` and a row to `timingsFor()`.

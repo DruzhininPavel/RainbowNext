@@ -10,7 +10,8 @@ Status: v0.1.3 — M1 and M2 done: 48K and 128K/+2/+3 boot with AY sound, tape
         Next's MMU/NextREG file, its palette hardware, Layer 2, sprites, the
         tilemap and the video pipeline (Timex, ULA+, ULANext, blending).
         M3 is done: save states, a rewind buffer, RZX replay and recording, the
-        debugger and the CRT filter on an SDL_GPU renderer (docs/ROADMAP.md).
+        debugger and the CRT filter on an SDL_GPU renderer, and a Steam Deck
+        profile (docs/ROADMAP.md).
 ```
 
 ## Features
@@ -205,7 +206,10 @@ instant loading; turn it off to hear and debug the actual tape signal.
 | `ENTER` | Return |
 | `SPACE` | Space |
 | letters / digits | same key |
-| Kempston | arrow keys, or gamepad stick + A/B |
+| Kempston | arrow keys, or gamepad stick/d-pad + A/B |
+| Gamepad `X` / `Y` | `SPACE` / `ENTER` |
+| Gamepad `LB` / `RB` | `CAPS SHIFT` / `SYMBOL SHIFT` |
+| Gamepad `Start` / `Back` | show the toolbar / pause |
 | Debugger | `F1` |
 | Pause | `F2` |
 | Step / step over | `F3` / `F4` |
@@ -216,6 +220,29 @@ instant loading; turn it off to hear and debug the actual tape signal.
 | Quick load state | `F9` |
 | Save / load state as... | `Shift+F8` / `Shift+F9` |
 | Rewind one step | `F10` |
+
+### Steam Deck
+
+Download the AppImage from the [releases page](../../releases), copy it to the
+Deck, `chmod +x` it and add it to Steam as a non-Steam game. Steam exports
+`SteamDeck=1` for everything it launches, and on the 1280×800 panel the emulator
+starts fullscreen with the frame at 3× (960×768, centred). `Esc` or `F11` drops
+back to a window, `F1` opens the debugger.
+
+| Deck | Spectrum |
+|---|---|
+| Left stick, d-pad | Kempston directions |
+| `A`, `B` | Kempston fire |
+| `X`, `Y` | `SPACE`, `ENTER` |
+| `LB`, `RB` | `CAPS SHIFT`, `SYMBOL SHIFT` |
+| `Start` | show the toolbar for ten seconds — the right trackpad is the pointer |
+| `Back` | pause |
+
+A pad is read as a Kempston joystick, so switch one on in
+`Peripherals > Kempston joystick` for the games that use it; the four matrix
+buttons work either way. The other buttons are left to Steam Input, so a
+per-game layout can bind `F5` (reset), `F8`/`F9` (quick save/load) and `F6`
+(tape) to whatever suits.
 
 ### Save states
 
