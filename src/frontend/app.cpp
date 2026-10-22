@@ -4,6 +4,7 @@
 #include <cctype>
 #include <cmath>
 #include <cstdio>
+#include <fstream>
 #include <vector>
 
 #include <imgui.h>
@@ -12,6 +13,10 @@
 
 #include "frontend/debugger.h"
 #include "frontend/ui.h"
+#include "peripherals/cartridge.h"
+#include "peripherals/kempston_mouse.h"
+#include "peripherals/printer.h"
+#include "plugin/loader.h"
 
 namespace mynext::frontend {
 namespace {
@@ -161,6 +166,13 @@ bool App::init(const Options& options) {
 
   input_.openGamepads();
 
+  loadConfig();
+  scanPeripherals();
+  applyPeripheralConfig();
+  // Write the file on the first run too, so the plugin folder is recorded even
+  // if the emulator is killed rather than closed.
+  saveConfig();
+
   IMGUI_CHECKVERSION();
   ImGui::CreateContext();
   ImGui::GetIO().IniFilename = nullptr;
@@ -174,6 +186,7 @@ bool App::init(const Options& options) {
 }
 
 void App::shutdown() {
+  saveConfig();
   input_.closeGamepads();
   audio_.shutdown();
 
@@ -219,7 +232,10 @@ void App::run() {
         case DialogKind::Tape: loadTape(path); break;
         case DialogKind::Disk: loadDisk(path); break;
         case DialogKind::Rom: loadRom(path); break;
+        case DialogKind::Cartridge: loadCartridge(path); break;
+        case DialogKind::Printout: savePrintout(path); break;
       }
+      dialogSave_ = false;
     }
 
     u8 kempston = 0;
@@ -236,6 +252,7 @@ void App::run() {
     ImGui_ImplSDL3_NewFrame();
     ImGui_ImplSDLRenderer3_NewFrame();
     ImGui::NewFrame();
+    feedMouse();
 
     const ImGuiIO& io = ImGui::GetIO();
     framebufferScale_ = io.DisplayFramebufferScale.x > 0.0f ? io.DisplayFramebufferScale.x : 1.0f;
@@ -357,6 +374,11 @@ void App::setMachine(MachineType type) {
   if (!loaded) loaded = loadRomFor(*machine_, type, "", &romPath_);
   status_ = std::string("Machine: ") + machineName(type) +
             (loaded ? "  ROM: " + romPath_ : "  (no ROM found)");
+
+  // A new machine has a new bus, so the plugins have to be loaded into it and
+  // the user's choices replayed.
+  scanPeripherals();
+  applyPeripheralConfig();
 }
 
 bool App::loadRom(const std::string& path) {
@@ -415,14 +437,194 @@ void App::openFileDialog(DialogKind kind) {
       {"Tape images", "tap;tzx"}, {"All files", "*"}};
   static const SDL_DialogFileFilter diskFilters[] = {
       {"Disk images", "dsk;edsk"}, {"All files", "*"}};
+  static const SDL_DialogFileFilter cartridgeFilters[] = {
+      {"Cartridge images", "rom;bin;cart"}, {"All files", "*"}};
 
   dialogKind_ = kind;
   dialogOpen_ = true;
+  dialogSave_ = false;
   const SDL_DialogFileFilter* filters = romFilters;
   if (kind == DialogKind::Snapshot) filters = snapshotFilters;
   if (kind == DialogKind::Tape) filters = tapeFilters;
   if (kind == DialogKind::Disk) filters = diskFilters;
+  if (kind == DialogKind::Cartridge) filters = cartridgeFilters;
   SDL_ShowOpenFileDialog(onFileDialog, this, window_, filters, 2, nullptr, false);
+}
+
+void App::openSaveDialog(DialogKind kind) {
+  if (dialogOpen_) return;
+  static const SDL_DialogFileFilter printoutFilters[] = {
+      {"PBM image", "pbm"}, {"All files", "*"}};
+
+  dialogKind_ = kind;
+  dialogOpen_ = true;
+  dialogSave_ = true;
+  SDL_ShowSaveFileDialog(onFileDialog, this, window_, printoutFilters, 2, nullptr);
+}
+
+// ---------------------------------------------------------------------------
+// Peripherals
+// ---------------------------------------------------------------------------
+
+bool App::loadCartridge(const std::string& path) {
+  auto* cart = static_cast<Cartridge*>(machine_->expansion().find("cartridge"));
+  if (cart == nullptr) return false;
+  std::string error;
+  if (!cart->loadFile(path, error)) {
+    status_ = "Cartridge failed: " + error;
+    return false;
+  }
+  // Loading an image is the user asking for it to run, so plug it in too.
+  machine_->expansion().setEnabled("cartridge", true);
+  syncConfigFromBus();
+  status_ = "Cartridge: " + path;
+  return true;
+}
+
+bool App::savePrintout(const std::string& path) {
+  auto* printer = static_cast<ZxPrinter*>(machine_->expansion().find("printer"));
+  if (printer == nullptr) return false;
+  std::ofstream out(path, std::ios::binary | std::ios::trunc);
+  if (!out) {
+    status_ = "Cannot write " + path;
+    return false;
+  }
+  out << printer->toPbm();
+  status_ = "Printout saved: " + path;
+  return true;
+}
+
+void App::loadConfig() {
+  if (const char* dir = SDL_GetPrefPath("myNext", "myNext")) configPath_ = std::string(dir) + "mynext.cfg";
+  config_.load(configPath_);
+
+  // Plugins live next to the executable, which is where a downloaded build and
+  // a development build both keep them.
+  pluginDir_ = config_.pluginDir;
+  if (pluginDir_.empty()) {
+    if (const char* base = SDL_GetBasePath()) pluginDir_ = std::string(base) + "peripherals";
+  }
+  config_.pluginDir = pluginDir_;
+}
+
+void App::saveConfig() const {
+  if (configPath_.empty()) return;
+  Config copy = config_;
+  copy.enabledPeripherals.clear();
+  for (const auto& slot : machine_->expansion().slots()) {
+    if (slot.enabled) copy.enabledPeripherals.push_back(slot.module->info().id);
+  }
+  copy.save(configPath_);
+}
+
+void App::syncConfigFromBus() {
+  config_.enabledPeripherals.clear();
+  for (const auto& slot : machine_->expansion().slots()) {
+    if (slot.enabled) config_.enabledPeripherals.push_back(slot.module->info().id);
+  }
+  saveConfig();
+}
+
+void App::applyPeripheralConfig() {
+  if (config_.enabledPeripherals.empty()) return;
+  std::string list;
+  for (const std::string& id : config_.enabledPeripherals) {
+    if (!list.empty()) list += ',';
+    list += id;
+  }
+  machine_->expansion().applyEnabledList(list);
+}
+
+void App::scanPeripherals() {
+  ExpansionBus& bus = machine_->expansion();
+  // Whatever is plugged in now stays plugged in: a rescan must not unplug a
+  // module the user switched on.
+  const std::string before = bus.enabledList();
+  for (const std::string& id : pluginIds_) bus.remove(id);
+  pluginIds_.clear();
+
+  PluginLoader::Result result = PluginLoader::scan(pluginDir_, bus.host());
+  pluginErrors_ = result.errors;
+  for (auto& module : result.modules) {
+    pluginIds_.push_back(module->info().id);
+    bus.add(std::move(module), false);
+  }
+  bus.applyEnabledList(before);
+}
+
+void App::drawPeripheralsMenu() {
+  ExpansionBus& bus = machine_->expansion();
+  for (const auto& slot : bus.slots()) {
+    const PeripheralInfo& info = slot.module->info();
+    bool on = slot.enabled;
+    if (ImGui::MenuItem(info.name.c_str(), nullptr, &on)) {
+      bus.setEnabled(info.id, on);
+      syncConfigFromBus();
+    }
+    if (ImGui::IsItemHovered()) {
+      ImGui::SetTooltip("%s\n\n%s", info.description.c_str(),
+                        info.author.empty() ? info.id.c_str() : info.author.c_str());
+    }
+  }
+
+  auto* cartridge = static_cast<Cartridge*>(bus.find("cartridge"));
+  auto* printer = static_cast<ZxPrinter*>(bus.find("printer"));
+  if (cartridge != nullptr || printer != nullptr) ImGui::Separator();
+  if (cartridge != nullptr) {
+    if (ImGui::MenuItem("Load cartridge image...")) openFileDialog(DialogKind::Cartridge);
+    if (ImGui::MenuItem("Eject cartridge", nullptr, false, cartridge->loaded())) {
+      cartridge->eject();
+      bus.setEnabled("cartridge", false);
+      syncConfigFromBus();
+      status_ = "Cartridge ejected";
+    }
+  }
+  if (printer != nullptr) {
+    if (ImGui::MenuItem("Save printout...", nullptr, false, printer->used())) {
+      openSaveDialog(DialogKind::Printout);
+    }
+    if (ImGui::MenuItem("Clear printout", nullptr, false, printer->used())) printer->clear();
+  }
+
+  ImGui::Separator();
+  if (ImGui::MenuItem("Rescan plugin folder")) {
+    scanPeripherals();
+    status_ = pluginErrors_.empty()
+                  ? "Plugins: " + std::to_string(pluginIds_.size()) + " loaded"
+                  : "Plugins: " + std::to_string(pluginErrors_.size()) + " failed to load";
+  }
+  if (!pluginErrors_.empty()) {
+    ImGui::TextDisabled("%zu plugin(s) failed", pluginErrors_.size());
+    if (ImGui::IsItemHovered()) {
+      std::string all;
+      for (const std::string& error : pluginErrors_) all += error + "\n";
+      ImGui::SetTooltip("%s", all.c_str());
+    }
+  }
+  ImGui::TextDisabled("Folder: %s", pluginDir_.c_str());
+  if (ImGui::MenuItem("Open plugin folder")) SDL_OpenURL(("file://" + pluginDir_).c_str());
+}
+
+// The Kempston mouse follows the pointer while it is over the picture, which is
+// the only place a mouse makes sense in a machine that has no window manager.
+void App::feedMouse() {
+  auto* mouse = static_cast<KempstonMouse*>(machine_->expansion().find("kempston-mouse"));
+  if (mouse == nullptr || !machine_->expansion().enabled("kempston-mouse")) return;
+
+  const ImGuiIO& io = ImGui::GetIO();
+  const bool inside = io.MousePos.x >= screenMin_.x && io.MousePos.x < screenMax_.x &&
+                      io.MousePos.y >= screenMin_.y && io.MousePos.y < screenMax_.y;
+  if (inside) {
+    if (io.MouseDelta.x != 0.0f || io.MouseDelta.y != 0.0f) {
+      mouse->move(int(io.MouseDelta.x), int(io.MouseDelta.y));
+    }
+    // Bit 0 is the right button, 1 the left, 2 the middle.
+    u8 buttons = 0;
+    if (io.MouseDown[1]) buttons |= 0x01;
+    if (io.MouseDown[0]) buttons |= 0x02;
+    if (io.MouseDown[2]) buttons |= 0x04;
+    mouse->setButtons(buttons);
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -548,6 +750,8 @@ void App::drawToolbar() {
       if (ImGui::MenuItem(machineName(type), nullptr, machine_->type() == type)) setMachine(type);
     }
   });
+
+  menu("Peripherals", [this] { drawPeripheralsMenu(); });
 
   menu("View", [this] {
     ImGui::MenuItem("Debugger", "F1", &showDebugger_);

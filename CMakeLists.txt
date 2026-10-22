@@ -89,6 +89,11 @@ add_library(mynext_core STATIC
   src/core/copper.cpp
   src/core/dac.cpp
   src/core/dma.cpp
+  src/core/expansion.cpp
+  src/peripherals/kempston.cpp
+  src/peripherals/kempston_mouse.cpp
+  src/peripherals/printer.cpp
+  src/peripherals/cartridge.cpp
   src/formats/dsk.cpp
   src/formats/sna.cpp
   src/formats/tape.cpp
@@ -98,17 +103,50 @@ target_include_directories(mynext_core PUBLIC src)
 target_compile_options(mynext_core PRIVATE -Wall -Wextra -Wpedantic)
 
 # ---------------------------------------------------------------------------
+# Plugin loader (the only part of the core that talks to the operating system)
+# ---------------------------------------------------------------------------
+add_library(mynext_plugin STATIC src/plugin/loader.cpp)
+target_link_libraries(mynext_plugin PUBLIC mynext_core)
+target_include_directories(mynext_plugin PUBLIC src)
+target_compile_options(mynext_plugin PRIVATE -Wall -Wextra -Wpedantic)
+if(CMAKE_DL_LIBS)
+  target_link_libraries(mynext_plugin PUBLIC ${CMAKE_DL_LIBS})
+endif()
+
+# ---------------------------------------------------------------------------
+# Example peripheral plugin, built into build/peripherals/ so the emulator and
+# the tests find it the same way a user's own plugin would be found.
+# ---------------------------------------------------------------------------
+add_library(mynext_fuller MODULE plugins/fuller/fuller.cpp)
+target_include_directories(mynext_fuller PRIVATE src)
+set_target_properties(mynext_fuller PROPERTIES
+  PREFIX ""
+  OUTPUT_NAME "fuller_joystick"
+  LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/peripherals"
+)
+if(APPLE)
+  set_target_properties(mynext_fuller PROPERTIES SUFFIX ".dylib")
+elseif(WIN32)
+  set_target_properties(mynext_fuller PROPERTIES SUFFIX ".dll")
+else()
+  set_target_properties(mynext_fuller PROPERTIES SUFFIX ".so")
+endif()
+
+# ---------------------------------------------------------------------------
 # Frontend (SDL3 + Dear ImGui)
 # ---------------------------------------------------------------------------
 add_executable(mynext
   src/frontend/main.cpp
   src/frontend/app.cpp
+  src/frontend/config.cpp
   src/frontend/audio.cpp
   src/frontend/input.cpp
   src/frontend/debugger.cpp
   src/frontend/ui.cpp
 )
-target_link_libraries(mynext PRIVATE mynext_core SDL3::SDL3 imgui Threads::Threads)
+target_link_libraries(mynext PRIVATE mynext_core mynext_plugin SDL3::SDL3 imgui Threads::Threads)
+# The example plugin is built into build/peripherals, where the emulator looks.
+add_dependencies(mynext mynext_fuller)
 target_compile_options(mynext PRIVATE -Wall -Wextra -Wpedantic)
 
 if(APPLE)
@@ -132,6 +170,8 @@ if(MYNEXT_BUILD_TESTS)
     tests/test_sprites_relative.cpp
     tests/test_copper.cpp
     tests/test_dma.cpp
+    tests/test_expansion.cpp
+    src/frontend/config.cpp
   tests/test_turbosound.cpp
     tests/test_tilemap.cpp
     tests/test_nextreg.cpp
@@ -144,10 +184,11 @@ if(MYNEXT_BUILD_TESTS)
     tests/test_dsk.cpp
     tests/test_boot.cpp
   )
-  target_link_libraries(mynext_tests PRIVATE mynext_core)
+  target_link_libraries(mynext_tests PRIVATE mynext_core mynext_plugin)
   target_compile_options(mynext_tests PRIVATE -Wall -Wextra -Wpedantic)
   # Lets the golden ROM test look for roms/48.rom in the source tree.
   target_compile_definitions(mynext_tests PRIVATE
-    MYNEXT_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
+    MYNEXT_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}"
+    MYNEXT_PLUGIN_DIR="${CMAKE_BINARY_DIR}/peripherals")
   add_test(NAME mynext_tests COMMAND mynext_tests)
 endif()

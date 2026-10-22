@@ -2,11 +2,13 @@
 
 #include <memory>
 #include <string>
+#include <vector>
 
 #include <SDL3/SDL.h>
 
 #include "core/machine.h"
 #include "frontend/audio.h"
+#include "frontend/config.h"
 #include "frontend/input.h"
 #include "frontend/ui.h"
 
@@ -45,14 +47,28 @@ private:
   void pushAudio();
 
   void setMachine(MachineType type);
-  enum class DialogKind { Rom, Snapshot, Tape, Disk };
+  enum class DialogKind { Rom, Snapshot, Tape, Disk, Cartridge, Printout };
 
   bool loadRom(const std::string& path);
   bool loadSnapshot(const std::string& path);
   bool loadTape(const std::string& path);
   bool loadDisk(const std::string& path);
+  bool loadCartridge(const std::string& path);
+  bool savePrintout(const std::string& path);
   void openFileDialog(DialogKind kind);
+  void openSaveDialog(DialogKind kind);
   void reset();
+
+  // Settings that outlive a run: which peripherals are plugged in and where
+  // plugin libraries are looked for.
+  void loadConfig();
+  void saveConfig() const;
+  void syncConfigFromBus();
+  void applyPeripheralConfig();
+  // Re-reads the plugin folder and swaps the external modules in the bus.
+  void scanPeripherals();
+  void drawPeripheralsMenu();
+  void feedMouse();
 
   static void SDLCALL onFileDialog(void* userdata, const char* const* filelist, int filter);
 
@@ -68,7 +84,16 @@ private:
   std::string romPath_;
   std::string pendingDialogResult_;
   bool dialogOpen_ = false;
+  bool dialogSave_ = false;
   DialogKind dialogKind_ = DialogKind::Rom;
+
+  Config config_;
+  std::string configPath_;
+  std::string pluginDir_;
+  std::vector<std::string> pluginErrors_;
+  // Ids of the modules that came from a library, so a rescan can take them back
+  // out without touching the built-in ones.
+  std::vector<std::string> pluginIds_;
 
   ui::Fonts fonts_;
   float framebufferScale_ = 1.0f;

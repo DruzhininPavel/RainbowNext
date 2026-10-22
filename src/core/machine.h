@@ -10,6 +10,7 @@
 #include "core/copper.h"
 #include "core/dac.h"
 #include "core/dma.h"
+#include "core/expansion.h"
 #include "core/keyboard.h"
 #include "core/nextreg.h"
 #include "core/palette.h"
@@ -146,6 +147,10 @@ public:
   bool irqLine() const { return irqLine_; }
   bool romLoaded() const { return romLoaded_; }
   void setKempston(u8 value) { kempston_ = value; }
+  // The edge connector: peripherals are plugged in here, and the settings menu
+  // switches them on and off through it.
+  ExpansionBus& expansion() { return expansion_; }
+  const ExpansionBus& expansion() const { return expansion_; }
   const NextRegFile& nextRegs() const { return next_; }
   const NextPalette& palette() const { return palette_; }
   const Sprites& sprites() const { return sprites_; }
@@ -165,6 +170,14 @@ public:
   static const u32 Palette[PaletteSize];
 
 private:
+  // The machine's own port decode. The public ioRead/ioWrite offer the access to
+  // the expansion bus first and fall back to these, which is also what a
+  // peripheral's host callbacks reach, so a module never recurses into itself.
+  u8 ioReadBase(u16 port, u32 t);
+  void ioWriteBase(u16 port, u8 value, u32 t);
+  void installPeripherals();
+  void refreshCartridge();
+
   void renderFrame();
   void renderScreenRow(int y);
   void frameStart();
@@ -257,6 +270,10 @@ private:
   Sprites sprites_;
   Copper copper_;
   ZxnDma dma_;
+  ExpansionBus expansion_;
+  // The cartridge image, cached from the bus so the memory path stays a single
+  // pointer test.
+  const std::vector<u8>* cartRom_ = nullptr;
   // Register 0x18 takes four writes in a row, so the position needs a counter.
   std::array<u8, 4> layer2Clip_ = {0, 255, 0, 191};
   u8 layer2ClipIndex_ = 0;

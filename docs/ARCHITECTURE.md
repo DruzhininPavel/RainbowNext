@@ -17,6 +17,7 @@ flowchart TD
         DAC["SpecDrum<br/>4x 8-bit DAC"]
         FDC["µPD765<br/>+3 disk controller,<br/>two ports, non-DMA"]
         FMT["Formats<br/>SNA, Z80, TAP, TZX, DSK"]
+        EXP["Expansion bus<br/>edge connector,<br/>built-in + plugin modules"]
     end
 
     subgraph host["Frontend (SDL3 + Dear ImGui)"]
@@ -35,6 +36,7 @@ flowchart TD
     MACH --> DAC
     MACH --> FDC
     MACH --> FMT
+    MACH --> EXP
     APP --> MACH
     APP --> AUD
     APP --> INP
@@ -66,6 +68,57 @@ flowchart TD
    execute one iteration per `step()` and rewind `PC` by two bytes, which is
    exactly what the hardware does and lets an interrupt land between
    iterations.
+
+## Expansion bus
+
+The Spectrum had its expansion on the edge connector, and myNext keeps that
+shape: `src/core/peripheral.h` is the contract a device implements,
+`src/core/expansion.h` is the bus that owns the devices, and `Machine` routes
+every access through it. Nothing in the machine knows which modules exist, so
+adding a joystick interface, a printer, a cartridge or a mass-storage interface
+never touches the core.
+
+There are two levels of module, and the difference is only who compiles them:
+
+* **Built-in** (`src/peripherals/`) are compiled into `mynext_core`, created by
+  a factory in `Machine::installPeripherals()` and type-safe. They can reach the
+  rest of the core directly when they need to; `kempston`, `kempston-mouse`,
+  `printer` and `cartridge` ship this way.
+* **Plugins** are shared libraries (`.dylib` / `.so` / `.dll`) in a folder next
+  to the executable, found at startup and after `Rescan plugin folder`. They
+  talk to the emulator through the plain C ABI of `src/plugin/plugin_api.h` and
+  are not linked against it, so one can be written, rebuilt and dropped in
+  without touching the emulator — `plugins/fuller/fuller.cpp` is a complete
+  example. A plugin that fails to load is reported in the menu and skipped;
+  one broken library never stops the others.
+
+`Peripheral` is deliberately small. A module declares `info()` (an id, a name, a
+description and the ports it decodes), and may implement `reset()`,
+`enable()`, `disable()`, `ioRead()`, `ioWrite()`, `rom()`, `tick()`,
+`fileFilter()` and `loadFile()`.
+
+`ioRead()`/`ioWrite()` return **true when the module owns the access** and false
+to pass it on. The bus offers each access to the enabled modules in the order
+they were plugged in — a real daisy chain — and whatever nobody claims reaches
+`Machine::ioReadBase()`. That boolean is what lets the printer *watch* port
+`0xFB` without stealing it from the ULA, and what lets a module sit behind
+another one.
+
+`HostServices` is the module's way back into the machine: callbacks for port and
+memory reads, NextREG access and the current joystick state. The callbacks go to
+`ioReadBase()`/`memRead()` directly, never back through the bus, so a module
+cannot recurse into itself by reading a port it claims. The bus hands the same
+address out to everyone, so a module may keep the pointer.
+
+`rom()` is how a cartridge takes over the bottom 16K: the machine maps the first
+enabled module that returns an image at `0x0000` and ignores its own ROM while
+that module is plugged in. The bus fires an observer after anything that changes
+what the modules contribute, and `Machine::refreshCartridge()` re-reads the image
+then rather than on every access.
+
+The bus owns its modules and knows nothing about `Machine`, so a test can build
+one, plug in a fake module and drive it without a CPU or a ROM — see
+`tests/test_expansion.cpp`.
 
 ## Timings
 

@@ -7,6 +7,11 @@
 #include <iterator>
 #include <utility>
 
+#include "peripherals/cartridge.h"
+#include "peripherals/kempston.h"
+#include "peripherals/kempston_mouse.h"
+#include "peripherals/printer.h"
+
 #include "formats/dsk.h"
 #include "formats/sna.h"
 #include "formats/snapshot.h"
@@ -84,6 +89,7 @@ Machine::Machine(MachineType type)
   framebuffer_.assign(FrameWidth * FrameHeight, Palette[0]);
   borderLines_.fill(0);
   reset();
+  installPeripherals();
   // The DMA reaches memory and IO through the machine, but is otherwise a
   // self-contained device.
   dma_.connect(
@@ -139,6 +145,7 @@ void Machine::reset() {
   dacs_.reset();
   fdc_.reset();
   fdc_.setDisk(hasDiskController() && !disk_.empty() ? &disk_ : nullptr);
+  expansion_.reset();
 
   tstates_ = 0;
   cpuTstates_ = 0;
@@ -315,6 +322,11 @@ void Machine::runCycles(u32 cycles) {
 // which is what CP/M runs in. Every other machine keeps bank 5 at 0x4000 and
 // bank 2 at 0x8000, with 0xC000 switchable.
 u8 Machine::memRead(u16 addr, u32) {
+  // A cartridge takes over the bottom 16K entirely, exactly as an Interface 2
+  // does: the machine's own ROM is not reachable while it is plugged in.
+  if (cartRom_ != nullptr && addr < 0x4000) {
+    return (*cartRom_)[addr & (cartRom_->size() - 1)];
+  }
   const Page& page = page_[addr >> 13];
   const size_t offset = size_t(page.page) * PageSize + (addr & (PageSize - 1));
   return page.ram ? ram_[offset] : rom_[offset];
@@ -330,7 +342,18 @@ void Machine::memWrite(u16 addr, u8 value, u32) {
 // I/O
 // ===========================================================================
 
-u8 Machine::ioRead(u16 port, u32) {
+u8 Machine::ioRead(u16 port, u32 t) {
+  u8 value = 0xFF;
+  if (expansion_.ioRead(port, t, value)) return value;
+  return ioReadBase(port, t);
+}
+
+void Machine::ioWrite(u16 port, u8 value, u32 t) {
+  if (expansion_.ioWrite(port, value, t)) return;
+  ioWriteBase(port, value, t);
+}
+
+u8 Machine::ioReadBase(u16 port, u32) {
   if (isNext()) {
     if (port == 0x243B) return next_.selected();
     if (port == 0x253B) return readNextReg(next_.selected());
@@ -365,11 +388,10 @@ u8 Machine::ioRead(u16 port, u32) {
     if ((port & 0xF002) == 0x3000) return fdc_.readData();   // 0x3FFD
   }
 
-  if ((port & 0x00E0) == 0x0000) return kempston_;      // 0x1F
   return 0xFF;
 }
 
-void Machine::ioWrite(u16 port, u8 value, u32) {
+void Machine::ioWriteBase(u16 port, u8 value, u32) {
   if (isNext()) {
     if (port == 0x243B) {
       next_.select(value);
@@ -450,6 +472,47 @@ void Machine::ioWrite(u16 port, u8 value, u32) {
       return;
     }
   }
+}
+
+void Machine::installPeripherals() {
+  // The callbacks stop at the machine's own decode, so a module that claims a
+  // port cannot re-enter the bus by reading another one.
+  HostServices host;
+  host.host = this;
+  host.ioRead = [](void* self, u16 port, u32 t) {
+    return static_cast<Machine*>(self)->ioReadBase(port, t);
+  };
+  host.ioWrite = [](void* self, u16 port, u8 value, u32 t) {
+    static_cast<Machine*>(self)->ioWriteBase(port, value, t);
+  };
+  host.memRead = [](void* self, u16 addr, u32 t) {
+    return static_cast<Machine*>(self)->memRead(addr, t);
+  };
+  host.memWrite = [](void* self, u16 addr, u8 value, u32 t) {
+    static_cast<Machine*>(self)->memWrite(addr, value, t);
+  };
+  host.nextRegRead = [](void* self, u8 reg) {
+    return static_cast<Machine*>(self)->readNextReg(reg);
+  };
+  host.nextRegWrite = [](void* self, u8 reg, u8 value) {
+    static_cast<Machine*>(self)->writeNextReg(reg, value);
+  };
+  host.joystick = [](void* self) { return static_cast<Machine*>(self)->kempston_; };
+
+  expansion_.setHost(host);
+  expansion_.setObserver([this] { refreshCartridge(); });
+
+  // The joystick interface is what most software expects to find; everything
+  // else is off until the user plugs it in.
+  expansion_.add(std::make_unique<KempstonJoystick>(), true);
+  expansion_.add(std::make_unique<KempstonMouse>(), false);
+  expansion_.add(std::make_unique<ZxPrinter>(), false);
+  expansion_.add(std::make_unique<Cartridge>(), false);
+  refreshCartridge();
+}
+
+void Machine::refreshCartridge() {
+  cartRom_ = expansion_.rom();
 }
 
 void Machine::writePort7ffd(u8 value) {
@@ -791,6 +854,7 @@ void Machine::tick(u32 cycles) {
     remaining -= step;
     tape_.advance(step);
     if (hasAy()) sound_.tick(step);
+    expansion_.tick(step);
 
     audioAccum_ += u64(step) * u64(sampleRate_);
     while (audioAccum_ >= u64(timings_.cpuHz)) {

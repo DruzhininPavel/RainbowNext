@@ -1,0 +1,71 @@
+#include "frontend/config.h"
+
+#include <cctype>
+#include <filesystem>
+#include <fstream>
+#include <sstream>
+
+namespace mynext::frontend {
+namespace {
+
+std::string trim(const std::string& text) {
+  size_t first = 0;
+  while (first < text.size() && std::isspace(static_cast<unsigned char>(text[first]))) ++first;
+  size_t last = text.size();
+  while (last > first && std::isspace(static_cast<unsigned char>(text[last - 1]))) --last;
+  return text.substr(first, last - first);
+}
+
+void appendIds(const std::string& list, std::vector<std::string>& out) {
+  std::string current;
+  for (const char c : list) {
+    if (c == ',' || c == ';' || c == ' ' || c == '\t') {
+      if (!current.empty()) out.push_back(current);
+      current.clear();
+    } else {
+      current += c;
+    }
+  }
+  if (!current.empty()) out.push_back(current);
+}
+
+} // namespace
+
+bool Config::load(const std::string& path) {
+  std::ifstream in(path);
+  if (!in) return false;
+
+  enabledPeripherals.clear();
+  std::string line;
+  while (std::getline(in, line)) {
+    line = trim(line);
+    if (line.empty() || line[0] == '#' || line[0] == ';') continue;
+    const size_t equals = line.find('=');
+    if (equals == std::string::npos) continue;
+    const std::string key = trim(line.substr(0, equals));
+    const std::string value = trim(line.substr(equals + 1));
+    if (key == "plugin_dir") {
+      pluginDir = value;
+    } else if (key == "peripheral") {
+      appendIds(value, enabledPeripherals);
+    } else if (key == "peripherals") {
+      appendIds(value, enabledPeripherals);
+    }
+  }
+  return true;
+}
+
+bool Config::save(const std::string& path) const {
+  std::error_code ec;
+  const std::filesystem::path parent = std::filesystem::path(path).parent_path();
+  if (!parent.empty()) std::filesystem::create_directories(parent, ec);
+
+  std::ofstream out(path, std::ios::trunc);
+  if (!out) return false;
+  out << "# myNext settings\n";
+  out << "plugin_dir = " << pluginDir << '\n';
+  for (const std::string& id : enabledPeripherals) out << "peripheral = " << id << '\n';
+  return out.good();
+}
+
+} // namespace mynext::frontend

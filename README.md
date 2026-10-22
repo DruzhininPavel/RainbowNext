@@ -69,10 +69,18 @@ Status: M1 — 48K and 128K/+2/+3 boot with AY sound, tape loading, disk images
   and extended `.edsk` images (SPECIFY, SEEK, READ ID, READ/WRITE DATA, FORMAT
   TRACK), driven by the real +3 ROM.
 * **Snapshots** — `.sna` (48K/128K) and `.z80` (v1, v2, v3 with RLE).
+* **Modular peripherals** — an expansion bus in the spirit of the edge
+  connector. A Kempston joystick, a Kempston mouse, a ZX Printer (with PBM
+  export) and a ROM cartridge ship with the emulator; each is a module that can
+  be switched on and off in `Peripherals`, and the choice is remembered in
+  `mynext.cfg`. Further modules are shared libraries dropped into a
+  `peripherals/` folder next to the executable — the emulator finds them at
+  startup and needs no rebuild (see [Writing a peripheral](#writing-a-peripheral)).
 * **Frontend** — resizable window, integer scaling, speed 1×/2×/4×/8×,
   drag & drop loading, Dear ImGui menus and a debugger overlay.
 * **Input** — Spectrum keyboard mapping, Kempston joystick on arrow keys or any
-  SDL gamepad (Steam Deck controls work out of the box).
+  SDL gamepad (Steam Deck controls work out of the box), Kempston mouse when the
+  module is plugged in.
 
 ## Build
 
@@ -140,12 +148,46 @@ instant loading; turn it off to hear and debug the actual tape signal.
 ## Layout
 
 ```
-src/core/       Z80, ULA, keyboard, beeper, AY, DACs, µPD765, Machine — no OS deps
-src/formats/    SNA / Z80 snapshots, TAP / TZX tapes, DSK / EDSK disk images
-src/frontend/   SDL3 + Dear ImGui host: app, audio, input, debugger
-tests/          unit tests, incl. an end-to-end boot test (no ROM required)
-docs/           ARCHITECTURE.md, REFERENCES.md, ROADMAP.md
-roms/           user-supplied ROMs (empty by design)
+src/core/          Z80, ULA, AY, DACs, µPD765, Machine — no OS deps
+src/core/          peripheral.h and expansion.h: the bus and the module contract
+src/peripherals/   built-in modules: kempston, kempston mouse, printer, cartridge
+src/plugin/        the C ABI and the loader for out-of-tree modules
+plugins/           example plugin: a Fuller Audio Box joystick interface
+src/formats/       SNA / Z80 snapshots, TAP / TZX tapes, DSK / EDSK disk images
+src/frontend/      SDL3 + Dear ImGui host: app, audio, input, debugger, config
+tests/             unit tests, incl. an end-to-end boot test (no ROM required)
+docs/              ARCHITECTURE.md, REFERENCES.md, ROADMAP.md
+roms/              user-supplied ROMs (empty by design)
+```
+
+## Writing a peripheral
+
+A module is one class deriving from `mynext::Peripheral`
+(`src/core/peripheral.h`). Implement `info()` and whatever you need of
+`ioRead`/`ioWrite`/`rom`/`tick`/`loadFile`, and remember that `ioRead`/`ioWrite`
+return **true only when the module owns the access** — return false and the
+access travels on to the next module and then to the machine, which is how a
+module can watch a port without claiming it.
+
+Two ways to ship it:
+
+1. **Built-in** — put the source in `src/peripherals/`, add it to `mynext_core`
+   in `CMakeLists.txt` and create it in `Machine::installPeripherals()`. Use
+   this while you develop, since you get the debugger and the tests for free.
+2. **Plugin** — implement the plain C ABI of `src/plugin/plugin_api.h` and
+   export a `mynext_plugin_v1` symbol. `plugins/fuller/fuller.cpp` is a complete
+   worked example; `mynext_fuller` in `CMakeLists.txt` shows the link line. The
+   result is a `.dylib`/`.so`/`.dll` you drop into the `peripherals/` folder
+   (next to the executable, or wherever `plugin_dir` in `mynext.cfg` points) and
+   switch on in `Peripherals`.
+
+The settings file lives at `~/Library/Application Support/myNext/myNext/mynext.cfg`
+on macOS and in the SDL pref path on Linux, and is a flat `key = value` file:
+
+```
+plugin_dir = /path/to/peripherals
+peripheral = kempston
+peripheral = printer
 ```
 
 ## Testing
@@ -154,14 +196,14 @@ roms/           user-supplied ROMs (empty by design)
 ctest --test-dir build --output-on-failure
 ```
 
-280 tests cover the Z80 core (timings, flags, undocumented opcodes,
+295 tests cover the Z80 core (timings, flags, undocumented opcodes,
 interrupts), the Z80N extension, the Next MMU, palette, Layer 2, sprites
 (including relative and unified sprites and the collision flags), the tilemap,
-the Copper and the zxnDMA, ULA
-behaviour, contention, floating bus, frame length, audio rate, both snapshot
-formats, the AY, the TurboSound chip select and stereo bits, the SpecDrum and
-SoundDrive DAC ports, 128K/+3 paging and timings, tape blocks, the µPD765 and
-the DSK parser, and end-to-end runs of
+the Copper and the zxnDMA, ULA behaviour, contention, floating bus, frame
+length, audio rate, both snapshot formats, the AY, the TurboSound chip select
+and stereo bits, the SpecDrum and SoundDrive DAC ports, 128K/+3 paging and
+timings, tape blocks, the µPD765 and the DSK parser, the expansion bus with its
+modules and plugin loader, the settings file, and end-to-end runs of
 hand-assembled programs through the machine. Golden tests also boot the real
 `roms/128-0.rom` and `roms/plus3-0.rom` sets when those files are present; they
 skip themselves on a clean checkout.

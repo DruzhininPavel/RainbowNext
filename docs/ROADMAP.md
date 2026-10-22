@@ -117,8 +117,22 @@ a multicolour demo renders correctly; `z80test` passes.
 * [x] Four 8-bit DACs on the SpecDrum and SoundDrive ports (`0x1F`, `0x0F`,
       `0x4F`, `0x5F`, `0xDF`, `0xB3` and their mirrors), with DAC A and B on the
       left, C and D on the right, and the `0x2C`/`0x2D`/`0x2E` NextReg mirrors
+* [x] The expansion bus: `Peripheral` as the module contract, `ExpansionBus`
+      as an ordered daisy chain that hands each I/O access to the enabled
+      modules in plug-in order and lets a module claim it, `HostServices` as the
+      way back into the machine without recursing through the bus, and an
+      observer that re-reads a cartridge's ROM. Four built-in modules ship:
+      Kempston joystick, Kempston mouse, ZX Printer with PBM export, and a ROM
+      cartridge that maps into `0x0000`. Modules are switched on and off in the
+      `Peripherals` menu and the choice is written to `mynext.cfg`
+* [x] Out-of-tree modules as shared libraries: the plain C ABI of
+      `src/plugin/plugin_api.h`, a loader that scans a `peripherals/` folder,
+      skips a broken library instead of failing, and a worked example
+      (`plugins/fuller`)
 * [ ] `.nex` snapshot format
-* [ ] SD card image access for NextZXOS
+* [ ] SD card image access for NextZXOS, and a DivMMC module that uses it
+      (needs memory access in the `Peripheral` contract, since the automap
+      overlay has to shadow `0x0000`/`0x2000`)
 * [ ] Video pipeline: Timex modes, ULA+ palettes, blending modes 6 and 7 of the
       `0x15` priority byte (the ULA → tilemap → Layer 2 → sprite compositor and
       the palette path are in place)
@@ -145,7 +159,9 @@ These are deliberate simplifications, tracked here so they are not forgotten:
    `0xFF` = `RST 38h`).
 5. Tape playback is real-time only through the EAR bit; protected loaders that
    depend on exact pilot lengths are best run with instant load enabled.
-6. No Kempston mouse, no Kempston joystick.
+6. Kempston joystick and Kempston mouse exist only as expansion modules, so
+   they answer only while they are plugged in and enabled. A module cannot be
+   added or removed without resetting the machine.
 7. The AY is clocked from the CPU T-state counter rather than from the ULA
    frame counter, so it is deterministic but not cycle-exact against hardware.
 8. The µPD765 answers instantly instead of modelling head movement, so a SEEK
@@ -171,6 +187,13 @@ These are deliberate simplifications, tracked here so they are not forgotten:
     always live, so a program that leaves them off still hears its writes. The
     DAC outputs are not low-pass filtered, so a fast stream of samples aliases
     instead of rolling off.
+14. A module can only intercept I/O ports. `Peripheral` has no memory callbacks,
+    so a device that shadows RAM or ROM (DivMMC, a ROM cartridge with its own
+    paging, the Multiface) has to be built into the core for now; a cartridge
+    gets in only because `rom()` is a special case in the machine.
+15. Plugging or unplugging a module resets the machine instead of hot-plugging
+    it, and the plugin ABI is version 1, so a module built against a future
+    header is refused rather than adapted.
 
 ## Open decisions
 
