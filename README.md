@@ -5,12 +5,13 @@ around a deterministic headless core and a thin SDL3 + Dear ImGui frontend.
 Runs on macOS and Linux (including SteamOS / Steam Deck).
 
 ```
-Status: v0.1.1 — M1 and M2 done: 48K and 128K/+2/+3 boot with AY sound, tape
+Status: v0.1.2 — M1 and M2 done: 48K and 128K/+2/+3 boot with AY sound, tape
         loading, disk images and snapshots, plus the Z80N instruction set, the
         Next's MMU/NextREG file, its palette hardware, Layer 2, sprites, the
         tilemap and the video pipeline (Timex, ULA+, ULANext, blending).
-        M3 is under way: save states, a rewind buffer and the debugger are in;
-        RZX replay and shaders are not (docs/ROADMAP.md).
+        M3 is under way: save states, a rewind buffer, the debugger and the
+        CRT filter on an SDL_GPU renderer are in; RZX replay is not
+        (docs/ROADMAP.md).
 ```
 
 ## Features
@@ -92,6 +93,9 @@ Status: v0.1.1 — M1 and M2 done: 48K and 128K/+2/+3 boot with AY sound, tape
 * **Frontend** — resizable window, integer scaling, speed 1×/2×/4×/8×,
   drag & drop loading, Dear ImGui menus and a debugger with breakpoints, a
   disassembly listing, a memory editor and a profiler.
+* **Renderer** — SDL_GPU (Metal on macOS, Vulkan on Linux) with a CRT pass:
+  a dark seam between scanlines and an aperture grille, both adjustable in
+  `View > CRT strength`. Turn it off for a pixel-exact picture.
 * **Input** — Spectrum keyboard mapping, Kempston joystick on arrow keys or any
   SDL gamepad (Steam Deck controls work out of the box), Kempston mouse when the
   module is plugged in.
@@ -119,7 +123,7 @@ On macOS `run-rainbow.command` does the same thing from Finder; if Gatekeeper
 refuses the downloaded binary, clear the flag once with
 `xattr -d com.apple.quarantine rainbow`. SDL3 is linked into the binary, so
 nothing has to be installed; the Linux builds still need an X11 or Wayland
-session and the usual audio libraries. The ROMs are **not** included — see
+session, a Vulkan driver and the usual audio libraries. The ROMs are **not** included — see
 [`roms/README.md`](roms/README.md).
 
 ## Build
@@ -128,6 +132,12 @@ Requirements: CMake ≥ 3.24, a C++20 compiler, SDL3 ≥ 3.2. If SDL3 is missing
 is downloaded and built automatically (`-DRAINBOW_FETCH_SDL3=OFF` to disable).
 Pass `-DRAINBOW_STATIC_SDL3=ON` to build a static SDL3 even when a system copy is
 installed, which is what the release archives do.
+
+The picture is drawn through SDL_GPU, so the machine needs Metal (macOS) or
+Vulkan (Linux). The CRT shaders are checked in as compiled SPIR-V and MSL in
+`src/frontend/shaders/crt_shaders.h`; after editing `crt.vert` or `crt.frag`,
+regenerate it with `src/frontend/shaders/build.sh` (needs `glslang` and
+`spirv-cross`, `brew install glslang spirv-cross`).
 
 ### macOS
 

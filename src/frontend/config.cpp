@@ -3,6 +3,7 @@
 #include <cctype>
 #include <filesystem>
 #include <fstream>
+#include <optional>
 #include <sstream>
 
 namespace rainbow::frontend {
@@ -15,6 +16,19 @@ std::string trim(const std::string& text) {
   while (last > first && std::isspace(static_cast<unsigned char>(text[last - 1]))) --last;
   return text.substr(first, last - first);
 }
+
+std::optional<float> parseFloat(const std::string& text) {
+  try {
+    size_t used = 0;
+    const float value = std::stof(text, &used);
+    if (used == 0) return std::nullopt;
+    return value;
+  } catch (...) {
+    return std::nullopt;
+  }
+}
+
+float clamp01(float value) { return value < 0.0f ? 0.0f : (value > 1.0f ? 1.0f : value); }
 
 void appendIds(const std::string& list, std::vector<std::string>& out) {
   std::string current;
@@ -50,6 +64,12 @@ bool Config::load(const std::string& path) {
       appendIds(value, enabledPeripherals);
     } else if (key == "peripherals") {
       appendIds(value, enabledPeripherals);
+    } else if (key == "crt") {
+      crtEnabled = value != "off" && value != "0" && value != "false";
+    } else if (key == "crt_scanlines") {
+      if (const auto parsed = parseFloat(value)) crtScanlines = clamp01(*parsed);
+    } else if (key == "crt_mask") {
+      if (const auto parsed = parseFloat(value)) crtMask = clamp01(*parsed);
     }
   }
   return true;
@@ -65,6 +85,9 @@ bool Config::save(const std::string& path) const {
   out << "# RainbowNext settings\n";
   out << "plugin_dir = " << pluginDir << '\n';
   for (const std::string& id : enabledPeripherals) out << "peripheral = " << id << '\n';
+  out << "crt = " << (crtEnabled ? "on" : "off") << '\n';
+  out << "crt_scanlines = " << crtScanlines << '\n';
+  out << "crt_mask = " << crtMask << '\n';
   return out.good();
 }
 
