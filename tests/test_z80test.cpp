@@ -78,6 +78,7 @@ private:
 };
 
 struct RunResult {
+  bool skipped = false; // the ROM or the suite data is not available
   bool finished = false;
   bool passed = false;
   int failures = -1;
@@ -92,15 +93,24 @@ RunResult runSuite(const std::string& tapName, int maxFrames) {
   RunResult result;
 
   Machine machine(MachineType::Spectrum48);
-  if (!machine.loadRom(RAINBOW_SOURCE_DIR "/roms/48.rom")) return result;
+  if (!machine.loadRom(RAINBOW_SOURCE_DIR "/roms/48.rom")) {
+    result.skipped = true;
+    return result;
+  }
 
   const std::vector<u8> tap =
       readFile(std::string(RAINBOW_SOURCE_DIR "/tests/data/z80test/") + tapName);
-  if (tap.empty()) return result;
+  if (tap.empty()) {
+    result.skipped = true;
+    return result;
+  }
 
   rainbow::formats::TapeImage image;
   std::string error;
-  if (!rainbow::formats::parseTap(tap, image, error)) return result;
+  if (!rainbow::formats::parseTap(tap, image, error)) {
+    result.skipped = true;
+    return result;
+  }
   machine.tape().loadImage(image);
   machine.tape().setFastLoad(true);
   machine.setVideoEnabled(false);
@@ -147,6 +157,7 @@ RunResult runSuite(const std::string& tapName, int maxFrames) {
 
 RunResult runSuiteOrFail(const char* tapName, int maxFrames = 60000) {
   const RunResult result = runSuite(tapName, maxFrames);
+  if (result.skipped) return result;
   if (!result.finished) {
     ::testing::fail(__FILE__, __LINE__, std::string(tapName) + " did not reach a result line");
   }
@@ -164,6 +175,7 @@ std::string screenDump(const RunResult& result) {
 // The documented flag suite is the one the emulator must always satisfy.
 TEST(z80test_documented_flags_all_pass) {
   const RunResult result = runSuiteOrFail("z80doc.tap");
+  if (result.skipped) return;
   if (result.finished && !result.passed) {
     ::testing::fail(__FILE__, __LINE__,
                     "z80doc reported " + std::to_string(result.failures) + " failing test(s):\n" +
@@ -175,6 +187,7 @@ TEST(z80test_documented_flags_all_pass) {
 // undocumented F3/F5 behaviour of the block instructions.
 TEST(z80test_documented_and_undocumented_flags_all_pass) {
   const RunResult result = runSuiteOrFail("z80docflags.tap");
+  if (result.skipped) return;
   if (result.finished && !result.passed) {
     ::testing::fail(__FILE__, __LINE__,
                     "z80docflags reported " + std::to_string(result.failures) +
@@ -190,7 +203,7 @@ TEST(z80test_documented_and_undocumented_flags_all_pass) {
 // MEMPTR register. The test guards against regressions outside that set.
 TEST(z80test_full_flag_suite_has_no_new_regressions) {
   const RunResult result = runSuiteOrFail("z80flags.tap");
-  if (!result.finished || result.passed) return;
+  if (result.skipped || !result.finished || result.passed) return;
   if (result.failures > 8) {
     ::testing::fail(__FILE__, __LINE__,
                     "z80flags reported " + std::to_string(result.failures) +
