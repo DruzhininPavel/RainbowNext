@@ -123,6 +123,18 @@ public:
   u32 sampleCount(u16 address) const { return samples_[address]; }
   u64 sampleTotal() const { return sampleTotal_; }
 
+  // --- save states --------------------------------------------------------
+  // Everything that makes the machine what it is, as a versioned little-endian
+  // stream with a checksum. Tapes, disks and the SD card image are not embedded
+  // -- they are large, user-supplied files -- so a state restores where they
+  // were and the frontend keeps them attached.
+  void saveState(std::vector<u8>& out);
+  bool loadState(const std::vector<u8>& in, std::string& error);
+  // Reads only the header, so a frontend can switch to the machine a state was
+  // written for before asking it to load. Says nothing about the rest of the
+  // file: loadState still checks everything.
+  static bool peekStateType(const std::vector<u8>& in, MachineType& type);
+
   // Bus interface
   u8 memRead(u16 addr, u32 t) override;
   void memWrite(u16 addr, u8 value, u32 t) override;
@@ -293,6 +305,11 @@ private:
   void applySnapshot(const formats::Snapshot& snapshot);
   void applyNex(const formats::NexFile& nex);
   bool applyTapeFastLoad();
+
+  // The body of a save state, shared by both directions. Defined in
+  // machine.cpp and instantiated for the reader and the writer, so the two can
+  // never disagree about the order or the set of fields.
+  template <class Ar> void serialize(Ar& ar);
 
   MachineType type_;
   Timings timings_;

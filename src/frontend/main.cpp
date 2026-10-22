@@ -20,13 +20,14 @@ void printUsage() {
   std::printf(
       "usage: rainbow [options] [file]\n"
       "\n"
-      "  file              .rom, .tap, .tzx, .sna, .z80, .nex, .dsk, .edsk or .img,\n"
-      "                    picked by extension\n"
+      "  file              .rom, .tap, .tzx, .sna, .z80, .nex, .dsk, .edsk, .img\n"
+      "                    or .rbn, picked by extension\n"
       "  --rom FILE        Spectrum ROM image\n"
       "  --tape FILE       TAP or TZX image to insert into the tape deck\n"
       "  --snapshot FILE   SNA, Z80 snapshot or NEX program to load at startup\n"
       "  --disk FILE       DSK or EDSK image to insert into the +3 disk drive\n"
       "  --sd FILE         SD card image for the DivMMC; NextZXOS boots from it\n"
+      "  --state FILE      save state to restore at startup\n"
       "  --debugger        start paused with the debugger window open\n"
       "  -h, --help        this message\n");
 }
@@ -49,7 +50,7 @@ int main(int argc, char** argv) {
       return 0;
     }
     if ((argument == "--rom" || argument == "--tape" || argument == "--snapshot" ||
-         argument == "--disk" || argument == "--sd") &&
+         argument == "--disk" || argument == "--sd" || argument == "--state") &&
         hasValue) {
       const std::string value = argv[++i];
       if (argument == "--rom") options.rom = value;
@@ -57,6 +58,7 @@ int main(int argc, char** argv) {
       if (argument == "--snapshot") options.snapshot = value;
       if (argument == "--disk") options.disk = value;
       if (argument == "--sd") options.sd = value;
+      if (argument == "--state") options.state = value;
       continue;
     }
 
@@ -72,6 +74,8 @@ int main(int argc, char** argv) {
       options.disk = argument;
     } else if (extension == ".img") {
       options.sd = argument;
+    } else if (extension == ".rbn") {
+      options.state = argument;
     } else {
       std::fprintf(stderr, "rainbow: unsupported argument '%s'\n", argument.c_str());
       printUsage();

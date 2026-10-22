@@ -99,6 +99,21 @@ public:
   bool collided() const { return collision_; }
   bool overflowed() const { return overflow_; }
 
+  template <class Ar> void serialize(Ar& ar) {
+    ar(attrs_);
+    ar(pattern_);
+    ar(clip_);
+    ar(number_);
+    ar(portNumber_);
+    ar(patternOffset_);
+    ar(attributeIndex_);
+    ar(clipIndex_);
+    ar(patternAddress_);
+    ar(lockstep_);
+    ar(collision_);
+    ar(overflow_);
+  }
+
   u8 attribute(int sprite, int index) const {
     return attrs_[size_t(sprite & 0x7F)][size_t(index)];
   }

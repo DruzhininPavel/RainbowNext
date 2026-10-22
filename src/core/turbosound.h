@@ -54,6 +54,16 @@ public:
   float sampleLeft() const;
   float sampleRight() const;
 
+  template <class Ar> void serialize(Ar& ar) {
+    ar(chips_);
+    ar(mono_);
+    ar(left_);
+    ar(right_);
+    ar(selected_);
+    ar(chipSelect_);
+    ar(enabled_);
+  }
+
 private:
   static int clampIndex(int index);
 

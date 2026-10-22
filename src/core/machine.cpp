@@ -1,5 +1,7 @@
 #include "core/machine.h"
 
+#include "core/state.h"
+
 #include <algorithm>
 #include <cctype>
 #include <cstring>
@@ -462,6 +464,177 @@ void Machine::resetProfile() {
 void Machine::runCycles(u32 cycles) {
   const u64 target = cpuTstates_ + cycles;
   while (cpuTstates_ < target) stepInstruction();
+}
+
+// ===========================================================================
+// Save states
+// ===========================================================================
+
+namespace {
+
+// A state file starts with this word, then a version, the machine type and the
+// ROM fingerprint, and ends with a checksum over all of it.
+constexpr u8 kStateMagic[8] = {'R', 'B', 'N', 'S', 'T', 'A', 'T', 'E'};
+// Bump whenever the field order or the set of fields changes. An older build
+// refuses a newer state instead of reading it as garbage.
+constexpr u32 kStateVersion = 1;
+constexpr size_t kStateHeader = sizeof(kStateMagic) + 4 + 1 + 1 + 8;
+
+} // namespace
+
+// The single body both directions use. Anything derived -- the resolved page
+// table, the audio buffer, the sprite collision scratch -- is left out and
+// rebuilt by loadState, so a state stays small and cannot disagree with itself.
+template <class Ar> void Machine::serialize(Ar& ar) {
+  ar(cpu_);
+  ar(ula_);
+  ar(keyboard_);
+  ar(beeper_);
+  ar(sound_);
+  ar(dacs_);
+  ar(tape_);
+  ar(fdc_);
+  ar(next_);
+  ar(palette_);
+  ar(sprites_);
+  ar(copper_);
+  ar(dma_);
+
+  ar(ram_);
+  ar(framebuffer_);
+  ar(borderLines_);
+
+  ar(ramBank_);
+  ar(screenBank_);
+  ar(romBank_);
+  ar(port7ffd_);
+  ar(port1ffd_);
+  ar(pagingLocked_);
+  ar(specialPaging_);
+  ar(romLoaded_);
+  ar(layer2Clip_);
+  ar(layer2ClipIndex_);
+  ar(tilemapClip_);
+  ar(tilemapClipIndex_);
+
+  ar(tstates_);
+  ar(cpuTstates_);
+  ar(turboAccum_);
+  ar(frames_);
+  ar(irqLine_);
+  ar(irqEnd_);
+}
+
+void Machine::saveState(std::vector<u8>& out) {
+  StateWriter writer;
+  u32 version = kStateVersion;
+  u8 type = u8(type_);
+  u8 romLoaded = romLoaded_ ? 1 : 0;
+  // The ROM is a file the user supplies, so it is fingerprinted rather than
+  // stored: a state restored against a different ROM would run the wrong code.
+  u64 romHash = stateChecksum(rom_.data(), rom_.size());
+  writer(version);
+  writer(type);
+  writer(romLoaded);
+  writer(romHash);
+  serialize(writer);
+
+  out.clear();
+  out.insert(out.end(), std::begin(kStateMagic), std::end(kStateMagic));
+  const std::vector<u8>& payload = writer.bytes();
+  out.insert(out.end(), payload.begin(), payload.end());
+  const u64 sum = stateChecksum(out.data(), out.size());
+  for (int i = 0; i < 8; ++i) out.push_back(u8(sum >> (8 * i)));
+}
+
+// Both ends of the stream, so the body above is instantiated for each.
+template void Machine::serialize<StateWriter>(StateWriter&);
+template void Machine::serialize<StateReader>(StateReader&);
+
+bool Machine::peekStateType(const std::vector<u8>& in, MachineType& type) {
+  if (in.size() < kStateHeader) return false;
+  if (!std::equal(std::begin(kStateMagic), std::end(kStateMagic), in.begin())) return false;
+  u32 version = 0;
+  for (int i = 0; i < 4; ++i) version |= u32(in[8 + size_t(i)]) << (8 * i);
+  if (version != kStateVersion) return false;
+  const u8 raw = in[12];
+  if (raw > u8(MachineType::Next)) return false;
+  type = MachineType(raw);
+  return true;
+}
+
+bool Machine::loadState(const std::vector<u8>& in, std::string& error) {
+  if (in.size() < kStateHeader + 8) {
+    error = "not a save state";
+    return false;
+  }
+  if (!std::equal(std::begin(kStateMagic), std::end(kStateMagic), in.begin())) {
+    error = "not a save state";
+    return false;
+  }
+  u64 stored = 0;
+  for (int i = 0; i < 8; ++i) stored |= u64(in[in.size() - size_t(8 - i)]) << (8 * i);
+  if (stored != stateChecksum(in.data(), in.size() - 8)) {
+    error = "the state is damaged (checksum mismatch)";
+    return false;
+  }
+
+  // The header is read on its own, before anything in the machine is touched.
+  StateReader header(in.data() + sizeof(kStateMagic), kStateHeader - sizeof(kStateMagic));
+  u32 version = 0;
+  header(version);
+  if (version != kStateVersion) {
+    error = "the state was written by another version (" + std::to_string(version) +
+            ", this build writes " + std::to_string(kStateVersion) + ")";
+    return false;
+  }
+  u8 type = 0;
+  header(type);
+  if (type != u8(type_)) {
+    error = std::string("the state belongs to a ") + machineName(MachineType(type)) +
+            ", not a " + machineName(type_);
+    return false;
+  }
+  u8 romLoaded = 0;
+  u64 romHash = 0;
+  header(romLoaded);
+  header(romHash);
+  if (romLoaded != (romLoaded_ ? 1 : 0) ||
+      romHash != stateChecksum(rom_.data(), rom_.size())) {
+    error = "the state was saved with a different ROM";
+    return false;
+  }
+
+  // The body is parsed twice: once into a scratch machine, to prove the whole
+  // of it reads, and only then for real. A file that stops halfway therefore
+  // leaves this machine untouched instead of half-rewritten.
+  const u8* body = in.data() + kStateHeader;
+  const size_t bodySize = in.size() - kStateHeader - 8;
+  {
+    Machine scratch(type_);
+    StateReader probe(body, bodySize);
+    scratch.serialize(probe);
+    if (!probe.ok()) {
+      error = probe.error();
+      return false;
+    }
+    // Catches a field added without bumping the version, which the checksum
+    // cannot see because the writer produced a consistent file.
+    if (!probe.consumedAll()) {
+      error = "the state has more data than this build understands";
+      return false;
+    }
+  }
+
+  StateReader reader(body, bodySize);
+  serialize(reader);
+  // The page table is derived from the paging registers the state just
+  // restored, so it is rebuilt rather than trusted.
+  updatePaging();
+  fdc_.setDisk(hasDiskController() && !disk_.empty() ? &disk_ : nullptr);
+  audio_.clear();
+  audioAccum_ = 0;
+  return true;
 }
 
 // ===========================================================================

@@ -7,6 +7,7 @@
 #include <SDL3/SDL.h>
 
 #include "core/machine.h"
+#include "core/rewind.h"
 #include "frontend/audio.h"
 #include "frontend/config.h"
 #include "frontend/debugger.h"
@@ -31,6 +32,7 @@ public:
     std::string snapshot;
     std::string disk;
     std::string sd;
+    std::string state;      // save state to restore at startup
     bool debugger = false;  // start paused with the debugger open
   };
 
@@ -58,7 +60,9 @@ private:
     Cartridge,
     DivMmcRom,
     DivMmcCard,
-    Printout
+    Printout,
+    StateSave,
+    StateLoad
   };
 
   bool loadRom(const std::string& path);
@@ -73,6 +77,13 @@ private:
   void insertSdCard();
   void ejectSdCard();
   bool savePrintout(const std::string& path);
+  bool saveStateFile(const std::string& path);
+  bool loadStateFile(const std::string& path);
+  // F8/F9 use one well-known file instead of asking for a name every time.
+  void quickSaveState();
+  void quickLoadState();
+  void rewindOneFrame();
+  void clearRewind();
   void openFileDialog(DialogKind kind);
   void openSaveDialog(DialogKind kind);
   void reset();
@@ -100,6 +111,7 @@ private:
   Input input_;
 
   std::string romPath_;
+  std::string quickStatePath_;
   std::string sdPath_;
   std::vector<u8> sdImage_;
   std::string pendingDialogResult_;
@@ -134,6 +146,9 @@ private:
   bool toolbarVisible_ = true;
   u64 toolbarRevealUntilNs_ = 0;
   int speedMultiplier_ = 1;
+  RewindBuffer rewind_;
+  bool rewindEnabled_ = true;
+  int rewindStride_ = 0;
   std::string status_;
 };
 

@@ -22,6 +22,10 @@
 namespace rainbow::frontend {
 namespace {
 
+// One rewind state every four frames: often enough to feel continuous when the
+// key is held, rare enough that copying memory does not eat the frame budget.
+constexpr int kRewindStride = 4;
+
 constexpr MachineType AllMachines[] = {
     MachineType::Spectrum48, MachineType::Spectrum128, MachineType::Plus2,
     MachineType::Plus3,      MachineType::Pentagon,    MachineType::Next,
@@ -182,6 +186,7 @@ bool App::init(const Options& options) {
   scanPeripherals();
   applyPeripheralConfig();
   if (!options.sd.empty()) loadDivMmcCard(options.sd);
+  if (!options.state.empty()) loadStateFile(options.state);
   if (options.debugger) {
     showDebugger_ = true;
     paused_ = true;
@@ -253,6 +258,8 @@ void App::run() {
         case DialogKind::DivMmcRom: loadDivMmcRom(path); break;
         case DialogKind::DivMmcCard: loadDivMmcCard(path); break;
         case DialogKind::Printout: savePrintout(path); break;
+        case DialogKind::StateSave: saveStateFile(path); break;
+        case DialogKind::StateLoad: loadStateFile(path); break;
       }
       dialogSave_ = false;
     }
@@ -260,6 +267,15 @@ void App::run() {
     u8 kempston = 0;
     input_.pollGamepads(kempston);
     machine_->setKempston(kempston);
+
+    if (!paused_ && rewindEnabled_) {
+      if (rewindStride_ == 0) {
+        std::vector<u8> state;
+        machine_->saveState(state);
+        rewind_.push(std::move(state));
+      }
+      rewindStride_ = (rewindStride_ + 1) % kRewindStride;
+    }
 
     if (!paused_) {
       for (int i = 0; i < speedMultiplier_; ++i) {
@@ -348,6 +364,25 @@ void App::handleEvent(const SDL_Event& event) {
         case SDLK_F7:
           machine_->tape().rewind();
           break;
+        case SDLK_F8:
+          // The plain key is the one that has to be quick, so the dialog lives
+          // behind a modifier instead of the other way round.
+          if ((event.key.mod & SDL_KMOD_SHIFT) != 0) {
+            openSaveDialog(DialogKind::StateSave);
+          } else {
+            quickSaveState();
+          }
+          break;
+        case SDLK_F9:
+          if ((event.key.mod & SDL_KMOD_SHIFT) != 0) {
+            openFileDialog(DialogKind::StateLoad);
+          } else {
+            quickLoadState();
+          }
+          break;
+        case SDLK_F10:
+          rewindOneFrame();
+          break;
         case SDLK_F11:
           toggleFullscreen();
           break;
@@ -379,6 +414,8 @@ void App::handleEvent(const SDL_Event& event) {
         loadDisk(path);
       } else if (extension == ".img") {
         loadDivMmcCard(path);
+      } else if (extension == ".rbn") {
+        loadStateFile(path);
       } else {
         loadSnapshot(path);
       }
@@ -405,6 +442,7 @@ void App::reset() {
 }
 
 void App::setMachine(MachineType type) {
+  clearRewind();
   machine_ = std::make_unique<Machine>(type);
   machine_->setSampleRate(audio_.sampleRate() > 0 ? audio_.sampleRate() : 44100);
 
@@ -428,6 +466,8 @@ bool App::loadRom(const std::string& path) {
     return false;
   }
   romPath_ = path;
+  // States are fingerprinted against the ROM, so a new ROM makes them all stale.
+  clearRewind();
   status_ = "ROM loaded: " + path;
   return true;
 }
@@ -489,6 +529,8 @@ void App::openFileDialog(DialogKind kind) {
       {"DivMMC ROM", "rom"}, {"All files", "*"}};
   static const SDL_DialogFileFilter divMmcCardFilters[] = {
       {"SD card images", "mmc;img;iso;bin"}, {"All files", "*"}};
+  static const SDL_DialogFileFilter stateFilters[] = {
+      {"RainbowNext save state", "rbn"}, {"All files", "*"}};
 
   dialogKind_ = kind;
   dialogOpen_ = true;
@@ -500,6 +542,7 @@ void App::openFileDialog(DialogKind kind) {
   if (kind == DialogKind::Cartridge) filters = cartridgeFilters;
   if (kind == DialogKind::DivMmcRom) filters = divMmcRomFilters;
   if (kind == DialogKind::DivMmcCard) filters = divMmcCardFilters;
+  if (kind == DialogKind::StateLoad) filters = stateFilters;
   SDL_ShowOpenFileDialog(onFileDialog, this, window_, filters, 2, nullptr, false);
 }
 
@@ -507,11 +550,15 @@ void App::openSaveDialog(DialogKind kind) {
   if (dialogOpen_) return;
   static const SDL_DialogFileFilter printoutFilters[] = {
       {"PBM image", "pbm"}, {"All files", "*"}};
+  static const SDL_DialogFileFilter stateFilters[] = {
+      {"RainbowNext save state", "rbn"}, {"All files", "*"}};
 
   dialogKind_ = kind;
   dialogOpen_ = true;
   dialogSave_ = true;
-  SDL_ShowSaveFileDialog(onFileDialog, this, window_, printoutFilters, 2, nullptr);
+  const SDL_DialogFileFilter* filters = printoutFilters;
+  if (kind == DialogKind::StateSave) filters = stateFilters;
+  SDL_ShowSaveFileDialog(onFileDialog, this, window_, filters, 2, nullptr);
 }
 
 // ---------------------------------------------------------------------------
@@ -610,8 +657,104 @@ bool App::savePrintout(const std::string& path) {
   return true;
 }
 
+// The state is written whole before the file is touched, so a failed save
+// leaves the previous one intact instead of half-overwritten.
+bool App::saveStateFile(const std::string& path) {
+  std::vector<u8> state;
+  machine_->saveState(state);
+  std::ofstream out(path, std::ios::binary | std::ios::trunc);
+  if (!out) {
+    status_ = "Cannot write " + path;
+    return false;
+  }
+  out.write(reinterpret_cast<const char*>(state.data()), std::streamsize(state.size()));
+  if (!out) {
+    status_ = "Cannot write " + path;
+    return false;
+  }
+  status_ = "State saved: " + path;
+  return true;
+}
+
+bool App::loadStateFile(const std::string& path) {
+  std::ifstream in(path, std::ios::binary);
+  if (!in) {
+    status_ = "State failed: cannot open " + path;
+    return false;
+  }
+  std::vector<u8> state{std::istreambuf_iterator<char>(in),
+                        std::istreambuf_iterator<char>()};
+  if (in.bad()) {
+    status_ = "State failed: cannot read " + path;
+    return false;
+  }
+
+  // A state names the machine it was written for, so switch to that machine
+  // rather than refusing a file the user just picked.
+  MachineType type = MachineType::Spectrum48;
+  if (Machine::peekStateType(state, type) && type != machine_->type()) setMachine(type);
+
+  std::string error;
+  if (!machine_->loadState(state, error)) {
+    status_ = "State failed: " + error;
+    return false;
+  }
+  // The history belongs to the machine that was just replaced.
+  clearRewind();
+  status_ = "State loaded: " + path;
+  return true;
+}
+
+void App::quickSaveState() {
+  if (quickStatePath_.empty()) {
+    status_ = "No writable folder for a quick save";
+    return;
+  }
+  saveStateFile(quickStatePath_);
+}
+
+void App::quickLoadState() {
+  if (quickStatePath_.empty()) {
+    status_ = "No folder to look for a quick save in";
+    return;
+  }
+  std::ifstream probe(quickStatePath_, std::ios::binary);
+  if (!probe) {
+    status_ = "No quick save yet - press F8 first";
+    return;
+  }
+  probe.close();
+  loadStateFile(quickStatePath_);
+}
+
+void App::rewindOneFrame() {
+  std::vector<u8> state;
+  if (!rewind_.pop(state)) {
+    status_ = "Nothing to rewind yet";
+    return;
+  }
+  std::string error;
+  if (!machine_->loadState(state, error)) {
+    // Every state in the buffer was written by the same machine, so one that
+    // does not fit means the buffer is stale: drop it rather than keep failing.
+    clearRewind();
+    status_ = "Rewind failed: " + error;
+    return;
+  }
+  paused_ = true;
+  status_ = "Rewound to frame " + std::to_string(machine_->frames());
+}
+
+void App::clearRewind() {
+  rewind_.clear();
+  rewindStride_ = 0;
+}
+
 void App::loadConfig() {
-  if (const char* dir = SDL_GetPrefPath("RainbowNext", "RainbowNext")) configPath_ = std::string(dir) + "rainbow.cfg";
+  if (const char* dir = SDL_GetPrefPath("RainbowNext", "RainbowNext")) {
+    configPath_ = std::string(dir) + "rainbow.cfg";
+    quickStatePath_ = std::string(dir) + "quick.rbn";
+  }
   config_.load(configPath_);
 
   // Plugins live next to the executable, which is where a downloaded build and
@@ -836,6 +979,11 @@ void App::drawToolbar() {
     if (ImGui::MenuItem("Open Tape...")) openFileDialog(DialogKind::Tape);
     if (ImGui::MenuItem("Insert Disk...")) openFileDialog(DialogKind::Disk);
     ImGui::Separator();
+    if (ImGui::MenuItem("Save state...", "Shift+F8")) openSaveDialog(DialogKind::StateSave);
+    if (ImGui::MenuItem("Load state...", "Shift+F9")) openFileDialog(DialogKind::StateLoad);
+    if (ImGui::MenuItem("Quick save", "F8")) quickSaveState();
+    if (ImGui::MenuItem("Quick load", "F9")) quickLoadState();
+    ImGui::Separator();
     if (ImGui::MenuItem("Reset", "F5")) reset();
     ImGui::Separator();
     if (ImGui::MenuItem("Quit")) running_ = false;
@@ -897,6 +1045,10 @@ void App::drawToolbar() {
     if (ImGui::MenuItem("Step over", "F4")) {
       paused_ = true;
       stepOverInstruction(*machine_);
+    }
+    if (ImGui::MenuItem("Rewind", "F10", false, rewind_.canRewind())) rewindOneFrame();
+    if (ImGui::MenuItem("Rewind buffer", nullptr, &rewindEnabled_) && !rewindEnabled_) {
+      clearRewind();
     }
     ImGui::Separator();
     ImGui::MenuItem("Toolbar", "Tab", &toolbarPinned_);

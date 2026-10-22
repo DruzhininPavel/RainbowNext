@@ -20,6 +20,13 @@ public:
     bool iff1 = false, iff2 = false;
     u8 im = 1;
     bool halted = false;
+
+    template <class Ar> void serialize(Ar& ar) {
+      ar(a); ar(f); ar(b); ar(c); ar(d); ar(e); ar(h); ar(l);
+      ar(a2); ar(f2); ar(b2); ar(c2); ar(d2); ar(e2); ar(h2); ar(l2);
+      ar(ix); ar(iy); ar(sp); ar(pc);
+      ar(i); ar(r); ar(iff1); ar(iff2); ar(im); ar(halted);
+    }
   };
 
   explicit Z80(Bus& bus) : bus_(bus) { reset(); }
@@ -57,6 +64,16 @@ public:
   // when the machine says so.
   void setExtendedInstructions(bool on) { z80n_ = on; }
   bool extendedInstructions() const { return z80n_; }
+
+  // Save states carry the registers, MEMPTR, the EI delay and the cycle
+  // counter; the bus belongs to the machine and is not part of them.
+  template <class Ar> void serialize(Ar& ar) {
+    regs_.serialize(ar);
+    ar(wz_);
+    ar(cycles_);
+    ar(eiDelay_);
+    ar(z80n_);
+  }
 
 private:
   // --- clock and memory ---------------------------------------------------

@@ -54,6 +54,27 @@ public:
   u32 noisePeriod() const { return noisePeriod_; }
   u16 envelopePeriod() const { return envPeriod_; }
 
+  template <class Ar> void serialize(Ar& ar) {
+    ar(regs_);
+    ar(selected_);
+    ar(tonePeriod_);
+    ar(toneCounter_);
+    ar(toneOut_);
+    ar(noisePeriod_);
+    ar(noiseCounter_);
+    ar(lfsr_);
+    ar(noiseOut_);
+    ar(envPeriod_);
+    ar(envCounter_);
+    ar(envPos_);
+    ar(envDir_);
+    ar(envStep_);
+    ar(envHolding_);
+    ar(divider_);
+    ar(dividerAccum_);
+    ar(stereo_);
+  }
+
 private:
   void clock();
   void stepNoise();

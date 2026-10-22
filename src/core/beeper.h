@@ -13,6 +13,8 @@ public:
   void setLevel(u8 level) { level_ = level ? 0.5f : -0.5f; }
   float sample() const { return level_; }
 
+  template <class Ar> void serialize(Ar& ar) { ar(level_); }
+
 private:
   float level_ = 0.0f;
 };

@@ -67,6 +67,16 @@ public:
 
   static u32 toArgb(u16 rgb9);
 
+  template <class Ar> void serialize(Ar& ar) {
+    ar(colours_);
+    ar(argb_);
+    ar(control_);
+    ar(index_);
+    ar(last_);
+    ar(pendingHigh_);
+    ar(highBytePending_);
+  }
+
 private:
   void store(int palette, u8 index, u16 rgb9);
 

@@ -81,6 +81,7 @@ add_library(rainbow_core STATIC
   src/core/z80.cpp
   src/core/disassembler.cpp
   src/core/machine.cpp
+  src/core/rewind.cpp
   src/core/ula.cpp
   src/core/keyboard.cpp
   src/core/ay.cpp
@@ -175,6 +176,7 @@ if(RAINBOW_BUILD_TESTS)
     tests/test_z80n.cpp
     tests/test_disassembler.cpp
     tests/test_debugger.cpp
+    tests/test_state.cpp
     tests/test_palette.cpp
     tests/test_sprites.cpp
     tests/test_sprites_relative.cpp

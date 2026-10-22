@@ -28,6 +28,8 @@ public:
   float sampleLeft() const;
   float sampleRight() const;
 
+  template <class Ar> void serialize(Ar& ar) { ar(dacs_); }
+
 private:
   u8 dacs_[DacCount] = {0x80, 0x80, 0x80, 0x80};
 };

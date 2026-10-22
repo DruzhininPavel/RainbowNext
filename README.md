@@ -155,10 +155,12 @@ ROM images are not bundled — see [`roms/README.md`](roms/README.md).
 ./build/rainbow --rom 48.rom --tape game.tzx --snapshot save.z80
 ./build/rainbow --rom roms/plus3-0.rom --disk game.dsk
 ./build/rainbow --rom roms/48.rom --sd nextzxos.img   # DivMMC SD card
+./build/rainbow --state quick.rbn      # carry on from a saved state
 ```
 
 A bare path is routed by extension: `.rom`, `.tap`/`.tzx`, `.sna`/`.z80`,
-`.nex`, `.dsk`/`.edsk`, `.img`. The same files can be dropped onto the window.
+`.nex`, `.dsk`/`.edsk`, `.img`, `.rbn`. The same files can be dropped onto the
+window.
 
 Tape playback is real-time through the EAR bit, so `LOAD ""` works as on real
 hardware. `Tape > Instant load` (on by default) short-circuits the ROM loader for
@@ -180,6 +182,35 @@ instant loading; turn it off to hear and debug the actual tape signal.
 | Reset | `F5` |
 | Tape play / stop | `F6` |
 | Tape rewind | `F7` |
+| Quick save state | `F8` |
+| Quick load state | `F9` |
+| Save / load state as... | `Shift+F8` / `Shift+F9` |
+| Rewind one step | `F10` |
+
+### Save states
+
+`File > Save state...` writes everything the machine is — CPU registers, RAM,
+paging, NextRegs, palette, sprites, the border and the framebuffer — into one
+`.rbn` file. `F8` and `F9` do the same without a dialog, using
+`quick.rbn` next to `rainbow.cfg`, which is what you want in the middle of a
+game. A state names the machine it was written for and is fingerprinted against
+the ROM, so loading one switches to that machine and refuses to run on a
+different ROM.
+
+The file is `RBNSTATE`, a version, the machine type, a ROM fingerprint, the
+body, and an FNV-1a checksum over all of it. A damaged, truncated or
+newer-versioned file is rejected instead of loaded as garbage; bumping the
+version in `machine.cpp` is how the format is allowed to change.
+
+Tapes, disks and the SD card image are **not** embedded — they are large,
+user-supplied files. A state restores where the tape head was and the frontend
+keeps the media attached, so re-insert a tape before loading a state that needs
+one.
+
+`F10` walks back through a ring of states the emulator records while it runs
+(one every four frames, up to 256 MB, so roughly a minute of 48K play). It
+pauses the machine, and pressing it again steps further back. `View > Rewind
+buffer` switches the recording off if the memory is wanted for something else.
 
 ## Layout
 
@@ -243,10 +274,13 @@ peripheral = printer
 ctest --test-dir build --output-on-failure
 ```
 
-399 tests cover the Z80 core (timings, flags, undocumented opcodes,
+414 tests cover the Z80 core (timings, flags, undocumented opcodes,
 interrupts), the disassembler (base, CB, ED, indexed and Z80N forms, lengths and
-flow), the debugger's breakpoints and profiler, the Z80N extension, the Next MMU, palette, Layer 2, the Timex
-modes and the ULA+/ULANext attribute paths, the blending priority modes,
+flow), the debugger's breakpoints and profiler, save states (round trips of the
+CPU, memory, paging and peripherals, and the refusals for a damaged, truncated,
+foreign or differently-ROM'd file), the rewind buffer, the Z80N extension, the
+Next MMU, palette, Layer 2, the Timex modes and the ULA+/ULANext attribute
+paths, the blending priority modes,
 sprites (including relative and unified sprites and the collision flags), the
 tilemap, the Copper and the zxnDMA, ULA behaviour, contention, floating bus,
 frame length, audio rate, both snapshot formats, the NEX parser and its

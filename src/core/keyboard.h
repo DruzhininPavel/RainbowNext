@@ -22,6 +22,8 @@ public:
   // that no selected row drives, and 0 for pressed keys.
   u8 read(u8 high) const;
 
+  template <class Ar> void serialize(Ar& ar) { ar(keys_); }
+
 private:
   std::array<std::array<bool, Columns>, Rows> keys_{};
 };
