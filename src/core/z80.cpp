@@ -1188,10 +1188,17 @@ bool Z80::interrupt() {
   regs_.halted = false;
 
   if (regs_.im == 2) {
+    // IM 2 is an indirect jump: I and the byte the device put on the bus form
+    // the address of a table entry, and the word stored there is the handler.
+    // The Next's interrupt table is built exactly that way, so jumping to the
+    // entry itself lands in the middle of the table.
     const u8 vector = bus_.interruptVector();
     tick(7);
     push16(regs_.pc);
-    regs_.pc = u16(u16(regs_.i) << 8 | vector);
+    const u16 entry = u16(u16(regs_.i) << 8 | vector);
+    const u16 handler = u16(bus_.memRead(entry, bus_.now()) |
+                            u16(bus_.memRead(u16(entry + 1), bus_.now()) << 8));
+    regs_.pc = handler;
     tick(6);
   } else {
     tick(7);

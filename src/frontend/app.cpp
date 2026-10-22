@@ -187,7 +187,16 @@ bool App::init(const Options& options) {
     return false;
   }
 
-  machine_ = std::make_unique<Machine>(MachineType::Spectrum48);
+  MachineType machineType = MachineType::Spectrum48;
+  if (!options.machine.empty()) {
+    const std::optional<MachineType> parsed = machineTypeFromId(options.machine);
+    if (!parsed) {
+      std::fprintf(stderr, "rainbow: unknown machine '%s'\n", options.machine.c_str());
+      return false;
+    }
+    machineType = *parsed;
+  }
+  machine_ = std::make_unique<Machine>(machineType);
   rzx_.bind(*machine_);
   audio_.init(44100);
   machine_->setSampleRate(audio_.sampleRate() > 0 ? audio_.sampleRate() : 44100);
@@ -206,7 +215,7 @@ bool App::init(const Options& options) {
   }
 
   if (!options.snapshot.empty()) loadSnapshot(options.snapshot);
-  if (!options.tape.empty()) loadTape(options.tape);
+  if (!options.tape.empty() && loadTape(options.tape)) autoloadTape();
   if (!options.disk.empty()) loadDisk(options.disk);
 
   input_.openGamepads();
@@ -215,6 +224,7 @@ bool App::init(const Options& options) {
   scanPeripherals();
   applyPeripheralConfig();
   if (!options.sd.empty()) loadDivMmcCard(options.sd);
+  if (!options.esxdos.empty()) mountEsxDos(options.esxdos);
   if (!options.state.empty()) loadStateFile(options.state);
   if (!options.rzx.empty()) loadRzxFile(options.rzx);
   if (options.debugger) {
@@ -337,6 +347,7 @@ void App::run() {
       }
     }
 
+    autoload_.tick();
     pushAudio();
 
     ImGui_ImplSDL3_NewFrame();
@@ -484,11 +495,13 @@ void App::handleEvent(const SDL_Event& event) {
 // ---------------------------------------------------------------------------
 
 void App::reset() {
+  autoload_.cancel();
   machine_->reset();
   status_ = "Reset";
 }
 
 void App::setMachine(MachineType type) {
+  autoload_.cancel();
   clearRewind();
   // A session belongs to the machine it was started on, so it goes before the
   // bus it was recording is torn down.
@@ -546,6 +559,17 @@ bool App::loadTape(const std::string& path) {
   }
   status_ = "Tape loaded: " + machine_->tape().title();
   return true;
+}
+
+void App::autoloadTape() {
+  if (!machine_->tape().loaded()) {
+    status_ = "No tape to load";
+    return;
+  }
+  if (paused_) paused_ = false;
+  machine_->tape().rewind();
+  autoload_.start(*machine_);
+  status_ = "Autoload: waiting for the ROM";
 }
 
 bool App::loadDisk(const std::string& path) {
@@ -676,6 +700,22 @@ bool App::loadDivMmcCard(const std::string& path) {
   insertSdCard();
   status_ = "SD card: " + path + " (" + std::to_string(sdImage_.size() / 512) +
             " sectors)";
+  return true;
+}
+
+// Answers `RST 8` out of a host directory instead of booting the DivMMC
+// firmware, which is what a Next program that loads files needs. Nothing has to
+// be supplied alongside it: the calls are answered from the machine, so the
+// directory alone is enough.
+bool App::mountEsxDos(const std::string& path) {
+  if (!machine_) return false;
+  std::string error;
+  if (!machine_->esxDos().mount(path, error)) {
+    status_ = "esxDOS failed: " + error;
+    return false;
+  }
+  machine_->esxDos().setEnabled(true);
+  status_ = "esxDOS: " + machine_->esxDos().root();
   return true;
 }
 
@@ -1175,6 +1215,7 @@ void App::drawToolbar() {
       tape.setPlaying(!tape.playing());
     }
     if (ImGui::MenuItem("Rewind", "F7", false, loaded)) tape.rewind();
+    if (ImGui::MenuItem("Autoload", nullptr, false, loaded)) autoloadTape();
     ImGui::Separator();
     bool fastLoad = tape.fastLoad();
     if (ImGui::MenuItem("Instant load", nullptr, &fastLoad)) tape.setFastLoad(fastLoad);

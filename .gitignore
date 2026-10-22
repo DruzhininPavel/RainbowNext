@@ -20,3 +20,6 @@ roms/*.tap
 roms/*.tzx
 roms/*.sna
 roms/*.z80
+
+# Local research material (copyrighted distributions, never committed)
+/research

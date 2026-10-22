@@ -294,9 +294,16 @@ TEST(z80_im2_interrupt) {
   cpu.regs().i = 0x40;
   cpu.regs().iff1 = true;
   cpu.regs().im = 2;
+  // IM 2 reads the handler out of the table at (I << 8) | bus byte, so the
+  // entry has to exist for the jump to mean anything.
+  bus.mem[0x40FF] = 0x34;
+  bus.mem[0x4100] = 0x12;
 
   CHECK(cpu.interrupt());
-  CHECK_EQ(cpu.regs().pc, 0x40FF);
+  CHECK_EQ(cpu.regs().pc, 0x1234);
+  CHECK_EQ(cpu.regs().sp, 0xFEFE);
+  CHECK_EQ(bus.mem[0xFEFE], 0x00);
+  CHECK_EQ(bus.mem[0xFEFF], 0x80);
 }
 
 TEST(z80_nmi) {

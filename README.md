@@ -186,12 +186,20 @@ ROM images are not bundled — see [`roms/README.md`](roms/README.md).
 ./build/rainbow --rom 48.rom --tape game.tzx --snapshot save.z80
 ./build/rainbow --rom roms/plus3-0.rom --disk game.dsk
 ./build/rainbow --rom roms/48.rom --sd nextzxos.img   # DivMMC SD card
+./build/rainbow --rom roms/next.rom --esxdos gamefiles/ # RST 8 from a directory
 ./build/rainbow --state quick.rbn      # carry on from a saved state
 ```
 
 A bare path is routed by extension: `.rom`, `.tap`/`.tzx`, `.sna`/`.z80`,
 `.nex`, `.dsk`/`.edsk`, `.img`, `.rbn`. The same files can be dropped onto the
 window.
+
+`--esxdos DIR` points the program's `RST 8` calls at a host directory instead of
+booting the DivMMC firmware: `F_OPEN`, `F_READ`, `F_WRITE`, `F_SEEK` and the
+rest are answered from the emulator, so a Next game that keeps its data next to
+the loader runs without a card image. Paths are resolved inside that directory
+only and matched case-insensitively, so an image built on FAT still works on a
+case-sensitive file system.
 
 Tape playback is real-time through the EAR bit, so `LOAD ""` works as on real
 hardware. `Tape > Instant load` (on by default) short-circuits the ROM loader for
