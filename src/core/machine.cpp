@@ -1331,9 +1331,11 @@ void Machine::tick(u32 cycles) {
       audio_.push_back(std::clamp(outL, -1.0f, 1.0f));
       audio_.push_back(std::clamp(outR, -1.0f, 1.0f));
     }
-    // Two seconds of interleaved stereo.
+    // Two seconds of interleaved stereo. Trim in chunks: once the buffer sits
+    // at the limit the naive one-in-one-out erase memmoves ~700 KB per
+    // scanline, which dwarfs the emulation itself.
     const size_t limit = size_t(sampleRate_) * 4;
-    if (audio_.size() > limit) {
+    if (audio_.size() > limit + 4096) {
       audio_.erase(audio_.begin(), audio_.begin() + long(audio_.size() - limit));
     }
 
@@ -1345,7 +1347,7 @@ void Machine::tick(u32 cycles) {
       if (completed < borderLines_.size()) borderLines_[completed] = ula_.border();
 
       if (newFrameT == 0) {
-        renderFrame();
+        if (videoEnabled_) renderFrame();
         ++frames_;
         frameStart();
       }

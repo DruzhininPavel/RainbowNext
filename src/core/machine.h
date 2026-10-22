@@ -175,6 +175,11 @@ public:
   Tape& tape() { return tape_; }
   const Tape& tape() const { return tape_; }
   const u32* framebuffer() const { return framebuffer_.data(); }
+  // Headless runs (conformance tests, batch tools) skip the per-pixel
+  // compositor. Timing, interrupts and the border log still advance, so the
+  // emulated program cannot tell the difference.
+  void setVideoEnabled(bool on) { videoEnabled_ = on; }
+  bool videoEnabled() const { return videoEnabled_; }
   int frameWidth() const { return FrameWidth; }
   int frameHeight() const { return FrameHeight; }
   u64 frames() const { return frames_; }
@@ -416,6 +421,7 @@ private:
 
   std::vector<u16> breakpoints_;  // sorted, so the per-instruction test is a search
   bool profiling_ = false;
+  bool videoEnabled_ = true;
   std::array<u32, 65536> samples_{};
   u64 sampleTotal_ = 0;
 
