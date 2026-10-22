@@ -100,7 +100,7 @@ jobs:
           (cd dist && zip -r -9 "${name}.zip" "${name}" >/dev/null)
           echo "PACKAGE=dist/${name}.zip" >> "${GITHUB_ENV}"
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v5
         with:
           name: dist-${{ matrix.slug }}
           path: ${{ env.PACKAGE }}
@@ -114,7 +114,7 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v5
         with:
           path: dist
           merge-multiple: true
