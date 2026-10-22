@@ -197,7 +197,7 @@ if(RAINBOW_BUILD_TESTS)
     tests/test_esxdos.cpp
     src/frontend/config.cpp
     src/frontend/autoload.cpp
-  tests/test_turbosound.cpp
+    tests/test_turbosound.cpp
     tests/test_tilemap.cpp
     tests/test_nextreg.cpp
     tests/test_ula.cpp
@@ -212,6 +212,7 @@ if(RAINBOW_BUILD_TESTS)
     tests/test_dsk.cpp
     tests/test_boot.cpp
     tests/test_z80test.cpp
+    tests/test_rom_selftest.cpp
   )
   target_link_libraries(rainbow_tests PRIVATE rainbow_core rainbow_plugin)
   target_compile_options(rainbow_tests PRIVATE -Wall -Wextra -Wpedantic)

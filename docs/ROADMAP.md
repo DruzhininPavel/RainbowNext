@@ -22,8 +22,10 @@ done by loading a ROM or a snapshot.
 * [x] `48.rom` boots to the BASIC prompt: the copyright message is printed and
       `PRINT 42` evaluates to `42` with the `0 OK, 0:1` report
 * [x] `z80test` conformance suite runs as part of the unit tests: `z80doc` and
-      `z80docflags` pass 160 of 160, `z80flags` 152 of 160 (the remaining eight
+      `z80docflags` pass 160 of 160, `z80full` 152 of 160 (the remaining eight
       are the CPU-dependent SCF/CCF variants and the MEMPTR-sensitive block cases)
+* [x] Synthetic test ROM (`tools/make_test_rom.py` → `tests/data/test48.rom`) so
+      the suites run without the copyrighted Spectrum ROM
 * [ ] `zexall` conformance run
 * [x] TAP/TZX tape loading
 * [ ] Golden-frame image hashes

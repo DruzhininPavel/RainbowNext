@@ -764,7 +764,10 @@ u8 Machine::ioReadBase(u16 port, u32) {
   if ((port & 0x0001) == 0) {
     if ((port & 0x00FF) == 0xFE) {
       u8 value = ula_.read(port, keyboard_);
-      value = u8((value & ~0x40) | (tape_.ear() ? 0x40 : 0x00));
+      // Only a running tape drives the EAR input. With the motor stopped the
+      // line idles low, which is the 0xBF the ULA already reports and what the
+      // ROM loader and the Z80 conformance suites expect from an idle machine.
+      if (tape_.playing()) value = u8((value & ~0x40) | (tape_.ear() ? 0x40 : 0x00));
       return value;
     }
     return floatingBus();
