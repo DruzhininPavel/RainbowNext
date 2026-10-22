@@ -48,6 +48,7 @@ public:
 
   const PeripheralInfo& info() const override;
   void reset() override;
+  void softReset() override;
   void enable() override;
   void disable() override;
 

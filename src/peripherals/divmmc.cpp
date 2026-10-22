@@ -76,13 +76,23 @@ void DivMmc::reset() {
   spiLatch_ = 0xFF;
   std::fill(ram_.begin(), ram_.end(), u8(0));
   card_.reset();
-  card_.select(true);
+  card_.select(legacySpiPort());
+}
+
+// The reset button drops the latch and the SPI state but leaves the 128K RAM
+// alone -- it is ordinary memory on the board, and esxDOS keeps its warm-boot
+// markers there.
+void DivMmc::softReset() {
+  control_ = 0;
+  spiLatch_ = 0xFF;
+  card_.reset();
+  card_.select(legacySpiPort());
 }
 
 void DivMmc::enable() {
   control_ = 0;
   spiLatch_ = 0xFF;
-  card_.select(true);
+  card_.select(legacySpiPort());
 }
 
 void DivMmc::disable() {
@@ -111,8 +121,15 @@ bool DivMmc::ioRead(u16 port, u32, u8& value) {
   }
   if (low == PortData) {
     // 0xEB is the data port on the Next. On the older boards it is the map-in
-    // latch, which still reads back the last byte shifted, so both work.
-    value = spiLatch_;
+    // latch, which still reads back the last byte shifted.
+    if (legacySpiPort_) {
+      value = spiLatch_;
+    } else {
+      // Reading the Next's data port clocks a byte out of the card just like
+      // writing does, and drivers poll it while waiting for a response.
+      spiLatch_ = card_.transfer(0xFF);
+      value = spiLatch_;
+    }
     return true;
   }
   if (low == PortUnmap && legacySpiPort_) {
@@ -136,14 +153,19 @@ bool DivMmc::ioWrite(u16 port, u8 value, u32) {
     // clears it. The Next can clear it through NextReg 0x09 bit 3, which this
     // module does not watch, so the latch is simply writable.
     control_ = value;
-    card_.select(!mappedIn());
+    // On the Next the chip select lives on its own port, so the mapping latch
+    // has nothing to do with the card.
+    if (legacySpiPort_) card_.select(!mappedIn());
     return true;
   }
   if (!legacySpiPort_) {
     // On the Next the chip select has a port of its own and 0xEB shifts a byte
     // through the card: bit 0 low selects the SD card, high releases it.
     if (low == PortUnmap) {
-      card_.select((value & 0x01) != 0);
+      // Bit 0 is the SD card 0 select and bit 1 is card 1's; a board with one
+      // socket answers on either, which is what the Next does when it falls
+      // back to the second slot.
+      card_.select((value & 0x03) != 0x03);
       return true;
     }
     if (low == PortData) {

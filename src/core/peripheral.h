@@ -68,6 +68,10 @@ public:
   // Switched on, switched off, or the machine reset. `reset()` is also called
   // once when the module is first added.
   virtual void reset() {}
+  // A soft reset is the CPU reset button, not a power cycle, so anything the
+  // module holds in RAM has to survive it. A module that owns memory overrides
+  // this; the default is a full reset.
+  virtual void softReset() { reset(); }
   virtual void enable() {}
   virtual void disable() {}
 

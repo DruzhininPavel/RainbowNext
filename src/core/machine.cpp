@@ -177,7 +177,11 @@ void Machine::reset(bool preserveRam) {
   dacs_.reset();
   fdc_.reset();
   fdc_.setDisk(hasDiskController() && !disk_.empty() ? &disk_ : nullptr);
-  expansion_.reset();
+  if (preserveRam) {
+    expansion_.softReset();
+  } else {
+    expansion_.reset();
+  }
   // The Next drives the automap option from NextReg 0x0A bit 4, which a hard
   // reset clears so the boot ROM keeps the RST 0/8 vectors. A classic machine
   // has no such register and the module is only useful with automap on.
@@ -187,6 +191,7 @@ void Machine::reset(bool preserveRam) {
   cpuTstates_ = 0;
   turboAccum_ = 0;
   frames_ = 0;
+  ++resets_;
   irqLine_ = false;
   irqEnd_ = 0;
 
@@ -464,7 +469,11 @@ void Machine::stepInstruction() {
 
 std::optional<u16> Machine::runFrame() {
   const u64 target = frames_ + 1;
-  while (frames_ < target) {
+  // The guest can ask for a reset from inside an instruction (NextReg 0x02),
+  // which rewinds the frame counter and would leave this loop waiting for a
+  // frame that has already gone by. One reset is enough of a frame boundary.
+  const u64 resets = resets_;
+  while (frames_ < target && resets_ == resets) {
     // Only pay for the search once something is armed.
     if (!breakpoints_.empty()) {
       const u16 pc = cpu_.regs().pc;

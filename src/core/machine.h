@@ -418,6 +418,8 @@ private:
   u64 cpuTstates_ = 0;
   u32 turboAccum_ = 0;
   u64 frames_ = 0;
+  // Monotonic, so runFrame() can tell that the guest reset the machine.
+  u64 resets_ = 0;
   u64 instructions_ = 0;
   IoReadHook* ioReadHook_ = nullptr;
   bool irqLine_ = false;

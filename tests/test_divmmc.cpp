@@ -606,6 +606,76 @@ TEST(divmmc_routes_spi_bytes_through_the_data_port) {
   CHECK_EQ(value, u8(0x01));  // idle
 }
 
+TEST(divmmc_next_selects_the_card_through_port_e7) {
+  DivMmc div;
+  div.setLegacySpiPort(false);
+  std::string error;
+  CHECK(div.loadCard(makeCard(), error));
+
+  // On the Next the mapping latch says nothing about the card: every socket
+  // stays released until 0xE7 picks one.
+  CHECK(!div.card().selected());
+  CHECK(div.ioWrite(DivMmc::PortControl, u8(DivMmc::Conmem), 0));
+  CHECK(!div.card().selected());
+
+  // Bit 0 low picks SD card 0 and bit 1 low picks card 1; the value is not
+  // otherwise a chip select, so 0xFE and 0xFD both mean "a card is listening".
+  CHECK(div.ioWrite(DivMmc::PortUnmap, 0xFE, 0));
+  CHECK(div.card().selected());
+  CHECK(div.ioWrite(DivMmc::PortUnmap, 0xFD, 0));
+  CHECK(div.card().selected());
+
+  // All bits high is the released state the driver leaves behind.
+  CHECK(div.ioWrite(DivMmc::PortUnmap, 0xFF, 0));
+  CHECK(!div.card().selected());
+}
+
+TEST(divmmc_next_data_port_reads_clock_the_card) {
+  DivMmc div;
+  div.setLegacySpiPort(false);
+  std::string error;
+  CHECK(div.loadCard(makeCard(), error));
+  CHECK(div.ioWrite(DivMmc::PortUnmap, 0xFE, 0));
+
+  // Everything goes through 0xEB, and only a read clocks a byte in: the driver
+  // spins on the port until the card answers.
+  auto send = [&div](u8 cmd, u32 arg) {
+    div.ioWrite(DivMmc::PortData, u8(0x40 | cmd), 0);
+    div.ioWrite(DivMmc::PortData, u8(arg >> 24), 0);
+    div.ioWrite(DivMmc::PortData, u8(arg >> 16), 0);
+    div.ioWrite(DivMmc::PortData, u8(arg >> 8), 0);
+    div.ioWrite(DivMmc::PortData, u8(arg), 0);
+    div.ioWrite(DivMmc::PortData, 0x95, 0);
+  };
+  auto poll = [&div](size_t count) {
+    std::vector<u8> got;
+    for (size_t i = 0; i < count; ++i) {
+      u8 value = 0xFF;
+      div.ioRead(DivMmc::PortData, 0, value);
+      got.push_back(value);
+    }
+    return got;
+  };
+
+  poll(4);  // the card needs a few clocks to enter SPI mode
+  send(0, 0);
+  poll(4);
+  send(8, 0x1AA);
+  poll(4);
+  send(55, 0);
+  poll(4);
+  send(41, 0x40000000);
+  poll(4);
+
+  send(17, 0);  // READ_SINGLE_BLOCK, sector 0
+  const std::vector<u8> block = poll(64);
+  bool sawToken = false;
+  for (u8 value : block) {
+    if (value == 0xFE) sawToken = true;
+  }
+  CHECK(sawToken);
+}
+
 TEST(divmmc_loads_an_image_by_extension) {
   DivMmc div;
   std::string error;
