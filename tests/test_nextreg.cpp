@@ -158,7 +158,7 @@ TEST(nextreg_port_7ffd_repages_the_high_slots) {
   CHECK_EQ(m.nextRegs().mmuSlot(7), 0x06);
 }
 
-TEST(nextreg_reset_register_clears_ram) {
+TEST(nextreg_soft_reset_keeps_ram_and_hard_reset_clears_it) {
   Machine m(MachineType::Next);
 
   m.writeNextReg(0x50, 0x02);
@@ -166,6 +166,13 @@ TEST(nextreg_reset_register_clears_ram) {
   m.writeNextReg(0x02, 0x01); // soft reset
 
   CHECK_EQ(m.nextRegs().mmuSlot(0), NextRegFile::RomPage);
+  CHECK_EQ(m.readNextReg(0x02), 0x01); // the ROM can tell it was a warm start
+  m.writeNextReg(0x50, 0x02);
+  CHECK_EQ(m.memRead(0x0000, 0), 0x99);
+
+  m.writeNextReg(0x02, 0x02); // hard reset
+
+  CHECK_EQ(m.readNextReg(0x02), 0x02);
   m.writeNextReg(0x50, 0x02);
   CHECK_EQ(m.memRead(0x0000, 0), 0x00);
 }

@@ -98,7 +98,9 @@ public:
 
   explicit Machine(MachineType type = MachineType::Spectrum48);
 
-  void reset();
+  // A power-on reset also clears the RAM. A soft or hard reset triggered from
+  // NextReg 0x02 leaves the SRAM contents intact, as on real hardware.
+  void reset(bool preserveRam = false);
 
   bool loadRom(const std::string& path);
   // Loads a multi-bank ROM image (128K, +2, +2A, +3). A 16K file fills one

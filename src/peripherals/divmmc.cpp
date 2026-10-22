@@ -105,9 +105,17 @@ bool DivMmc::ioRead(u16 port, u32, u8& value) {
     value = control_;
     return true;
   }
-  if (low == PortSpiData || low == PortUnmap || low == PortMapIn) {
-    // The DivMMC+ hands the SPI byte back on 0xE7 and 0xEB as well, so a driver
-    // written for either board works.
+  if (low == PortSpiData && legacySpiPort_) {
+    value = spiLatch_;
+    return true;
+  }
+  if (low == PortData) {
+    // 0xEB is the data port on the Next. On the older boards it is the map-in
+    // latch, which still reads back the last byte shifted, so both work.
+    value = spiLatch_;
+    return true;
+  }
+  if (low == PortUnmap && legacySpiPort_) {
     value = spiLatch_;
     return true;
   }
@@ -131,8 +139,21 @@ bool DivMmc::ioWrite(u16 port, u8 value, u32) {
     card_.select(!mappedIn());
     return true;
   }
-  // The card's chip select is not a port of its own: the board ties it to the
-  // mapping latch, so a driver talks to the card exactly while the module is
+  if (!legacySpiPort_) {
+    // On the Next the chip select has a port of its own and 0xEB shifts a byte
+    // through the card: bit 0 low selects the SD card, high releases it.
+    if (low == PortUnmap) {
+      card_.select((value & 0x01) != 0);
+      return true;
+    }
+    if (low == PortData) {
+      spiLatch_ = card_.transfer(value);
+      return true;
+    }
+    return false;
+  }
+  // On the older boards the chip select is not a port of its own: it is tied to
+  // the mapping latch, so a driver talks to the card exactly while the module is
   // mapped out. That is why esxDOS unmaps before every SPI access.
   if (low == PortUnmap) {
     control_ &= u8(~Conmem);
@@ -155,8 +176,9 @@ bool DivMmc::memRead(u16 addr, u32, bool m1, u8& value) {
   if (rom_.empty() || addr >= 0x4000) return false;
 
   // The automap: an opcode fetch at a hook address maps the module in before
-  // the fetch is answered, which is the whole point of the M1 flag.
-  if (m1 && isHookAddress(addr)) control_ |= Conmem;
+  // the fetch is answered, which is the whole point of the M1 flag. It only
+  // happens while the board option is on.
+  if (m1 && automap_ && isHookAddress(addr)) control_ |= Conmem;
   if (!mappedIn()) return false;
 
   if (addr < 0x2000) {

@@ -135,7 +135,7 @@ Machine::Machine(MachineType type)
       });
 }
 
-void Machine::reset() {
+void Machine::reset(bool preserveRam) {
   cpu_.reset();
   cpu_.setExtendedInstructions(type_ == MachineType::Next);
   ula_.reset(type_ != MachineType::Spectrum48);
@@ -143,11 +143,13 @@ void Machine::reset() {
   beeper_.reset();
   tape_.rewind();
 
-  ram_.assign(RamPages * PageSize, 0);
+  if (!preserveRam) ram_.assign(RamPages * PageSize, 0);
   framebuffer_.assign(FrameWidth * FrameHeight, Palette[0]);
   borderLines_.fill(0);
 
-  next_.reset();
+  // A hard reset (or a power cycle) is the one that reports itself as hard
+  // through register 0x02, and the only one that clears the RAM.
+  next_.reset(!preserveRam);
   palette_.reset();
   sprites_.reset();
   copper_.reset();
@@ -176,6 +178,12 @@ void Machine::reset() {
   fdc_.reset();
   fdc_.setDisk(hasDiskController() && !disk_.empty() ? &disk_ : nullptr);
   expansion_.reset();
+  // The Next drives the automap option from NextReg 0x0A bit 4, which a hard
+  // reset clears so the boot ROM keeps the RST 0/8 vectors. A classic machine
+  // has no such register and the module is only useful with automap on.
+  if (auto* div = static_cast<DivMmc*>(expansion_.find("divmmc"))) {
+    div->setAutomap(!isNext() || (next_.read(0x0A) & 0x10) != 0);
+  }
 
   tstates_ = 0;
   cpuTstates_ = 0;
@@ -924,8 +932,14 @@ void Machine::installPeripherals() {
   expansion_.add(std::make_unique<ZxPrinter>(), false);
   expansion_.add(std::make_unique<Cartridge>(), false);
   // Last, because its status port shares 0x1F with the Kempston joystick and
-  // the joystick is the one most software expects to find there.
-  expansion_.add(std::make_unique<DivMmc>(), false);
+  // the joystick is the one most software expects to find there. The Next has
+  // the module built in, so it starts plugged in there.
+  auto divmmc = std::make_unique<DivMmc>();
+  divmmc->setAutomap(!isNext() || (next_.read(0x0A) & 0x10) != 0);
+  // The Next moved the SPI byte to 0xEB and its chip select to 0xE7, leaving
+  // 0xDF to the Kempston joystick and DAC D; the older boards decode 0xDF.
+  divmmc->setLegacySpiPort(!isNext());
+  expansion_.add(std::move(divmmc), isNext());
   refreshCartridge();
 }
 
@@ -1067,9 +1081,16 @@ u8 Machine::readNextReg(u8 reg) const {
 
 void Machine::writeNextReg(u8 reg, u8 value) {
   switch (reg) {
-    case 0x02: // soft or hard reset
-      if ((value & 0x03) != 0) reset();
+    case 0x02: // bit 1 asks for a hard reset, bit 0 for a soft one
+      if ((value & 0x03) != 0) reset((value & 0x02) == 0);
       return;
+    case 0x0A: { // peripheral 5: the DivMMC automap option lives in bit 4
+      next_.write(reg, value);
+      if (auto* div = static_cast<DivMmc*>(expansion_.find("divmmc"))) {
+        div->setAutomap((value & 0x10) != 0);
+      }
+      return;
+    }
     case 0x03: {
       // The display timing bits are locked unless bit 7 unlocks them.
       u8 type = next_.read(0x03);

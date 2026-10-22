@@ -21,10 +21,12 @@ public:
   // MMU slot values 0-254 map that 8K page of RAM; 255 shows the ROM instead.
   static constexpr u8 RomPage = 0xFF;
 
-  NextRegFile() { reset(); }
+  NextRegFile() { reset(true); }
 
-  // Soft reset values, i.e. the state NextZXOS expects after an F4.
-  void reset();
+  // Soft reset values, i.e. the state NextZXOS expects after an F4. Both kinds
+  // of reset reload the register file; only the cause reported back through
+  // register 0x02 differs.
+  void reset(bool hard);
 
   u8 selected() const { return selected_; }
   void select(u8 reg) { selected_ = reg; }
@@ -42,11 +44,13 @@ public:
   template <class Ar> void serialize(Ar& ar) {
     ar(values_);
     ar(selected_);
+    ar(lastResetHard_);
   }
 
 private:
   std::array<u8, Count> values_{};
   u8 selected_ = 0;
+  bool lastResetHard_ = true;
 };
 
 } // namespace rainbow
