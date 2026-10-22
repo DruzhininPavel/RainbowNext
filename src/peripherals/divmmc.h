@@ -1,5 +1,6 @@
 #pragma once
 
+#include <functional>
 #include <string>
 #include <vector>
 
@@ -81,6 +82,29 @@ public:
   // the RST 0/8 vectors until NextZXOS hands them to esxDOS.
   void setAutomap(bool on) { automap_ = on; }
   bool automap() const { return automap_; }
+  // Which addresses automap, and under what conditions. The Next puts this in
+  // NextRegs 0xB8-0xBB: 0xB8/0xBB hold one enable bit per entry point, 0xB9
+  // says whether a point fires everywhere or only while the +3 DOS ROM is the
+  // one paged in, and 0xBA asks for the map to happen after the instruction
+  // rather than before it. Mapping before the fetch is what makes a hook
+  // address work at all, so the timing bits are accepted but not acted on.
+  void setEntryPoints(u8 points0, u8 valid0, u8 timing0, u8 points1) {
+    entryPoints0_ = points0;
+    entryPointsValid0_ = valid0;
+    entryPointsTiming0_ = timing0;
+    entryPoints1_ = points1;
+  }
+  u8 entryPoints0() const { return entryPoints0_; }
+  u8 entryPointsValid0() const { return entryPointsValid0_; }
+  u8 entryPointsTiming0() const { return entryPointsTiming0_; }
+  u8 entryPoints1() const { return entryPoints1_; }
+  // The machine answers whether the +3 DOS ROM is the one at 0x0000.
+  void setRom3PresentProvider(std::function<bool()> provider) {
+    rom3Present_ = std::move(provider);
+  }
+  // Whether an opcode fetch at `addr` pulls the module in, entry points and the
+  // ROM3 condition included. The automap master switch is not consulted.
+  bool hookEnabled(u16 addr) const;
   // Whether the DivIDE-era 0xDF data port is decoded. Off on the Next, where
   // 0xDF belongs to the Kempston joystick and DAC D; the data port there is
   // 0xEB, which is always decoded.
@@ -109,6 +133,11 @@ private:
   u8 control_ = 0;
   bool automap_ = true;
   bool legacySpiPort_ = true;
+  u8 entryPoints0_ = 0x83;
+  u8 entryPointsValid0_ = 0x01;
+  u8 entryPointsTiming0_ = 0x00;
+  u8 entryPoints1_ = 0xCD;
+  std::function<bool()> rom3Present_;
   SdCard card_;
   // The SPI port is one register: a write clocks a byte through the card and
   // latches what came back, a read hands that latched byte over without

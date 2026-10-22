@@ -737,3 +737,99 @@ TEST(divmmc_is_off_the_bus_until_it_is_plugged_in) {
   CHECK_EQ(machine.memFetch(0x0066, 0), u8(0x3F));
   CHECK(!div->mappedIn());
 }
+
+TEST(divmmc_hook_enable_follows_the_entry_point_registers) {
+  DivMmc div;
+  div.setEntryPoints(0x82, 0x00, 0x00, 0xCD);
+
+  // 0xB8 asks for 0x0038 and 0x0008 and nothing else, so the reset vector is
+  // not an entry point any more.
+  CHECK(!div.hookEnabled(0x0000));
+  CHECK(div.hookEnabled(0x0038));
+  CHECK(!div.hookEnabled(0x0010));
+
+  // 0xB9 is clear for 0x0008, so the point only fires while the +3 DOS ROM is
+  // the one paged in. That is exactly what keeps the Next boot ROM's own use of
+  // RST 8 as a bank switcher working.
+  bool rom3 = false;
+  div.setRom3PresentProvider([&rom3] { return rom3; });
+  CHECK(!div.hookEnabled(0x0008));
+  rom3 = true;
+  CHECK(div.hookEnabled(0x0008));
+
+  // 0xB9 bit 0 is set for 0x0000, so that point does not care about ROM3.
+  CHECK(div.hookEnabled(0x0038));
+
+  // 0xBB keeps the esxDOS hooks and drops the NMI vectors, which it does by
+  // leaving bits 0 and 1 clear.
+  div.setEntryPoints(0x00, 0x00, 0x00, 0x04);
+  CHECK(!div.hookEnabled(0x0066));
+  CHECK(div.hookEnabled(0x04C6));
+  CHECK(!div.hookEnabled(0x0562));
+}
+
+TEST(next_divmmc_automap_starts_off_and_follows_register_0x0a) {
+  Machine machine(MachineType::Next);
+  auto* div = static_cast<DivMmc*>(machine.expansion().find("divmmc"));
+  CHECK(div != nullptr);
+
+  // A hard reset clears the master switch, so the boot ROM keeps both RST
+  // vectors for itself.
+  CHECK(!div->automap());
+
+  machine.writeNextReg(0x0A, 0x10);
+  CHECK(div->automap());
+  machine.writeNextReg(0x0A, 0x00);
+  CHECK(!div->automap());
+}
+
+TEST(next_divmmc_entry_point_registers_reach_the_module) {
+  Machine machine(MachineType::Next);
+  auto* div = static_cast<DivMmc*>(machine.expansion().find("divmmc"));
+  CHECK(div != nullptr);
+
+  // The soft reset defaults: 0x0000 and 0x0038 everywhere, the rest only with
+  // ROM3 paged in.
+  CHECK_EQ(div->entryPoints0(), u8(0x83));
+  CHECK_EQ(div->entryPointsValid0(), u8(0x01));
+  CHECK_EQ(div->entryPointsTiming0(), u8(0x00));
+  CHECK_EQ(div->entryPoints1(), u8(0xCD));
+
+  machine.writeNextReg(0xB8, 0x82);
+  machine.writeNextReg(0xB9, 0x00);
+  machine.writeNextReg(0xBB, 0xF2);
+  CHECK_EQ(div->entryPoints0(), u8(0x82));
+  CHECK_EQ(div->entryPointsValid0(), u8(0x00));
+  CHECK_EQ(div->entryPoints1(), u8(0xF2));
+}
+
+TEST(next_divmmc_rst8_only_maps_in_with_rom3_paged) {
+  Machine machine(MachineType::Next);
+  std::vector<u8> system(0x10000, 0x3F);
+  CHECK(machine.loadRomImageData(system.data(), system.size()));
+  machine.reset();
+
+  auto* div = static_cast<DivMmc*>(machine.expansion().find("divmmc"));
+  CHECK(div != nullptr);
+  std::string error;
+  CHECK(div->loadRom(std::vector<u8>(DivMmc::RomSize, 0xC9), error));
+
+  // What the Next boot ROM itself programs before it turns the automap on.
+  machine.writeNextReg(0x0A, 0x10);
+  machine.writeNextReg(0xB8, 0x82);
+  machine.writeNextReg(0xB9, 0x00);
+
+  // ROM bank 0 is paged, so the RST 8 vector belongs to the ROM.
+  CHECK_EQ(machine.romBank(), u8(0x00));
+  CHECK_EQ(machine.memFetch(0x0008, 0), u8(0x3F));
+  CHECK(!div->mappedIn());
+
+  // Page the +3 DOS ROM in and the same fetch is a call into esxDOS. ROM 3 is
+  // the one that needs both select bits: 0x7FFD bit 4 for the low bit and
+  // 0x1FFD bit 2 for the high one.
+  machine.ioWrite(0x7FFD, 0x10, 0);
+  machine.ioWrite(0x1FFD, 0x04, 0);
+  CHECK_EQ(machine.romBank(), u8(0x03));
+  CHECK_EQ(machine.memFetch(0x0008, 0), u8(0xC9));
+  CHECK(div->mappedIn());
+}

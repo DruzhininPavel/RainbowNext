@@ -18,6 +18,12 @@ void NextRegFile::reset(bool hard) {
   values_[0x4C] = 0x0F; // tilemap transparency index
   values_[0x6E] = 0x6C; // tilemap at 0x6C00 in bank 5
   values_[0x6F] = 0x4C; // tile definitions at 0x4C00 in bank 5
+  // The divMMC entry points. The defaults hook 0x0000 and 0x0038 everywhere and
+  // 0x0008 only while the +3 DOS ROM is paged, which is what esxDOS expects.
+  values_[0xB8] = 0x83; // entry points 0: 0x0038 and 0x0000
+  values_[0xB9] = 0x01; // ...0x0000 fires always, the rest only with ROM3 in
+  values_[0xBA] = 0x00; // ...all of them map in after the instruction
+  values_[0xBB] = 0xCD; // entry points 1: 0x3DXX, 0x0562, 0x04C6, NMI
 
   // The boot mapping: ROM at 0x0000, the two halves of bank 5 at 0x4000 (that
   // is the ULA screen), bank 2 at 0x8000 and banks 0/1 at 0xC000.

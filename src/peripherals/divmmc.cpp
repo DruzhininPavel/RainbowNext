@@ -172,13 +172,43 @@ bool DivMmc::ioWrite(u16 port, u8 value, u32) {
   return false;
 }
 
+bool DivMmc::hookEnabled(u16 addr) const {
+  u8 points = entryPoints0_;
+  u8 bit = 0;
+  switch (addr) {
+    case 0x0000: bit = 0x01; break;
+    case 0x0008: bit = 0x02; break;
+    case 0x0010: bit = 0x04; break;
+    case 0x0018: bit = 0x08; break;
+    case 0x0020: bit = 0x10; break;
+    case 0x0028: bit = 0x20; break;
+    case 0x0030: bit = 0x40; break;
+    case 0x0038: bit = 0x80; break;
+    case 0x0066: points = entryPoints1_; bit = 0x01; break;
+    case 0x04C6: points = entryPoints1_; bit = 0x04; break;
+    case 0x04D7: points = entryPoints1_; bit = 0x10; break;
+    case 0x0562: points = entryPoints1_; bit = 0x08; break;
+    case 0x056A: points = entryPoints1_; bit = 0x20; break;
+    default: return false;
+  }
+  if ((points & bit) == 0) return false;
+  // 0xB9 only covers the eight RST and reset vectors. A clear bit there means
+  // the point fires only while the +3 DOS ROM is paged, which is how the
+  // original divMMC behaved and why RST 8 is not hooked on a stock Next.
+  if (addr < 0x0066 && (entryPointsValid0_ & bit) == 0 && rom3Present_ &&
+      !rom3Present_()) {
+    return false;
+  }
+  return true;
+}
+
 bool DivMmc::memRead(u16 addr, u32, bool m1, u8& value) {
   if (rom_.empty() || addr >= 0x4000) return false;
 
   // The automap: an opcode fetch at a hook address maps the module in before
   // the fetch is answered, which is the whole point of the M1 flag. It only
   // happens while the board option is on.
-  if (m1 && automap_ && isHookAddress(addr)) control_ |= Conmem;
+  if (m1 && automap_ && hookEnabled(addr)) control_ |= Conmem;
   if (!mappedIn()) return false;
 
   if (addr < 0x2000) {

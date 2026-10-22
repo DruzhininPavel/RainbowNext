@@ -181,9 +181,7 @@ void Machine::reset(bool preserveRam) {
   // The Next drives the automap option from NextReg 0x0A bit 4, which a hard
   // reset clears so the boot ROM keeps the RST 0/8 vectors. A classic machine
   // has no such register and the module is only useful with automap on.
-  if (auto* div = static_cast<DivMmc*>(expansion_.find("divmmc"))) {
-    div->setAutomap(!isNext() || (next_.read(0x0A) & 0x10) != 0);
-  }
+  syncDivMmcAutomap();
 
   tstates_ = 0;
   cpuTstates_ = 0;
@@ -935,12 +933,25 @@ void Machine::installPeripherals() {
   // the joystick is the one most software expects to find there. The Next has
   // the module built in, so it starts plugged in there.
   auto divmmc = std::make_unique<DivMmc>();
-  divmmc->setAutomap(!isNext() || (next_.read(0x0A) & 0x10) != 0);
+  divmmc->setRom3PresentProvider([this] { return romBank() == 3; });
   // The Next moved the SPI byte to 0xEB and its chip select to 0xE7, leaving
   // 0xDF to the Kempston joystick and DAC D; the older boards decode 0xDF.
   divmmc->setLegacySpiPort(!isNext());
   expansion_.add(std::move(divmmc), isNext());
   refreshCartridge();
+  syncDivMmcAutomap();
+}
+
+// The automap is board state that lives in the Next register file: the master
+// switch is 0x0A bit 4 and 0xB8-0xBB say which addresses are entry points.
+// A classic machine has no such registers, so there the module is only useful
+// with automap on.
+void Machine::syncDivMmcAutomap() {
+  auto* div = static_cast<DivMmc*>(expansion_.find("divmmc"));
+  if (div == nullptr) return;
+  div->setAutomap(!isNext() || (next_.read(0x0A) & 0x10) != 0);
+  div->setEntryPoints(next_.read(0xB8), next_.read(0xB9), next_.read(0xBA),
+                      next_.read(0xBB));
 }
 
 void Machine::refreshCartridge() {
@@ -1084,13 +1095,14 @@ void Machine::writeNextReg(u8 reg, u8 value) {
     case 0x02: // bit 1 asks for a hard reset, bit 0 for a soft one
       if ((value & 0x03) != 0) reset((value & 0x02) == 0);
       return;
-    case 0x0A: { // peripheral 5: the DivMMC automap option lives in bit 4
+    case 0x0A:   // peripheral 5: the divMMC automap master switch is bit 4
+    case 0xB8:   // divMMC entry points 0
+    case 0xB9:   // ...which of them need the +3 DOS ROM paged in
+    case 0xBA:   // ...and whether the map happens before or after the fetch
+    case 0xBB:   // divMMC entry points 1
       next_.write(reg, value);
-      if (auto* div = static_cast<DivMmc*>(expansion_.find("divmmc"))) {
-        div->setAutomap((value & 0x10) != 0);
-      }
+      syncDivMmcAutomap();
       return;
-    }
     case 0x03: {
       // The display timing bits are locked unless bit 7 unlocks them.
       u8 type = next_.read(0x03);
