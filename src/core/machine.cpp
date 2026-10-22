@@ -994,9 +994,12 @@ void Machine::updatePaging() {
   }
 
   mapBank(0, romBank_, false);
-  // Bit 3 of 0x7FFD swaps the whole 16 KiB at 0x4000 between bank 5 and the
-  // shadow screen in bank 7, not just the bank the ULA draws from.
-  mapBank(1, screenBank_, true);
+  // Bit 3 of 0x7FFD only picks the bank the ULA fetches from. The window at
+  // 0x4000 is hard-wired to bank 5 in normal paging mode; the shadow screen in
+  // bank 7 is only reachable by paging it into 0xC000. Programs keep their
+  // variables at 0x7F00..0x7FFF in bank 5 and expect them to stay visible
+  // after selecting the shadow screen.
+  mapBank(1, 5, true); // the fixed bank holding the main screen
   mapBank(2, 2, true);
   mapBank(3, ramBank_, true);
 }
