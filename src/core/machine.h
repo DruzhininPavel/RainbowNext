@@ -320,6 +320,12 @@ private:
   // from the file 8K above it. The framebuffer is 256 wide, so each output pixel
   // is the average of the two hi-res pixels it covers.
   void renderUlaHiresRow(int y, std::array<u32, ScreenWidth>& row) const;
+  // LoRes replaces the ULA with a 128x96 image stretched over the whole 256x192
+  // viewport, two display pixels per dot. NextReg 0x15 bit 7 switches it on and
+  // 0x6A bit 5 turns it into Radastan, four bits per dot.
+  bool loresEnabled() const;
+  bool radastanMode() const;
+  void renderLoresRow(int y, std::array<u32, ScreenWidth>& row) const;
   // Register 0x15 orders sprites, Layer 2 and the ULA from top to bottom.
   std::array<int, 3> layerOrder() const;
   static int layerDepth(const std::array<int, 3>& order, int layer);

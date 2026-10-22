@@ -366,7 +366,7 @@ peripheral = printer
 ctest --test-dir build --output-on-failure
 ```
 
-468 tests cover the Z80 core (timings, flags, undocumented opcodes,
+501 tests cover the Z80 core (timings, flags, undocumented opcodes,
 interrupts), the disassembler (base, CB, ED, indexed and Z80N forms, lengths and
 flow), the debugger's breakpoints and profiler, save states (round trips of the
 CPU, memory, paging and peripherals, and the refusals for a damaged, truncated,
@@ -383,10 +383,10 @@ loader, the DivMMC and its SPI SD card (single- and multi-block reads and
 writes, and that the module ships unplugged), the settings file, and end-to-end
 runs of hand-assembled programs through the machine. Golden-frame tests hash
 the finished picture for the classic screen, flash, Timex hi-res, ULA+, Layer 2,
-sprites and the tilemap, so an unintended change to the renderer fails the run
-with the scene named. Golden boot tests also drive the real `roms/128-0.rom` and
-`roms/plus3-0.rom` sets when those files are present; they skip themselves on a
-clean checkout.
+sprites, the tilemap, LoRes and Radastan, so an unintended change to the
+renderer fails the run with the scene named. Golden boot tests also drive the
+real `roms/128-0.rom` and `roms/plus3-0.rom` sets when those files are present;
+they skip themselves on a clean checkout.
 
 ## License
 

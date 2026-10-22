@@ -39,13 +39,13 @@ done by loading a ROM or a snapshot.
       the suites run without the copyrighted Spectrum ROM
 * [ ] `zexall` conformance run
 * [x] TAP/TZX tape loading
-* [x] Golden-frame hashes: `tests/test_golden.cpp` renders eight scenes and
+* [x] Golden-frame hashes: `tests/test_golden.cpp` renders ten scenes and
       compares an FNV-1a hash of the whole 320×256 surface against a recorded
       value. The scenes build their own memory contents, so no ROM is needed:
       the classic screen with per-cell ink/paper/bright, flash blinking, Timex
-      hi-res, ULA+, a Layer 2 gradient, two sprites, and the tilemap. Every
-      scene also asserts a few named pixels first, so a hash cannot record a
-      renderer that draws the wrong picture
+      hi-res, ULA+, a Layer 2 gradient, two sprites, the tilemap, LoRes and
+      Radastan. Every scene also asserts a few named pixels first, so a hash
+      cannot record a renderer that draws the wrong picture
 
 **Exit criteria:** `48.rom` boots to the BASIC prompt and executes BASIC (done);
 a multicolour demo renders correctly; `z80test` passes.
@@ -121,7 +121,15 @@ a multicolour demo renders correctly; `z80test` passes.
 * [x] The second Layer 2 palette, selectable for drawing by `0x43` bits 6:4 and
       for display by `0x43` bit 2, and bit 7 of a Layer 2 colour, which the
       blending modes use to lift the pixel above the sprites
-* [ ] Radastan mode
+* [x] LoRes and Radastan: `0x15` bit 7 replaces the ULA with a 128×96 image
+      stretched over the whole 256×192 viewport, two display pixels per dot and
+      two rows per image row. LoRes keeps eight bits per dot and adds the `0x6A`
+      palette offset to the high nibble only; Radastan takes four bits per dot
+      from one palette block, narrowed to `11` & offset(1:0) while ULA+ owns the
+      top 64 entries and to the plain high nibble once ULANext takes it back.
+      `0x6A` bit 4 XORs the Timex display file select, `0x32`/`0x33` scroll the
+      image in half-dot steps, and the clip registers are unimplemented on
+      hardware, so LoRes pixels are always opaque
 * [x] The Copper of registers `0x60`-`0x63`: 2K of program memory addressed by
       `0x61` (low byte) and bits 2:0 of `0x62` (high three bits), the `WAIT`
       and `MOVE` instructions, `0x0000` as a no-op and `0xFFFF` as the halt,

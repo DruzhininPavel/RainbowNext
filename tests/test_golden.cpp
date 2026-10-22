@@ -114,6 +114,8 @@ constexpr u64 HashUlaPlus = 0xBBDAF113D06DF225ull;
 constexpr u64 HashLayer2 = 0x289D9DDCA89D09D1ull;
 constexpr u64 HashSprites = 0xCA21C1FD60989B25ull;
 constexpr u64 HashTilemap = 0x3D65BBD25A402325ull;
+constexpr u64 HashLores8 = 8734180098038592293ull;
+constexpr u64 HashRadastan = 9389535656896754469ull;
 
 } // namespace
 
@@ -357,4 +359,72 @@ TEST(golden_frame_tilemap) {
   CHECK_EQ(surfacePixel(m, 0, 0), Green);
 
   CHECK_FRAME_HASH(HashTilemap, "tilemap");
+}
+
+// LoRes is a 128x96 image with eight bits per dot stretched over the whole
+// viewport, so a two-dimensional ramp covers the layout, the nibble split and
+// the way the second half of the image sits 8K further up the bank.
+TEST(golden_frame_lores_eight_bit) {
+  Machine m(MachineType::Next);
+  mapScreenBank(m);
+
+  for (int y = 0; y < 96; ++y) {
+    // Rows 0-47 live at 0x4000 and rows 48-95 at 0x6000.
+    const u16 base = u16(y < 48 ? 0x4000 + y * 128
+                               : 0x6000 + (y - 48) * 128);
+    for (int x = 0; x < 128; ++x) {
+      m.memWrite(u16(base + x), u8(((x & 0x0F) << 4) | ((y >> 3) & 0x0F)), 0);
+    }
+  }
+
+  m.writeNextReg(0x15, 0x80); // LoRes on
+  m.writeNextReg(0x6A, 0x03); // eight-bit LoRes, palette offset 3
+  m.writeNextReg(0x43, 0x00);
+  for (int entry = 0; entry < 256; ++entry) writePalette8(m, u8(entry), u8(entry));
+
+  renderOneFrame(m);
+
+  // The high nibble is shifted by the palette offset and the low one is not.
+  CHECK_EQ(pixelAt(m, 0, 0), argb8(u8(0x30)));
+  CHECK_EQ(pixelAt(m, 1, 1), argb8(u8(0x30)));
+  CHECK_EQ(pixelAt(m, 2, 0), argb8(u8(0x40)));
+  // Dot 127 of row 47 is the last byte of the first half of the bank.
+  CHECK_EQ(pixelAt(m, 254, 94), argb8(u8(0x25)));
+  // Row 48 is the first byte of the second half.
+  CHECK_EQ(pixelAt(m, 0, 96), argb8(u8(0x36)));
+  CHECK_EQ(pixelAt(m, 255, 191), argb8(u8(0x2B)));
+
+  CHECK_FRAME_HASH(HashLores8, "LoRes 8-bit");
+}
+
+// Radastan is the same 128x96 grid with four bits per dot, a palette offset that
+// selects the block and a pair of nibbles per byte.
+TEST(golden_frame_lores_radastan) {
+  Machine m(MachineType::Next);
+  mapScreenBank(m);
+
+  for (int y = 0; y < 96; ++y) {
+    for (int index = 0; index < 64; ++index) {
+      const u8 high = u8((index * 2) & 0x0F);
+      const u8 low = u8((index * 2 + 1 + (y >> 3)) & 0x0F);
+      m.memWrite(u16(0x4000 + y * 64 + index), u8((high << 4) | low), 0);
+    }
+  }
+
+  m.writeNextReg(0x15, 0x80); // LoRes on
+  m.writeNextReg(0x6A, 0x20 | 0x02); // Radastan, palette offset 2
+  m.writeNextReg(0x43, 0x00);
+  for (int entry = 0; entry < 256; ++entry) writePalette8(m, u8(entry), u8(entry));
+
+  renderOneFrame(m);
+
+  // With ULA+ off the offset is the whole high nibble of the palette index.
+  CHECK_EQ(pixelAt(m, 0, 0), argb8(u8(0x20)));
+  CHECK_EQ(pixelAt(m, 2, 0), argb8(u8(0x21)));
+  CHECK_EQ(pixelAt(m, 4, 0), argb8(u8(0x22)));
+  CHECK_EQ(pixelAt(m, 2, 16), argb8(u8(0x22)));
+  CHECK_EQ(pixelAt(m, 254, 190), argb8(u8(0x2A)));
+  CHECK_EQ(pixelAt(m, 255, 191), argb8(u8(0x2A)));
+
+  CHECK_FRAME_HASH(HashRadastan, "Radastan");
 }

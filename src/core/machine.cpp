@@ -1790,6 +1790,11 @@ Machine::TilemapView Machine::tilemapView() const {
 }
 
 void Machine::renderUlaRow(int y, std::array<u32, ScreenWidth>& row) const {
+  if (loresEnabled()) {
+    renderLoresRow(y, row);
+    return;
+  }
+
   // Timex modes 1 and 2 move the attributes, and mode 6 is a different display
   // entirely. The modes without a documented behaviour of their own (3, 4, 5,
   // 7) reuse the second file like mode 1 does, which is what the Timex hardware
@@ -1852,6 +1857,77 @@ void Machine::renderUlaHiresRow(int y, std::array<u32, ScreenWidth>& row) const 
       const u32 right = (pixels & (0x4000u >> (pair * 2))) ? ink : paper;
       row[size_t(col * 8 + pair)] = averageColours(left, right);
     }
+  }
+}
+
+bool Machine::loresEnabled() const {
+  return isNext() && (next_.read(0x15) & 0x80) != 0;
+}
+
+bool Machine::radastanMode() const {
+  return (next_.read(0x6A) & 0x20) != 0;
+}
+
+void Machine::renderLoresRow(int y, std::array<u32, ScreenWidth>& row) const {
+  // LoRes is a 128x96 image stretched over the whole 256x192 viewport, so every
+  // dot is two display pixels wide and two rows tall. NextReg 0x32/0x33 scroll
+  // it in half-dot steps and 0x6A bit 5 turns it into Radastan, four bits per
+  // dot. The image is linear, unlike the interleaved ULA screen file.
+  const u8 control = next_.read(0x6A);
+  const bool radastan = radastanMode();
+  const int paletteOffset = control & 0x0F;
+  const int scrollX = next_.read(0x32);
+  const int scrollY = next_.read(0x33);
+  const int palette = ulaPalette();
+  // 0x6A bit 4 XORs the Timex display file select, so Radastan can swap the two
+  // 6K halves of the bank without disturbing the SCLD register.
+  const bool secondFile =
+      ((ula_.screenMode() & 0x01) != 0) != ((control & 0x10) != 0);
+  const size_t bankBase = size_t(screenBank_) * BankSize;
+  const size_t base = bankBase + (radastan && secondFile ? 0x2000 : 0);
+
+  // The vertical scroll wraps inside the 192 line viewport, and the odd shape of
+  // the wrap above 192 is what the core does when the two are added together.
+  int scrolled = y + scrollY;
+  if (scrolled >= 192) scrolled = ((((scrolled >> 6) + 1) & 0x03) << 6) |
+                                  (scrolled & 0x3F);
+  const int line = scrolled >> 1;
+
+  size_t rowBase;
+  if (radastan) {
+    // 96 rows of 64 bytes: two dots per byte, 128 dots per row.
+    rowBase = size_t(line & 0x7F) << 6;
+  } else {
+    // 96 rows of 128 bytes, the second 48 of which live 8K further up so that
+    // the image fills 0x4000-0x57FF and 0x6000-0x77FF. A scrolled line past the
+    // bottom of the image walks on into the unused tail of the bank.
+    size_t offset = size_t(line) << 7;
+    if (scrolled >= 96)
+      offset = ((((offset >> 11) + 1) & 0x07) << 11) | (offset & 0x07FF);
+    rowBase = offset & 0x3FFF;
+  }
+
+  // Radastan takes its sixteen colours from one block of the palette selected by
+  // 0x6A bits 3:0, and only two of those bits apply when ULA+ owns the top 64
+  // entries. LoRes keeps eight bits per dot and only shifts the high nibble.
+  const bool ulaPlus = ulaPlusEnabled() && (next_.read(0x43) & 0x01) == 0;
+  const u8 highNibble = radastan
+                            ? (ulaPlus ? u8(0xC0 | (paletteOffset & 0x03))
+                                       : u8((paletteOffset & 0x0F) << 4))
+                            : 0;
+  for (int x = 0; x < ScreenWidth; ++x) {
+    const int px = (x + scrollX) & 0xFF;
+    u8 entry;
+    if (radastan) {
+      const u8 packed = ram_[base + rowBase + size_t(px >> 2)];
+      const u8 dot = (px & 0x02) != 0 ? u8(packed & 0x0F) : u8(packed >> 4);
+      entry = u8(highNibble | dot);
+    } else {
+      const u8 packed = ram_[base + rowBase + size_t(px >> 1)];
+      const u8 high = u8(((packed >> 4) + paletteOffset) & 0x0F);
+      entry = u8((high << 4) | (packed & 0x0F));
+    }
+    row[size_t(x)] = palette_.colour(palette, entry);
   }
 }
 

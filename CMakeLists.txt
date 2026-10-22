@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.24)
-project(RainbowNext VERSION 0.1.5 LANGUAGES CXX)
+project(RainbowNext VERSION 0.2.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -215,6 +215,7 @@ if(RAINBOW_BUILD_TESTS)
     tests/test_rom_selftest.cpp
     tests/test_next_boot.cpp
     tests/test_golden.cpp
+    tests/test_lores.cpp
   )
   target_link_libraries(rainbow_tests PRIVATE rainbow_core rainbow_plugin)
   target_compile_options(rainbow_tests PRIVATE -Wall -Wextra -Wpedantic)
