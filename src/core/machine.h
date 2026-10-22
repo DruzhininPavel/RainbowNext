@@ -326,8 +326,14 @@ private:
   // ULA+ is switched on either by its own mode register or by NextReg 0x68.
   bool ulaPlusEnabled() const;
   // The ink and paper colours of one attribute cell. ULA+ and ULANext remap the
-  // palette indices, so both halves are resolved together.
-  void ulaCellColours(u8 attr, bool flashOn, u32& ink, u32& paper) const;
+  // palette indices, so both halves are resolved together. The 9-bit palette
+  // values come back too, because NextReg 0x14 compares against them and not
+  // against the RGB the palette expands to.
+  void ulaCellColours(u8 attr, bool flashOn, u32& ink, u32& paper,
+                      u16& ink9, u16& paper9) const;
+  // True when a 9-bit palette value is the transparent one. Only the top eight
+  // bits take part, so 0x1C7 is transparent when 0x14 holds 0xE3.
+  bool ulaTransparent(u16 colour9) const;
   u32 ulaBorderColour(u8 index) const;
   // Maps one 16K bank into a pair of neighbouring 8K slots.
   void mapBank(int slot, int bank, bool ram);

@@ -1718,9 +1718,17 @@ void Machine::renderUlaRow(int y, std::array<u32, ScreenWidth>& row) const {
     const u8 attr = ram_[attrBase + size_t(col)];
     u32 inkRgb = 0;
     u32 paperRgb = 0;
-    ulaCellColours(attr, flashOn, inkRgb, paperRgb);
+    u16 ink9 = 0xFFFF;
+    u16 paper9 = 0xFFFF;
+    ulaCellColours(attr, flashOn, inkRgb, paperRgb, ink9, paper9);
+    // NextReg 0x14 makes the matching colour see-through, which is how a game
+    // shows Layer 2 under the ULA without blanking the ULA layer.
+    const bool inkClear = ulaTransparent(ink9);
+    const bool paperClear = ulaTransparent(paper9);
     for (int b = 0; b < 8; ++b) {
-      row[size_t(col * 8 + b)] = (pixels & (0x80u >> b)) ? inkRgb : paperRgb;
+      const bool on = (pixels & (0x80u >> b)) != 0;
+      row[size_t(col * 8 + b)] = on ? (inkClear ? Transparent : inkRgb)
+                                    : (paperClear ? Transparent : paperRgb);
     }
   }
 }
@@ -1748,7 +1756,10 @@ void Machine::renderUlaHiresRow(int y, std::array<u32, ScreenWidth>& row) const 
   }
 }
 
-void Machine::ulaCellColours(u8 attr, bool flashOn, u32& ink, u32& paper) const {
+void Machine::ulaCellColours(u8 attr, bool flashOn, u32& ink, u32& paper,
+                             u16& ink9, u16& paper9) const {
+  ink9 = 0xFFFF;
+  paper9 = 0xFFFF;
   if (!isNext()) {
     const u8 bright = u8(attr & 0x40) ? 8 : 0;
     const u8 inkIndex = u8((attr & 0x07) | bright);
@@ -1769,9 +1780,15 @@ void Machine::ulaCellColours(u8 attr, bool flashOn, u32& ink, u32& paper) const 
       const u8 fallback = u8(next_.read(0x4A) & 0x0F);
       ink = palette_.colour(palette, attr);
       paper = palette_.colour(palette, u8(16 + fallback));
+      ink9 = palette_.colour9(palette, attr);
+      paper9 = palette_.colour9(palette, u8(16 + fallback));
     } else {
-      ink = palette_.colour(palette, u8(attr & mask));
-      paper = palette_.colour(palette, u8(128 + (attr & u8(~mask))));
+      const u8 inkIndex = u8(attr & mask);
+      const u8 paperIndex = u8(128 + (attr & u8(~mask)));
+      ink = palette_.colour(palette, inkIndex);
+      paper = palette_.colour(palette, paperIndex);
+      ink9 = palette_.colour9(palette, inkIndex);
+      paper9 = palette_.colour9(palette, paperIndex);
     }
     return;
   }
@@ -1782,8 +1799,12 @@ void Machine::ulaCellColours(u8 attr, bool flashOn, u32& ink, u32& paper) const 
     // block chosen by FLASH and BRIGHT.
     const u8 block = u8(((attr & 0x80) ? 2 : 0) | ((attr & 0x40) ? 1 : 0));
     const u8 base = u8(block * 16);
-    ink = palette_.colour(palette, u8(base + (attr & 0x07)));
-    paper = palette_.colour(palette, u8(base + 8 + ((attr >> 3) & 0x07)));
+    const u8 inkIndex = u8(base + (attr & 0x07));
+    const u8 paperIndex = u8(base + 8 + ((attr >> 3) & 0x07));
+    ink = palette_.colour(palette, inkIndex);
+    paper = palette_.colour(palette, paperIndex);
+    ink9 = palette_.colour9(palette, inkIndex);
+    paper9 = palette_.colour9(palette, paperIndex);
     return;
   }
 
@@ -1791,8 +1812,17 @@ void Machine::ulaCellColours(u8 attr, bool flashOn, u32& ink, u32& paper) const 
   const u8 inkIndex = u8((attr & 0x07) | bright);
   const u8 paperIndex = u8(((attr >> 3) & 0x07) | bright);
   const bool flash = (attr & 0x80) != 0 && flashOn;
-  ink = ulaColour(flash ? paperIndex : inkIndex);
-  paper = paperColour(flash ? inkIndex : paperIndex);
+  const u8 shownInk = flash ? paperIndex : inkIndex;
+  const u8 shownPaper = flash ? inkIndex : paperIndex;
+  ink = ulaColour(shownInk);
+  paper = paperColour(shownPaper);
+  // Ink lives in the low half of the ULA palette and paper in the high half.
+  ink9 = palette_.colour9(palette, u8(shownInk & 0x0F));
+  paper9 = palette_.colour9(palette, u8(16 + (shownPaper & 0x0F)));
+}
+
+bool Machine::ulaTransparent(u16 colour9) const {
+  return isNext() && u8(colour9 >> 1) == next_.read(0x14);
 }
 
 bool Machine::ulaPlusEnabled() const {
