@@ -152,7 +152,9 @@ a multicolour demo renders correctly; `z80test` passes.
 * [x] DivMMC: an 8K or 32K esxDOS ROM, sixteen 8K RAM banks, `mapram`, the
       automap on `0x0000`/`0x0008`/`0x0038`/`0x0066`/`0x04C6`/`0x0562`, and an
       SPI SD card on an in-memory sector image (`CMD0`-`CMD59`, SDHC, block
-      addressing). Loaded from the `Peripherals` menu
+      addressing). Loaded from the `Peripherals` menu. Ships **unplugged** --
+      classic 128K + esxDOS is the configuration it is being finished on, and
+      its Next support currently derails the Next boot ROM (see item 17)
 * [x] SD card image access for NextZXOS: the card is `src/core/sdcard.*`, shared
       by the DivMMC and the Next firmware instead of hidden inside the module,
       with `CMD18`/`CMD25`/`CMD12`/`CMD23` for the multi-block reads and writes
@@ -288,9 +290,15 @@ These are deliberate simplifications, tracked here so they are not forgotten:
     the emulator exits. The SPI clock is not modelled: a command is answered on
     the next byte instead of after the few hundred cycles a real card needs, so
     a driver that polls for readiness simply sees it at once.
-17. The DivMMC does not decode NextReg `0xB8`-`0xBB`, the programmable automap
-    entry points, and its status port at `0x1F` is an approximation (card detect
-    and busy only); the exact bit layout of a real board was not available.
+17. DivMMC on the Next is unfinished and the module therefore ships unplugged.
+    NextReg `0xB8`-`0xBB` (the programmable automap entry points) are decoded,
+    but on `MachineType::Next` the hook returns into an address that is a `+3DOS`
+    data table in the real ROM, so the boot ROM executes data, issues an invalid
+    SD command frame and soft-resets -- NextZXOS never reaches its menu. The
+    plan is to finish it as a separate out-of-tree plugin over the expansion bus
+    rather than keep it on the Next's boot path. Its status port at `0x1F` is
+    also an approximation (card detect and busy only); the exact bit layout of a
+    real board was not available.
 18. A `.nex` loading screen is loaded into memory but never shown: the
     `loadingBar`, `loadingDelay` and `startDelay` fields are parsed and ignored,
     so the program starts at once instead of after an animated bar. The

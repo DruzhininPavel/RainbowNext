@@ -940,13 +940,15 @@ void Machine::installPeripherals() {
   expansion_.add(std::make_unique<Cartridge>(), false);
   // Last, because its status port shares 0x1F with the Kempston joystick and
   // the joystick is the one most software expects to find there. The Next has
-  // the module built in, so it starts plugged in there.
+  // the module built in, but the emulation is still a work in progress and it
+  // derails the Next boot ROM, so it starts unplugged everywhere and has to be
+  // switched on deliberately.
   auto divmmc = std::make_unique<DivMmc>();
   divmmc->setRom3PresentProvider([this] { return romBank() == 3; });
   // The Next moved the SPI byte to 0xEB and its chip select to 0xE7, leaving
   // 0xDF to the Kempston joystick and DAC D; the older boards decode 0xDF.
   divmmc->setLegacySpiPort(!isNext());
-  expansion_.add(std::move(divmmc), isNext());
+  expansion_.add(std::move(divmmc), false);
   refreshCartridge();
   syncDivMmcAutomap();
 }

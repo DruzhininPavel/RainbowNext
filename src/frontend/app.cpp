@@ -728,8 +728,8 @@ void App::insertSdCard() {
     status_ = "SD card failed: " + error;
     return;
   }
-  // The card is useless unless the ports that reach it are decoded, and on the
-  // Next the interface is built into the board, so enabling it is never wrong.
+  // The card is useless unless the ports that reach it are decoded. The module
+  // ships unplugged, so inserting a card is what plugs it in.
   machine_->expansion().setEnabled("divmmc", true);
   syncConfigFromBus();
 }

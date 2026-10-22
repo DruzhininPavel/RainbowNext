@@ -84,15 +84,19 @@ Status: v0.1.3 — M1 and M2 done: 48K and 128K/+2/+3 boot with AY sound, tape
   and the loader's register state. Loading one switches the machine to the Next.
 * **Modular peripherals** — an expansion bus in the spirit of the edge
   connector. A Kempston joystick, a Kempston mouse, a ZX Printer (with PBM
-  export), a ROM cartridge and a DivMMC ship with the emulator; each is a module
-  that can be switched on and off in `Peripherals`, and the choice is remembered
-  in `rainbow.cfg`. Further modules are shared libraries dropped into a
+  export) and a ROM cartridge ship with the emulator; each is a module that can
+  be switched on and off in `Peripherals`, and the choice is remembered in
+  `rainbow.cfg`. Further modules are shared libraries dropped into a
   `peripherals/` folder next to the executable — the emulator finds them at
   startup and needs no rebuild (see [Writing a peripheral](#writing-a-peripheral)).
-* **DivMMC and SD card** — the mass-storage interface esxDOS runs on: an 8K (or
-  32K) DivMMC ROM, sixteen 8K RAM banks, the automap on the hook addresses, and
-  an SPI SD card that talks to a plain sector image. Load `esxdos.rom` and a
-  card image from `Peripherals`; both are yours to supply.
+* **DivMMC and SD card (in development)** — the mass-storage interface esxDOS
+  runs on: an 8K (or 32K) DivMMC ROM, sixteen 8K RAM banks, the automap on the
+  hook addresses, and an SPI SD card that talks to a plain sector image. The
+  module ships **unplugged**: its Next support is unfinished and the hook
+  derails the Next boot ROM, so it has to be switched on deliberately in
+  `Peripherals`, then given an `esxdos.rom` and a card image (both yours to
+  supply). Classic 128K + esxDOS is the configuration it is being developed
+  against. See [DivMMC](#divmmc) for the current state and what is still open.
 * **Frontend** — resizable window, integer scaling, speed 1×/2×/4×/8×,
   drag & drop loading, Dear ImGui menus and a debugger with breakpoints, a
   disassembly listing, a memory editor and a profiler.
@@ -185,7 +189,7 @@ ROM images are not bundled — see [`roms/README.md`](roms/README.md).
 ./build/rainbow game.tap             # ROM from roms/, tape inserted
 ./build/rainbow --rom 48.rom --tape game.tzx --snapshot save.z80
 ./build/rainbow --rom roms/plus3-0.rom --disk game.dsk
-./build/rainbow --rom roms/48.rom --sd nextzxos.img   # DivMMC SD card
+./build/rainbow --rom roms/128.rom --sd nextzxos.img  # DivMMC SD card (in development)
 ./build/rainbow --rom roms/next.rom --esxdos gamefiles/ # RST 8 from a directory
 ./build/rainbow --state quick.rbn      # carry on from a saved state
 ```
@@ -302,7 +306,8 @@ only: Fuse and other RZX players will refuse them.
 src/core/          Z80, ULA, AY, DACs, µPD765, SD card, Machine — no OS deps
 src/core/          peripheral.h and expansion.h: the bus and the module contract
 src/peripherals/   built-in modules: kempston, kempston mouse, printer,
-                   cartridge, divmmc (SPI SD card shared from src/core/sdcard)
+                   cartridge, divmmc (SPI SD card shared from src/core/sdcard;
+                   ships unplugged, still in development)
 src/plugin/        the C ABI and the loader for out-of-tree modules
 plugins/           example plugin: a Fuller Audio Box joystick interface
 src/formats/       SNA / Z80 / NEX images, TAP / TZX tapes, DSK / EDSK / TRD disks
@@ -358,7 +363,7 @@ peripheral = printer
 ctest --test-dir build --output-on-failure
 ```
 
-414 tests cover the Z80 core (timings, flags, undocumented opcodes,
+468 tests cover the Z80 core (timings, flags, undocumented opcodes,
 interrupts), the disassembler (base, CB, ED, indexed and Z80N forms, lengths and
 flow), the debugger's breakpoints and profiler, save states (round trips of the
 CPU, memory, paging and peripherals, and the refusals for a damaged, truncated,
@@ -372,10 +377,10 @@ application to the machine, the AY, the TurboSound chip select and stereo bits,
 the SpecDrum and SoundDrive DAC ports, 128K/+3 paging and timings, tape blocks,
 the µPD765 and the DSK parser, the expansion bus with its modules and plugin
 loader, the DivMMC and its SPI SD card (single- and multi-block reads and
-writes), the settings file, and end-to-end runs of hand-assembled programs
-through the machine. Golden tests also boot the real
-`roms/128-0.rom` and `roms/plus3-0.rom` sets when those files are present; they
-skip themselves on a clean checkout.
+writes, and that the module ships unplugged), the settings file, and end-to-end
+runs of hand-assembled programs through the machine. Golden tests also boot the
+real `roms/128-0.rom` and `roms/plus3-0.rom` sets when those files are present;
+they skip themselves on a clean checkout.
 
 ## License
 

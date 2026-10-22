@@ -838,6 +838,18 @@ TEST(divmmc_hook_enable_follows_the_entry_point_registers) {
   CHECK(!div.hookEnabled(0x0562));
 }
 
+TEST(next_divmmc_starts_unplugged) {
+  // Its Next support is unfinished -- the hook derails the boot ROM -- so the
+  // module ships unplugged and waits to be switched on deliberately.
+  for (const MachineType type :
+       {MachineType::Spectrum48, MachineType::Spectrum128, MachineType::Plus2,
+        MachineType::Plus3, MachineType::Pentagon, MachineType::Next}) {
+    Machine machine(type);
+    CHECK(machine.expansion().find("divmmc") != nullptr);
+    CHECK(!machine.expansion().enabled("divmmc"));
+  }
+}
+
 TEST(next_divmmc_automap_starts_off_and_follows_register_0x0a) {
   Machine machine(MachineType::Next);
   auto* div = static_cast<DivMmc*>(machine.expansion().find("divmmc"));
@@ -881,6 +893,9 @@ TEST(next_divmmc_rst8_only_maps_in_with_rom3_paged) {
 
   auto* div = static_cast<DivMmc*>(machine.expansion().find("divmmc"));
   CHECK(div != nullptr);
+  // The module is unplugged by default until its Next support is finished, so
+  // the test has to switch it on the same way a user would.
+  CHECK(machine.expansion().setEnabled("divmmc", true));
   std::string error;
   CHECK(div->loadRom(std::vector<u8>(DivMmc::RomSize, 0xC9), error));
 

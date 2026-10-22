@@ -18,7 +18,7 @@ flowchart TD
         FDC["µPD765<br/>+3 disk controller,<br/>two ports, non-DMA"]
         FMT["Formats<br/>SNA, Z80, TAP, TZX, DSK"]
         EXP["Expansion bus<br/>edge connector, I/O + memory,<br/>built-in + plugin modules"]
-        MMC["DivMMC<br/>esxDOS ROM, RAM window,<br/>SPI SD card"]
+        MMC["DivMMC (in development)<br/>esxDOS ROM, RAM window,<br/>SPI SD card, ships unplugged"]
     end
 
     subgraph host["Frontend (SDL3 + Dear ImGui)"]
@@ -85,7 +85,8 @@ There are two levels of module, and the difference is only who compiles them:
 * **Built-in** (`src/peripherals/`) are compiled into `rainbow_core`, created by
   a factory in `Machine::installPeripherals()` and type-safe. They can reach the
   rest of the core directly when they need to; `kempston`, `kempston-mouse`,
-  `printer`, `cartridge` and `divmmc` ship this way.
+  `printer`, `cartridge` and `divmmc` ship this way. `divmmc` is the one that
+  arrives unplugged (see [DivMMC and the SD card](#divmmc-and-the-sd-card)).
 * **Plugins** are shared libraries (`.dylib` / `.so` / `.dll`) in a folder next
   to the executable, found at startup and after `Rescan plugin folder`. They
   talk to the emulator through the plain C ABI of `src/plugin/plugin_api.h` and
@@ -155,6 +156,17 @@ one, plug in a fake module and drive it without a CPU or a ROM — see
 is the first module that uses the memory half of the contract. It owns two
 things.
 
+> **Status: in development, unplugged by default.** The module is created on
+> every machine but `Machine::installPeripherals()` adds it disabled, so
+> `rainbow.cfg`, the `Peripherals` menu, `--sd` and `Load DivMMC ROM...` are
+> what switch it on. Classic 128K + esxDOS is the configuration it is being
+> worked on. Its Next support is unfinished: on `MachineType::Next` the hook
+> returns into what is a `+3DOS` data table in the real ROM, the boot ROM then
+> executes data and soft-resets, so NextZXOS never reaches its menu. The
+> intended fix is to rework it as a separate out-of-tree plugin (the expansion
+> bus is the natural integration path) rather than keep it on the Next's boot
+> path.
+
 **The memory window.** When `conmem` is set the module replaces `0x0000-0x1FFF`
 with its ROM and `0x2000-0x3FFF` with one of sixteen 8K RAM banks, so `control`
 (the latch on port `0xE3`) selects the bank in bits 3:0, `mapram` in bit 6 puts
@@ -200,8 +212,7 @@ The frontend offers `Load DivMMC ROM...` and `Insert SD card image...` under
 Both switch the module on. The card image is owned by the app rather than the
 module, so switching the machine type rebuilds the bus without ejecting the
 card. The ROM is not shipped — put `esxdos.rom` (8K, or 32K for a DivMMC+)
-wherever you keep your ROMs and load it
-from there.
+wherever you keep your ROMs and load it from there.
 
 ## Timings
 
