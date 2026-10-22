@@ -13,7 +13,7 @@ port semantics, memory layouts) was reimplemented.
 | [ZEsarUX](https://github.com/chernandezba/zesarux) | GPL-3.0 | Confirmation of contention ranges and border timing edge cases |
 | Fuse `fuse/peripherals/scld.c`, `scld.h` | GPL-2.0 | Timex SCLD: the `scrnmode`/`hirescol` bit split, `ALTDFILE_OFFSET`, the `hires_convert_dec` colour pairs (ink is the complement of paper, both bright) and the `x % 16 > 7` rule that picks the second display file |
 | Fuse `libspectrum/rzx.c` | GPL-2.0 | The RZX container layout: the `RZX!` header, the block identifiers and their length-includes-the-header rule, the creator/snapshot/input block fields, and the `0xFFFF` frame-count repeat marker. Reimplemented as `src/core/rzx.*`; no code copied |
-| [raxoft/z80test](https://github.com/raxoft/z80test) | MIT | Flag-behaviour expectations; planned as an external conformance suite |
+| [raxoft/z80test](https://github.com/raxoft/z80test) | MIT | Vendored v1.2a TAP images in `tests/data/z80test/`; `tests/test_z80test.cpp` runs them and checks the result line. Found the `DAA` and `INI/IND/OUTI/OUTD` bugs |
 | [raxoft/zexall](https://github.com/raxoft/zexall) | — | Planned full Z80 conformance run |
 
 ## Architecture and structure (read as design reference)
@@ -43,9 +43,11 @@ port semantics, memory layouts) was reimplemented.
 | [DivMMC](https://wiki.specnext.dev/DIVMMC) | — | Port map (`0xE3` control, `0xDF` SPI, `0xE7`/`0xEB` map/unmap), the automap hook addresses, `conmem`/`mapram` |
 | [SD Specifications, Part 1: Physical Layer](https://www.sdcard.org/downloads/pls/) | — | SPI command set, R1/R7 responses, the `CSD`/`CID` layouts, `ACMD41` and the HCS bit |
 
-## Conformance suites (to be wired into CI)
+## Conformance suites
 
-* `z80test` — flags, undocumented instructions, MEMPTR.
+* `z80test` — flags, undocumented instructions, MEMPTR. Wired into
+  `rainbow_tests`; the TAP images live in `tests/data/z80test/` under their own
+  MIT licence. The runs skip when `roms/48.rom` is absent.
 * `zexall` / `zexdoc` — full instruction coverage.
 * `z80ccf` — CCF/SCF flag quirks.
 * VHDL-derived per-instruction tests from the Next core.

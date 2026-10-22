@@ -21,7 +21,10 @@ done by loading a ROM or a snapshot.
       a `LOAD ""` run from a real TAP, and golden tests that boot the real `roms/48.rom`
 * [x] `48.rom` boots to the BASIC prompt: the copyright message is printed and
       `PRINT 42` evaluates to `42` with the `0 OK, 0:1` report
-* [ ] `z80test` / `zexall` conformance runs in CI
+* [x] `z80test` conformance suite runs as part of the unit tests: `z80doc` and
+      `z80docflags` pass 160 of 160, `z80flags` 152 of 160 (the remaining eight
+      are the CPU-dependent SCF/CCF variants and the MEMPTR-sensitive block cases)
+* [ ] `zexall` conformance run
 * [x] TAP/TZX tape loading
 * [ ] Golden-frame image hashes
 
