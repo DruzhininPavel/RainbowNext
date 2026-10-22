@@ -5,12 +5,12 @@ around a deterministic headless core and a thin SDL3 + Dear ImGui frontend.
 Runs on macOS and Linux (including SteamOS / Steam Deck).
 
 ```
-Status: v0.1.0 — M1 and M2 done: 48K and 128K/+2/+3 boot with AY sound, tape
+Status: v0.1.1 — M1 and M2 done: 48K and 128K/+2/+3 boot with AY sound, tape
         loading, disk images and snapshots, plus the Z80N instruction set, the
         Next's MMU/NextREG file, its palette hardware, Layer 2, sprites, the
         tilemap and the video pipeline (Timex, ULA+, ULANext, blending).
-        M3 — replay, save states and shaders — is under way
-        (docs/ROADMAP.md).
+        M3 is under way: save states, a rewind buffer and the debugger are in;
+        RZX replay and shaders are not (docs/ROADMAP.md).
 ```
 
 ## Features

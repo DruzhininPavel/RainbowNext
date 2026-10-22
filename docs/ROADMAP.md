@@ -191,7 +191,8 @@ a multicolour demo renders correctly; `z80test` passes.
 * [x] macOS universal (arm64 + Intel) and a SteamOS/Linux AppImage. One
       `CMAKE_OSX_ARCHITECTURES` environment variable in the matrix makes the
       macOS job cross-compile both slices, and the Linux job packs the same
-      binary into an AppDir that `appimagetool` turns into a single runnable file
+      binary into an AppDir that `appimagetool` turns into a single runnable
+      file. `v0.1.1` is the first release that ships both
 * [ ] Steam Deck controller profiles, 1280×800 default scaling
 
 ## Known gaps
