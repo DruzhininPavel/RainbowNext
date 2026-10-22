@@ -71,6 +71,38 @@ public:
   u16 portBAddress() const { return bPtr_; }
   int bytesRemaining() const { return int(counter_); }
 
+  // The bus callbacks are the machine's, so they are not part of the state.
+  template <class Ar> void serialize(Ar& ar) {
+    ar(aStart_);
+    ar(bStart_);
+    ar(length_);
+    ar(directionAToB_);
+    ar(aIsIo_);
+    ar(bIsIo_);
+    ar(aMode_);
+    ar(bMode_);
+    ar(cycleA_);
+    ar(cycleB_);
+    ar(prescalar_);
+    ar(mode_);
+    ar(autoRestart_);
+    ar(legacy_);
+    ar(enabled_);
+    ar(busy_);
+    ar(aPtr_);
+    ar(bPtr_);
+    ar(counter_);
+    ar(accum_);
+    ar(endOfBlock_);
+    ar(transferred_);
+    ar(readMask_);
+    ar(readIndex_);
+    ar(params_);
+    ar(paramCount_);
+    ar(paramIndex_);
+    ar(expectMask_);
+  }
+
 private:
   // The parameter slot the next write will land in.
   enum class Param : u8 {

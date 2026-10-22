@@ -85,6 +85,16 @@ public:
   int waitLine() const { return waitLine_; }
   int waitHpos() const { return waitHpos_; }
 
+  template <class Ar> void serialize(Ar& ar) {
+    ar(program_);
+    ar(index_);
+    ar(mode_);
+    ar(cpc_);
+    ar(pendingMsb_);
+    ar(waitLine_);
+    ar(waitHpos_);
+  }
+
 private:
   std::array<u8, ProgramSize> program_{};
   u16 index_ = 0;

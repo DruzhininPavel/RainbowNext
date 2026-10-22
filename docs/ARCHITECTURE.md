@@ -276,6 +276,50 @@ animated: the `loadingBar` and delay fields are parsed but nothing draws a
 progress bar, which is a determinism win and a fidelity loss noted in the
 roadmap.
 
+## Save states
+
+`src/core/state.h` is a two-ended stream: `StateWriter` appends fields,
+`StateReader` consumes them, and `Machine::serialize` is one template that both
+of them call. Writing a field the reader does not know about is therefore not
+possible — the same line of code does both directions — which is the property
+that keeps a state format from rotting.
+
+The file is:
+
+```
+RBNSTATE         8 bytes, magic
+version          u32, bump when the field order changes
+machine type     u8, MachineType
+rom loaded       u8
+ROM fingerprint  u64, FNV-1a over the ROM image
+body             every subsystem, RAM, framebuffer and the paging registers
+checksum         u64, FNV-1a over everything above
+```
+
+`loadState` verifies the size, magic and checksum before it reads a single
+field, then the version, the machine type and the ROM fingerprint. The body is
+parsed twice — once into a scratch machine to prove the whole of it reads, then
+for real — so a file that is wrong anywhere leaves the machine exactly as it
+was rather than half-rewritten. The scratch pass also insists that the body is
+consumed to the last byte, which is what catches a field added without a
+version bump.
+
+What is stored and what is not follows one rule: **state is stored, derivatives
+are not.** RAM, the framebuffer and the border colour are state; the resolved
+page table (`page_`), the audio mix buffer, the sprite collision scratch and the
+turbo accumulator are recomputed by `updatePaging()` and the next frame, so a
+state can never disagree with itself. Tapes, disks and the SD card image are
+user-supplied files of unbounded size and are not embedded: a state records the
+tape head position and the frontend keeps the media attached.
+
+The ROM is fingerprinted rather than stored. It is the user's file, it is large,
+and a state restored against a different ROM would run code the state never saw.
+
+`src/core/rewind.*` is a ring of those same states, bounded by bytes rather than
+by a count because a 48K state is a few hundred kilobytes and a Next state a few
+megabytes. `App` pushes one every four frames; `F10` pops one and loads it, which
+is what makes rewinding a matter of arithmetic rather than a second emulator.
+
 ## Disk
 
 The +3's µPD765 lives in `src/core/upd765.*` and talks to the CPU through the

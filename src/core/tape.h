@@ -52,6 +52,17 @@ public:
   // Moves the head past the block it currently rests on.
   void stepBlock();
 
+  // Only the head is a save state: the tape itself is reattached by path, so a
+  // state restores where the tape was, not which tape it was.
+  template <class Ar> void serialize(Ar& ar) {
+    ar(block_);
+    ar(pulse_);
+    ar(remaining_);
+    ar(ear_);
+    ar(playing_);
+    ar(fastLoad_);
+  }
+
 private:
   bool nextPulse();
 

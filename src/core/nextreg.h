@@ -39,6 +39,11 @@ public:
   // 0 = 3.5 MHz, 1 = 7 MHz, 2 = 14 MHz, 3 = 28 MHz.
   u8 turbo() const { return u8(values_[0x07] & 0x03); }
 
+  template <class Ar> void serialize(Ar& ar) {
+    ar(values_);
+    ar(selected_);
+  }
+
 private:
   std::array<u8, Count> values_{};
   u8 selected_ = 0;

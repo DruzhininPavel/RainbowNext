@@ -39,6 +39,16 @@ public:
   u8 ulaPlusMode() const { return ulaPlusMode_; }
   bool ulaPlusEnabled() const { return (ulaPlusMode_ & 0x01) != 0; }
 
+  template <class Ar> void serialize(Ar& ar) {
+    ar(border_);
+    ar(beeper_);
+    ar(lastByte_);
+    ar(defaultValue_);
+    ar(timex_);
+    ar(ulaPlusRegister_);
+    ar(ulaPlusMode_);
+  }
+
 private:
   u8 border_ = 0;
   u8 beeper_ = 0;

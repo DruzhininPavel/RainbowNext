@@ -43,6 +43,31 @@ class Upd765 {
   u8 status2() const { return status2_; }
   bool busy() const { return phase_ != Phase::Idle; }
 
+  // The disk image itself is not a save state, only where the controller is in
+  // a command; the image is reattached with loadDisk.
+  template <class Ar> void serialize(Ar& ar) {
+    ar(motor_);
+    ar(phase_);
+    ar(command_);
+    ar(buffer_);
+    ar(cursor_);
+    ar(result_);
+    ar(cpuToFdc_);
+    ar(cylinder_);
+    ar(head_);
+    ar(unit_);
+    ar(seekPending_);
+    ar(seekStatus_);
+    ar(seekCylinder_);
+    ar(status0_);
+    ar(status1_);
+    ar(status2_);
+    ar(lastC_);
+    ar(lastH_);
+    ar(lastR_);
+    ar(lastN_);
+  }
+
  private:
   enum class Phase { Idle, Command, Execution, Result };
 

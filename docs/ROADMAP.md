@@ -173,8 +173,15 @@ a multicolour demo renders correctly; `z80test` passes.
       before the instruction runs, the CPU tab lists the disassembly around PC
       (click a line to toggle a breakpoint), the Memory tab pokes bytes and the
       Profiler tab ranks addresses by how often they were executed
-* [ ] RZX replay and recording, rewind buffer
-* [ ] Save states in a versioned binary format
+* [x] Save states in a versioned binary format: `RBNSTATE`, a version, the
+      machine type, a ROM fingerprint, the body and an FNV-1a checksum. One
+      `serialize` template writes and reads every field, so the two directions
+      cannot drift apart. `F8`/`F9` quick save and load, `Shift+F8`/`Shift+F9`
+      with a file dialog, `--state` on the command line
+* [x] Rewind buffer: a ring of states capped by bytes, one recorded every four
+      frames while the machine runs. `F10` pauses and steps back through it,
+      `View > Rewind buffer` turns the recording off
+* [ ] RZX replay and recording
 * [ ] CRT/scanline shaders (SDL_GPU backend)
 * [x] CI releases: a tagged build of macOS arm64 and Linux x86_64, packaged as a
       self-contained zip (SDL3 linked in, `peripherals/` and `roms/` beside the
