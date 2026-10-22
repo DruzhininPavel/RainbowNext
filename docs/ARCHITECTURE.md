@@ -320,6 +320,54 @@ by a count because a 48K state is a few hundred kilobytes and a Next state a few
 megabytes. `App` pushes one every four frames; `F10` pops one and loads it, which
 is what makes rewinding a matter of arithmetic rather than a second emulator.
 
+## RZX replay
+
+`src/core/rzx.*` is the container and `src/core/rzx_session.*` is the session
+that makes one. The format is the one libspectrum and Fuse read, which is the
+only description of it that exists: a ten-byte `RZX!` header, then blocks of a
+one-byte identifier and a 32-bit length that counts its own five header bytes.
+
+```
+0x10  CREATOR   20-byte program name, major and minor words
+0x20  SIGN_START    \
+0x21  SIGN_END      / signature blocks, skipped
+0x30  SNAPSHOT  flags, a four-character format name, length, data
+0x80  INPUT     frame count, T-states, flags, then frames
+```
+
+An input frame is a 16-bit instruction count, a 16-bit byte count and that many
+bytes; a count of `0xFFFF` means "repeat the previous frame", which is how a
+still screen costs four bytes instead of thousands.
+
+What the bytes are is the whole idea of the format: each one is the value a port
+read returned, in the order the CPU asked for them. RZX does not record the
+keyboard. It records what the machine saw, so a replay does not care what the
+host is doing — which is why a session has to sit on the machine's I/O path and
+not on the input layer. `Machine::ioRead` takes an `IoReadHook` and calls it with
+the value it is about to return; in record mode the session appends that value
+to the current frame, in play mode it returns the recorded one instead.
+
+A recording therefore starts with a snapshot, taken at a frame boundary, and the
+input stream only means anything when replayed onto it. That snapshot goes into
+the file's `SNAPSHOT` block under the four-character name `RBNS`, which is our
+own state format: `Machine::loadState` reads it back exactly, and no translation
+from `SNA` or `SZX` has to be invented. The cost is that other emulators cannot
+open a RainbowNext RZX, which is a deliberate trade for a replay that is right
+rather than approximately right.
+
+Blocks are written uncompressed. Compression is optional in the format — the
+flag simply stays clear — and skipping it keeps zlib out of the dependency list.
+A file is dominated by its snapshot, so a 48K recording is about 2.4 MB however
+many frames it holds.
+
+`App` drives the session one frame at a time: `runFrame()` then
+`RzxSession::frameFinished()`. A frame cut short by a breakpoint or a pause is
+dropped instead of half-written. A replay that runs out of frames switches itself
+off and pauses the emulator. Reads the recording has no byte for, and bytes it
+stored that the machine never asked for, are counted as desyncs rather than
+treated as fatal: the run continues and the count says whether it was the one
+that was recorded.
+
 ## Disk
 
 The +3's µPD765 lives in `src/core/upd765.*` and talks to the CPU through the

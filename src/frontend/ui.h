@@ -29,6 +29,7 @@ inline constexpr ImU32 kTextMuted = IM_COL32(156, 156, 174, 255);
 inline constexpr ImU32 kAccent = IM_COL32(0, 215, 215, 255);
 inline constexpr ImU32 kOnAccent = IM_COL32(10, 10, 14, 255);
 inline constexpr ImU32 kWarn = IM_COL32(215, 215, 0, 255);
+inline constexpr ImU32 kDanger = IM_COL32(224, 72, 72, 255);
 
 struct Fonts {
   ImFont* regular = nullptr;

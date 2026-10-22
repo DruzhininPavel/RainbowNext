@@ -418,6 +418,8 @@ void Machine::stepInstruction() {
     ++samples_[cpu_.regs().pc];
     ++sampleTotal_;
   }
+  ++instructions_;
+  ++instructions_;
   cpu_.step();
 }
 
@@ -690,8 +692,13 @@ void Machine::memWriteBase(u16 addr, u8 value, u32) {
 
 u8 Machine::ioRead(u16 port, u32 t) {
   u8 value = 0xFF;
-  if (expansion_.ioRead(port, t, value)) return value;
-  return ioReadBase(port, t);
+  // The hook is the last stop on the way to the CPU, so a recording captures
+  // what a program actually saw, whichever module answered the read.
+  if (expansion_.ioRead(port, t, value)) {
+    return ioReadHook_ != nullptr ? ioReadHook_->ioRead(port, value) : value;
+  }
+  value = ioReadBase(port, t);
+  return ioReadHook_ != nullptr ? ioReadHook_->ioRead(port, value) : value;
 }
 
 void Machine::ioWrite(u16 port, u8 value, u32 t) {

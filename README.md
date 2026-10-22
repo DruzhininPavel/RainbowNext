@@ -5,13 +5,12 @@ around a deterministic headless core and a thin SDL3 + Dear ImGui frontend.
 Runs on macOS and Linux (including SteamOS / Steam Deck).
 
 ```
-Status: v0.1.2 — M1 and M2 done: 48K and 128K/+2/+3 boot with AY sound, tape
+Status: v0.1.3 — M1 and M2 done: 48K and 128K/+2/+3 boot with AY sound, tape
         loading, disk images and snapshots, plus the Z80N instruction set, the
         Next's MMU/NextREG file, its palette hardware, Layer 2, sprites, the
         tilemap and the video pipeline (Timex, ULA+, ULANext, blending).
-        M3 is under way: save states, a rewind buffer, the debugger and the
-        CRT filter on an SDL_GPU renderer are in; RZX replay is not
-        (docs/ROADMAP.md).
+        M3 is done: save states, a rewind buffer, RZX replay and recording, the
+        debugger and the CRT filter on an SDL_GPU renderer (docs/ROADMAP.md).
 ```
 
 ## Features
@@ -76,6 +75,9 @@ Status: v0.1.2 — M1 and M2 done: 48K and 128K/+2/+3 boot with AY sound, tape
   and extended `.edsk` images (SPECIFY, SEEK, READ ID, READ/WRITE DATA, FORMAT
   TRACK), driven by the real +3 ROM.
 * **Snapshots** — `.sna` (48K/128K) and `.z80` (v1, v2, v3 with RLE).
+* **RZX** — record and replay the RZX container: the input block holds the value
+  every port read returned, so a replay reproduces the run regardless of what
+  the keyboard is doing. See [RZX replay](#rzx-replay).
 * **Next programs** — `.nex` (V1.0–V1.3): the RAM banks in the loader's own
   order, the optional palette, Layer 2 and ULA loading screens, the entry bank
   and the loader's register state. Loading one switches the machine to the Next.
@@ -239,6 +241,25 @@ one.
 (one every four frames, up to 256 MB, so roughly a minute of 48K play). It
 pauses the machine, and pressing it again steps further back. `View > Rewind
 buffer` switches the recording off if the memory is wanted for something else.
+
+## RZX replay
+
+`File > Record RZX` starts recording from the current frame, and the toolbar
+shows `REC` while it runs. `File > Stop recording...` asks for a name and writes
+a `.rzx` file; `File > Discard recording` throws it away.
+
+`File > Play RZX...` loads one back, or pass it on the command line:
+`rainbow --rzx demo.rzx`. The machine is rebuilt from the snapshot stored in the
+file and then fed the recorded input, so the run does not depend on what the
+keyboard is doing. The toolbar shows `REPLAY`, and the emulator pauses when the
+last frame is done.
+
+What is recorded is the value each port read returned, not the state of the
+keys — that is what the format stores and what makes a replay exact. A file
+carries a full save state, so a 48K recording is about 2.4 MB no matter how many
+frames it holds, and the blocks are left uncompressed. The snapshot uses
+RainbowNext's own state format, which means these files are for this emulator
+only: Fuse and other RZX players will refuse them.
 
 ## Layout
 

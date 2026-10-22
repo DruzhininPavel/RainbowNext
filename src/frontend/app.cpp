@@ -150,6 +150,7 @@ bool App::init(const Options& options) {
   }
 
   machine_ = std::make_unique<Machine>(MachineType::Spectrum48);
+  rzx_.bind(*machine_);
   audio_.init(44100);
   machine_->setSampleRate(audio_.sampleRate() > 0 ? audio_.sampleRate() : 44100);
 
@@ -177,6 +178,7 @@ bool App::init(const Options& options) {
   applyPeripheralConfig();
   if (!options.sd.empty()) loadDivMmcCard(options.sd);
   if (!options.state.empty()) loadStateFile(options.state);
+  if (!options.rzx.empty()) loadRzxFile(options.rzx);
   if (options.debugger) {
     showDebugger_ = true;
     paused_ = true;
@@ -253,6 +255,8 @@ void App::run() {
         case DialogKind::Printout: savePrintout(path); break;
         case DialogKind::StateSave: saveStateFile(path); break;
         case DialogKind::StateLoad: loadStateFile(path); break;
+        case DialogKind::RzxSave: saveRzxFile(path); break;
+        case DialogKind::RzxLoad: loadRzxFile(path); break;
       }
       dialogSave_ = false;
     }
@@ -275,6 +279,16 @@ void App::run() {
         // A breakpoint stops the frame early, so the machine is left with the
         // registers the user wants to look at.
         if (machine_->runFrame().has_value()) {
+          // Half a frame of input is not a frame: drop it rather than write a
+          // recording that cannot be replayed.
+          rzx_.frameAborted();
+          paused_ = true;
+          break;
+        }
+        const bool wasPlaying = rzx_.playing();
+        if (!rzx_.frameFinished(*machine_) && wasPlaying) {
+          // A replay that ran out of frames has already switched itself off.
+          status_ = "RZX replay finished";
           paused_ = true;
           break;
         }
@@ -405,6 +419,8 @@ void App::handleEvent(const SDL_Event& event) {
         loadDivMmcCard(path);
       } else if (extension == ".rbn") {
         loadStateFile(path);
+      } else if (extension == ".rzx") {
+        loadRzxFile(path);
       } else {
         loadSnapshot(path);
       }
@@ -432,8 +448,12 @@ void App::reset() {
 
 void App::setMachine(MachineType type) {
   clearRewind();
+  // A session belongs to the machine it was started on, so it goes before the
+  // bus it was recording is torn down.
+  rzx_.unbind();
   machine_ = std::make_unique<Machine>(type);
   machine_->setSampleRate(audio_.sampleRate() > 0 ? audio_.sampleRate() : 44100);
+  rzx_.bind(*machine_);
 
   // A 48K ROM is not a valid 128K ROM and vice versa, so pick the matching set
   // instead of reusing whatever happened to be loaded before.
@@ -520,6 +540,8 @@ void App::openFileDialog(DialogKind kind) {
       {"SD card images", "mmc;img;iso;bin"}, {"All files", "*"}};
   static const SDL_DialogFileFilter stateFilters[] = {
       {"RainbowNext save state", "rbn"}, {"All files", "*"}};
+  static const SDL_DialogFileFilter rzxFilters[] = {
+      {"RZX replays", "rzx"}, {"All files", "*"}};
 
   dialogKind_ = kind;
   dialogOpen_ = true;
@@ -532,6 +554,7 @@ void App::openFileDialog(DialogKind kind) {
   if (kind == DialogKind::DivMmcRom) filters = divMmcRomFilters;
   if (kind == DialogKind::DivMmcCard) filters = divMmcCardFilters;
   if (kind == DialogKind::StateLoad) filters = stateFilters;
+  if (kind == DialogKind::RzxLoad) filters = rzxFilters;
   SDL_ShowOpenFileDialog(onFileDialog, this, window_, filters, 2, nullptr, false);
 }
 
@@ -541,12 +564,15 @@ void App::openSaveDialog(DialogKind kind) {
       {"PBM image", "pbm"}, {"All files", "*"}};
   static const SDL_DialogFileFilter stateFilters[] = {
       {"RainbowNext save state", "rbn"}, {"All files", "*"}};
+  static const SDL_DialogFileFilter rzxFilters[] = {
+      {"RZX replays", "rzx"}, {"All files", "*"}};
 
   dialogKind_ = kind;
   dialogOpen_ = true;
   dialogSave_ = true;
   const SDL_DialogFileFilter* filters = printoutFilters;
   if (kind == DialogKind::StateSave) filters = stateFilters;
+  if (kind == DialogKind::RzxSave) filters = rzxFilters;
   SDL_ShowSaveFileDialog(onFileDialog, this, window_, filters, 2, nullptr);
 }
 
@@ -694,8 +720,114 @@ bool App::loadStateFile(const std::string& path) {
   return true;
 }
 
-void App::quickSaveState() {
-  if (quickStatePath_.empty()) {
+// ---------------------------------------------------------------------------
+// RZX replay
+// ---------------------------------------------------------------------------
+
+void App::startRzxRecording() {
+  if (rzx_.playing()) {
+    status_ = "Stop the replay before recording";
+    return;
+  }
+  // The snapshot is taken now, so the recording starts at the point the user
+  // pressed the menu item rather than wherever the machine happened to be
+  // halfway through a frame.
+  std::string error;
+  if (!rzx_.startRecording(*machine_, error)) {
+    status_ = "Cannot record: " + error;
+    return;
+  }
+  paused_ = false;
+  status_ = "Recording RZX - File > Stop recording to save it";
+}
+
+bool App::saveRzxFile(const std::string& path) {
+  rzx::File file;
+  if (!rzx_.takeRecording(file)) {
+    status_ = "No recording to save";
+    return false;
+  }
+  if (file.blocks.empty() || file.blocks.back().input.frames.empty()) {
+    status_ = "Nothing was recorded";
+    return false;
+  }
+
+  std::vector<u8> bytes;
+  rzx::write(file, bytes);
+  std::ofstream out(path, std::ios::binary | std::ios::trunc);
+  if (!out) {
+    status_ = "Cannot write " + path;
+    return false;
+  }
+  out.write(reinterpret_cast<const char*>(bytes.data()), std::streamsize(bytes.size()));
+  if (!out) {
+    status_ = "Cannot write " + path;
+    return false;
+  }
+  status_ = "RZX saved: " + path + " (" +
+            std::to_string(file.blocks.back().input.frames.size()) + " frames)";
+  return true;
+}
+
+bool App::loadRzxFile(const std::string& path) {
+  std::ifstream in(path, std::ios::binary);
+  if (!in) {
+    status_ = "RZX failed: cannot open " + path;
+    return false;
+  }
+  std::vector<u8> bytes{std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>()};
+  if (in.bad()) {
+    status_ = "RZX failed: cannot read " + path;
+    return false;
+  }
+
+  rzx::File file;
+  std::string error;
+  if (!rzx::parse(bytes, file, error)) {
+    status_ = "RZX failed: " + error;
+    return false;
+  }
+
+  // The replay has to start from the snapshot the recording began with,
+  // otherwise the input stream describes a machine that no longer exists.
+  const rzx::SnapshotBlock* snapshot = nullptr;
+  for (const rzx::Block& block : file.blocks) {
+    if (block.kind == rzx::Block::Kind::Snapshot) {
+      snapshot = &block.snapshot;
+      break;
+    }
+  }
+  if (snapshot == nullptr) {
+    status_ = "RZX failed: no snapshot in the file";
+    return false;
+  }
+  if (snapshot->format != "RBNS") {
+    // Only our own state format is understood, and inventing a mapping from
+    // SNA/SZX is not something a replay can afford to get wrong.
+    status_ = "RZX failed: unsupported snapshot format \"" + snapshot->format + "\"";
+    return false;
+  }
+
+  MachineType type = MachineType::Spectrum48;
+  if (Machine::peekStateType(snapshot->data, type) && type != machine_->type()) setMachine(type);
+  if (!machine_->loadState(snapshot->data, error)) {
+    status_ = "RZX failed: " + error;
+    return false;
+  }
+
+  clearRewind();
+  rzx_.startPlayback(std::move(file));
+  paused_ = false;
+  status_ = "RZX playing: " + path + " (" + std::to_string(rzx_.totalFrames()) + " frames)";
+  return true;
+}
+
+void App::stopRzx() {
+  rzx_.cancel();
+  status_ = "Recording discarded";
+}
+
+void App::quickSaveState() {  if (quickStatePath_.empty()) {
     status_ = "No writable folder for a quick save";
     return;
   }
@@ -975,6 +1107,18 @@ void App::drawToolbar() {
     if (ImGui::MenuItem("Quick save", "F8")) quickSaveState();
     if (ImGui::MenuItem("Quick load", "F9")) quickLoadState();
     ImGui::Separator();
+    if (rzx_.recording()) {
+      if (ImGui::MenuItem("Stop recording...")) openSaveDialog(DialogKind::RzxSave);
+      if (ImGui::MenuItem("Discard recording")) stopRzx();
+    } else {
+      if (ImGui::MenuItem("Record RZX", nullptr, false, !rzx_.playing())) startRzxRecording();
+    }
+    if (ImGui::MenuItem("Play RZX...")) openFileDialog(DialogKind::RzxLoad);
+    if (rzx_.playing() && ImGui::MenuItem("Stop replay")) {
+      rzx_.cancel();
+      status_ = "Replay stopped";
+    }
+    ImGui::Separator();
     if (ImGui::MenuItem("Reset", "F5")) reset();
     ImGui::Separator();
     if (ImGui::MenuItem("Quit")) running_ = false;
@@ -1096,6 +1240,8 @@ void App::drawToolbar() {
     chipX -= ui::kChipGap;
   };
   if (paused_) placeChip("PAUSED", ui::kWarn, ui::kOnAccent);
+  if (rzx_.recording()) placeChip("REC", ui::kDanger, ui::kOnAccent);
+  if (rzx_.playing()) placeChip("REPLAY", ui::kAccent, ui::kOnAccent);
   if (!machine_->romLoaded()) placeChip("NO ROM", ui::kAccent, ui::kOnAccent);
   placeChip(machineName(machine_->type()), ui::kSurface, ui::kTextMuted);
 
