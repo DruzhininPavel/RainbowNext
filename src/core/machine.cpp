@@ -446,7 +446,6 @@ void Machine::stepInstruction() {
     ++sampleTotal_;
   }
   ++instructions_;
-  ++instructions_;
   cpu_.step();
 }
 
