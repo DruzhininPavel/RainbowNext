@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=RainbowNext
+GenericName=ZX Spectrum emulator
+Comment=ZX Spectrum and ZX Spectrum Next emulator
+Exec=rainbow
+Icon=rainbownext
+Terminal=false
+Categories=Game;Emulator;
+Keywords=zx;spectrum;next;emulator;sinclair;

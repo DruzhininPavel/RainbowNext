@@ -183,12 +183,15 @@ a multicolour demo renders correctly; `z80test` passes.
       `View > Rewind buffer` turns the recording off
 * [ ] RZX replay and recording
 * [ ] CRT/scanline shaders (SDL_GPU backend)
-* [x] CI releases: a tagged build of macOS arm64 and Linux x86_64, packaged as a
+* [x] CI releases: a tagged build of macOS and Linux x86_64, packaged as a
       self-contained zip (SDL3 linked in, `peripherals/` and `roms/` beside the
       executable) and attached to a GitHub release. `v0.1.0` is the first
       release cut this way; `workflow_dispatch` builds the same archives as
       workflow artifacts without publishing them
-* [ ] macOS universal (arm64 + Intel) and a SteamOS/Linux AppImage
+* [x] macOS universal (arm64 + Intel) and a SteamOS/Linux AppImage. One
+      `CMAKE_OSX_ARCHITECTURES` environment variable in the matrix makes the
+      macOS job cross-compile both slices, and the Linux job packs the same
+      binary into an AppDir that `appimagetool` turns into a single runnable file
 * [ ] Steam Deck controller profiles, 1280×800 default scaling
 
 ## Known gaps
