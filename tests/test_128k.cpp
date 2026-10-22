@@ -69,6 +69,33 @@ TEST(k128_screen_bank_follows_bit_three) {
   CHECK_EQ(m.screenBank(), 5);
 }
 
+// Bit 3 swaps the whole 16 KiB window at 0x4000, not just the bank the ULA
+// reads its pixels from. Games that unpack a level into the shadow screen rely
+// on seeing the other bank's bytes there.
+TEST(k128_screen_bank_swaps_the_4000_window) {
+  Machine m(MachineType::Spectrum128);
+
+  m.ioWrite(0x7FFD, 0x05, 0); // bank 5 at 0xC000, screen bank 5
+  m.memWrite(0xC000, 0xAA, 0);
+  m.ioWrite(0x7FFD, 0x07, 0); // bank 7 at 0xC000, screen bank 5
+  m.memWrite(0xC000, 0xBB, 0);
+
+  m.ioWrite(0x7FFD, 0x05, 0);
+  CHECK_EQ(m.memRead(0x4000, 0), 0xAA);
+  m.ioWrite(0x7FFD, 0x0D, 0); // bit 3 set: 0x4000 now shows bank 7
+  CHECK_EQ(m.screenBank(), 7);
+  CHECK_EQ(m.memRead(0x4000, 0), 0xBB);
+  CHECK_EQ(m.memRead(0xC000, 0), 0xAA); // bank 5 still at 0xC000
+  m.ioWrite(0x7FFD, 0x05, 0);
+  CHECK_EQ(m.memRead(0x4000, 0), 0xAA);
+
+  // With both the paging and the screen bit pointing at bank 7 the bank is
+  // aliased into 0x4000 and 0xC000 at the same time.
+  m.ioWrite(0x7FFD, 0x0F, 0);
+  m.memWrite(0x4000, 0xCC, 0);
+  CHECK_EQ(m.memRead(0xC000, 0), 0xCC);
+}
+
 TEST(k128_rom_bank_follows_bit_four) {
   Machine m(MachineType::Spectrum128);
   loadFourRomBanks(m);

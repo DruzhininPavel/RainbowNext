@@ -994,7 +994,9 @@ void Machine::updatePaging() {
   }
 
   mapBank(0, romBank_, false);
-  mapBank(1, 5, true); // the fixed bank holding the main screen
+  // Bit 3 of 0x7FFD swaps the whole 16 KiB at 0x4000 between bank 5 and the
+  // shadow screen in bank 7, not just the bank the ULA draws from.
+  mapBank(1, screenBank_, true);
   mapBank(2, 2, true);
   mapBank(3, ramBank_, true);
 }
