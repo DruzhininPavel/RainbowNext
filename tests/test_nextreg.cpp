@@ -248,6 +248,25 @@ TEST(nextreg_0x8e_maps_the_128k_memory_in_one_write) {
   CHECK_EQ(m.readNextReg(0x8E) & 0x04, 0x04);
 }
 
+TEST(next_ula_screen_bank_follows_port_7ffd) {
+  Machine m(MachineType::Next);
+  loadPatternRom(m);
+
+  // The Next maps memory through the MMU registers, but the ULA still takes
+  // its screen from bit 3 of 0x7FFD. A game that keeps Layer 2 in the low
+  // banks uses it to pick the free one, so it has to move the ULA with it.
+  m.ioWrite(0x7FFD, 0x00, 0);
+  CHECK_EQ(m.screenBank(), 5);
+  CHECK_EQ(m.ramBank(), 0);
+
+  m.ioWrite(0x7FFD, 0x08, 0);
+  CHECK_EQ(m.screenBank(), 7);
+
+  m.ioWrite(0x7FFD, 0x0B, 0);
+  CHECK_EQ(m.screenBank(), 7);
+  CHECK_EQ(m.ramBank(), 3);
+}
+
 TEST(nextreg_machine_type_needs_the_unlock_bit) {
   Machine m(MachineType::Next);
 

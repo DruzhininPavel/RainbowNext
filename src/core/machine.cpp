@@ -961,8 +961,12 @@ void Machine::updatePaging() {
 
   if (isNext()) {
     // The Next keeps its map in the MMU registers, and the classic paging
-    // ports only write into those same registers.
+    // ports only write into those same registers. The ULA still takes its
+    // screen bank from 0x7FFD bit 3, which is how a game swaps between the
+    // shadow screen and the one Layer 2 uses.
     updateNextMmu();
+    ramBank_ = u8(port7ffd_ & 0x07);
+    screenBank_ = (port7ffd_ & 0x08) ? 7 : 5;
     return;
   }
 
