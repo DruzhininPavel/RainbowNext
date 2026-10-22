@@ -94,6 +94,7 @@ add_library(mynext_core STATIC
   src/peripherals/kempston_mouse.cpp
   src/peripherals/printer.cpp
   src/peripherals/cartridge.cpp
+  src/peripherals/divmmc.cpp
   src/formats/dsk.cpp
   src/formats/sna.cpp
   src/formats/tape.cpp
@@ -171,6 +172,7 @@ if(MYNEXT_BUILD_TESTS)
     tests/test_copper.cpp
     tests/test_dma.cpp
     tests/test_expansion.cpp
+    tests/test_divmmc.cpp
     src/frontend/config.cpp
   tests/test_turbosound.cpp
     tests/test_tilemap.cpp

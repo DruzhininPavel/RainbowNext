@@ -45,6 +45,9 @@ struct HostServices {
     if (ioWrite) ioWrite(host, port, value, t);
   }
   u8 readMem(u16 addr, u32 t) const { return memRead ? memRead(host, addr, t) : 0xFF; }
+  void writeMem(u16 addr, u8 value, u32 t) const {
+    if (memWrite) memWrite(host, addr, value, t);
+  }
   u8 joystickState() const { return joystick ? joystick(host) : 0; }
 };
 
@@ -76,6 +79,31 @@ public:
   }
   virtual bool ioWrite(u16 port, u8 value, u32 t) {
     (void)port;
+    (void)value;
+    (void)t;
+    return false;
+  }
+
+  // Memory is offered before the machine decodes it, so a module can shadow
+  // ROM or RAM -- which is what a DivMMC's automap does when it lays its own
+  // ROM over 0x0000. Same rule as the ports: true means the module answered.
+  //
+  // Every read of every instruction goes through here, so a module that wants
+  // memory must say so in `interceptsMemory()`; the bus then keeps it on a
+  // short list and leaves the hot path alone when nothing is plugged in.
+  // `m1` is set for an opcode fetch. An automapping device needs it: it maps
+  // its ROM in when the CPU fetches an opcode at a known hook address, and it
+  // must not react to an operand read of the same address.
+  virtual bool interceptsMemory() const { return false; }
+  virtual bool memRead(u16 addr, u32 t, bool m1, u8& value) {
+    (void)addr;
+    (void)t;
+    (void)m1;
+    (void)value;
+    return false;
+  }
+  virtual bool memWrite(u16 addr, u8 value, u32 t) {
+    (void)addr;
     (void)value;
     (void)t;
     return false;

@@ -29,9 +29,11 @@
 extern "C" {
 #endif
 
-/* Bumped whenever a struct below changes shape. The loader refuses a plugin
- * that was built against a different number instead of calling into a table it
- * does not understand. */
+/* Bumped only for a change the loader cannot detect by itself. Fields may be
+ * appended to either struct without a bump: both carry a `struct_size`, so the
+ * loader reads an appended field only when the plugin's struct is long enough
+ * to have it, and an old plugin keeps working with a new emulator. A change to
+ * an existing field's meaning or position still needs a bump. */
 #define MYNEXT_PLUGIN_ABI_VERSION 1u
 
 /* The symbol a plugin must export. */
@@ -83,6 +85,17 @@ typedef struct mynext_peripheral_v1 {
   int (*io_read)(void* self, uint16_t port, uint32_t t, uint8_t* value);
   int (*io_write)(void* self, uint16_t port, uint8_t value, uint32_t t);
   void (*tick)(void* self, uint32_t cycles);
+
+  /* Appended after ABI 1 was released, so a plugin that leaves `struct_size`
+   * short of these simply never sees a memory access. They run before the
+   * machine decodes the address, which is how a device shadows ROM or RAM --
+   * a DivMMC laying its own ROM over 0x0000, for instance. Return non-zero to
+   * claim the access. Leaving both null keeps the machine's fast path. */
+  int (*mem_read)(void* self, uint16_t addr, uint32_t t, uint8_t* value);
+  int (*mem_write)(void* self, uint16_t addr, uint8_t value, uint32_t t);
+  /* The same read for an M1 opcode fetch, which is the cycle an automapping
+   * device reacts to. Null means mem_read handles both. */
+  int (*mem_fetch)(void* self, uint16_t addr, uint32_t t, uint8_t* value);
 } mynext_peripheral_v1;
 
 typedef const mynext_peripheral_v1* (*mynext_plugin_entry_fn)(void);

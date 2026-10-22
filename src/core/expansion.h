@@ -48,6 +48,13 @@ public:
   bool ioRead(u16 port, u32 t, u8& value);
   bool ioWrite(u16 port, u8 value, u32 t);
 
+  // Memory goes to the modules before the machine decodes it, in the same
+  // daisy-chain order. `memoryHooked()` is false when no enabled module wants
+  // memory, which is the common case and keeps the read path cheap.
+  bool memoryHooked() const { return !memory_.empty(); }
+  bool memRead(u16 addr, u32 t, bool m1, u8& value);
+  bool memWrite(u16 addr, u8 value, u32 t);
+
   // The ROM of the first enabled cartridge, or null.
   const std::vector<u8>* rom() const;
 
@@ -61,8 +68,13 @@ public:
 
 private:
   void changed();
+  void rebuildMemoryList();
 
   std::vector<Slot> slots_;
+  // Enabled modules that intercept memory, in chain order. Rebuilt by
+  // `changed()` so a read costs one empty check rather than a virtual call per
+  // slot.
+  std::vector<Peripheral*> memory_;
   HostServices host_;
   std::function<void()> observer_;
 };

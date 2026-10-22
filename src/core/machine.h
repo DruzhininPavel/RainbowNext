@@ -101,6 +101,7 @@ public:
   // Bus interface
   u8 memRead(u16 addr, u32 t) override;
   void memWrite(u16 addr, u8 value, u32 t) override;
+  u8 memFetch(u16 addr, u32 t) override;
   u8 ioRead(u16 port, u32 t) override;
   void ioWrite(u16 port, u8 value, u32 t) override;
   u8 contention(u16 addr, u32 t) override;
@@ -175,6 +176,10 @@ private:
   // peripheral's host callbacks reach, so a module never recurses into itself.
   u8 ioReadBase(u16 port, u32 t);
   void ioWriteBase(u16 port, u8 value, u32 t);
+  // Same split for memory: the public memRead/memWrite give the expansion bus
+  // first refusal, so a module can shadow ROM or RAM, and fall back to these.
+  u8 memReadBase(u16 addr, u32 t);
+  void memWriteBase(u16 addr, u8 value, u32 t);
   void installPeripherals();
   void refreshCartridge();
 

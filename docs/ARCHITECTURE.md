@@ -17,7 +17,8 @@ flowchart TD
         DAC["SpecDrum<br/>4x 8-bit DAC"]
         FDC["µPD765<br/>+3 disk controller,<br/>two ports, non-DMA"]
         FMT["Formats<br/>SNA, Z80, TAP, TZX, DSK"]
-        EXP["Expansion bus<br/>edge connector,<br/>built-in + plugin modules"]
+        EXP["Expansion bus<br/>edge connector, I/O + memory,<br/>built-in + plugin modules"]
+        MMC["DivMMC<br/>esxDOS ROM, RAM window,<br/>SPI SD card"]
     end
 
     subgraph host["Frontend (SDL3 + Dear ImGui)"]
@@ -37,6 +38,7 @@ flowchart TD
     MACH --> FDC
     MACH --> FMT
     MACH --> EXP
+    EXP --> MMC
     APP --> MACH
     APP --> AUD
     APP --> INP
@@ -83,7 +85,7 @@ There are two levels of module, and the difference is only who compiles them:
 * **Built-in** (`src/peripherals/`) are compiled into `mynext_core`, created by
   a factory in `Machine::installPeripherals()` and type-safe. They can reach the
   rest of the core directly when they need to; `kempston`, `kempston-mouse`,
-  `printer` and `cartridge` ship this way.
+  `printer`, `cartridge` and `divmmc` ship this way.
 * **Plugins** are shared libraries (`.dylib` / `.so` / `.dll`) in a folder next
   to the executable, found at startup and after `Rescan plugin folder`. They
   talk to the emulator through the plain C ABI of `src/plugin/plugin_api.h` and
@@ -116,9 +118,79 @@ that module is plugged in. The bus fires an observer after anything that changes
 what the modules contribute, and `Machine::refreshCartridge()` re-reads the image
 then rather than on every access.
 
+### Memory, and the M1 cycle
+
+Ports are not enough for everything. The DivMMC and DivIDE map themselves over
+the bottom 8K, and — this is the part that shapes the contract — they map in on
+their *own*, in the middle of an opcode fetch, whenever the CPU executes a byte
+at one of a handful of hook addresses. A driver that never writes to the control
+port still gets its NMI handler.
+
+So a module opts into memory with `interceptsMemory()`, and the bus keeps a
+separate list of the modules that said yes. `Machine::memRead()` and
+`memWrite()` consult that list before the base memory, and pay nothing when it
+is empty. The three memory methods are:
+
+* `memRead(addr, t, m1, value)` — `m1` is true only for an opcode fetch, so a
+  module can tell "the CPU is executing here" from "the CPU is reading a byte
+  here". That distinction is the whole automap.
+* `memFetch(addr, t)` — the machine's version, called from `Z80::fetch()` via
+  `Bus::memFetch()`, which defaults to `memRead()` so a module that does not care
+  only implements one of them.
+* `memWrite(addr, value, t)` — claimed the same way, which is what lets a module
+  hide the machine's RAM behind its own.
+
+`true` means the module answered and the access stops there; `false` falls
+through to the next module and then to the machine. Because a module can claim
+an address and still decline to store anything — a DivMMC's ROM half is
+read-only — the boolean means "mine", not "changed".
+
 The bus owns its modules and knows nothing about `Machine`, so a test can build
 one, plug in a fake module and drive it without a CPU or a ROM — see
-`tests/test_expansion.cpp`.
+`tests/test_expansion.cpp` and `tests/test_divmmc.cpp`.
+
+## DivMMC and the SD card
+
+`src/peripherals/divmmc.*` is the mass-storage interface esxDOS runs on, and it
+is the first module that uses the memory half of the contract. It owns two
+things.
+
+**The memory window.** When `conmem` is set the module replaces `0x0000-0x1FFF`
+with its ROM and `0x2000-0x3FFF` with one of sixteen 8K RAM banks, so `control`
+(the latch on port `0xE3`) selects the bank in bits 3:0, `mapram` in bit 6 puts
+RAM bank 3 over the ROM half, and bits 5:4 pick one of four pages when the ROM
+image is 32K. An opcode fetch at `0x0000`, `0x0008`, `0x0038`, `0x0066`,
+`0x04C6` or `0x0562` sets `conmem` by itself; a plain read of the same address
+does not.
+
+**The card.** The SD card is an `SdCard`: a plain sector image in memory with
+the SPI state machine in front of it, which is why it is testable without a
+file. A driver sends a six-byte command frame (`0x40 | cmd`, four argument
+bytes, a CRC that SPI mode ignores) and reads an R1 back; `CMD0`, `CMD8`,
+`CMD55`+`ACMD41`, `CMD9`, `CMD10`, `CMD13`, `CMD16`, `CMD17`, `CMD24`, `CMD58`
+and `CMD59` are answered, and everything else gets the illegal-command bit. The
+card reports SDHC and block addressing once `ACMD41` sets the HCS bit, and its
+`CSD` is rewritten to match the size of the image, because that is the one field
+a driver sanity-checks.
+
+Two details are worth knowing:
+
+* **Chip select is not a port.** The board ties it to the mapping latch, so the
+  card listens exactly while the module is mapped out. That is why esxDOS unmaps
+  before every SPI access, and why `0xE7`/`0xEB` exist at all.
+* **The SPI port is one register.** A write to `0xDF` clocks a byte through the
+  card and latches what came back; a read hands that byte over without clocking
+  again. Drivers are written as `out (0xDF),a : in a,(0xDF)`, so treating a read
+  as a second transfer would run the card at twice the clock rate.
+
+The `0x1F` status port shares its address with the Kempston joystick, so the
+module is plugged in last and the joystick wins `0x1F`; the module answers on
+`0x3F`, `0x9F` and `0xBF` instead.
+
+The frontend offers `Load DivMMC ROM...` and `Insert SD card image...` under
+**Peripherals**; both switch the module on. The ROM is not shipped — put
+`esxdos.rom` (8K, or 32K for a DivMMC+) wherever you keep your ROMs and load it
+from there.
 
 ## Timings
 

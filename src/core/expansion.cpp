@@ -102,6 +102,20 @@ bool ExpansionBus::ioWrite(u16 port, u8 value, u32 t) {
   return false;
 }
 
+bool ExpansionBus::memRead(u16 addr, u32 t, bool m1, u8& value) {
+  for (Peripheral* module : memory_) {
+    if (module->memRead(addr, t, m1, value)) return true;
+  }
+  return false;
+}
+
+bool ExpansionBus::memWrite(u16 addr, u8 value, u32 t) {
+  for (Peripheral* module : memory_) {
+    if (module->memWrite(addr, value, t)) return true;
+  }
+  return false;
+}
+
 const std::vector<u8>* ExpansionBus::rom() const {
   for (const Slot& slot : slots_) {
     if (!slot.enabled) continue;
@@ -148,7 +162,17 @@ void ExpansionBus::applyEnabledList(const std::string& list) {
   changed();
 }
 
+void ExpansionBus::rebuildMemoryList() {
+  memory_.clear();
+  for (Slot& slot : slots_) {
+    if (slot.enabled && slot.module->interceptsMemory()) {
+      memory_.push_back(slot.module.get());
+    }
+  }
+}
+
 void ExpansionBus::changed() {
+  rebuildMemoryList();
   if (observer_) observer_();
 }
 

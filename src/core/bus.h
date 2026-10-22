@@ -16,6 +16,11 @@ public:
   virtual u8 memRead(u16 addr, u32 t) = 0;
   virtual void memWrite(u16 addr, u8 value, u32 t) = 0;
 
+  // An M1 opcode fetch. It is a memory read with the M1 line asserted, which
+  // is the cycle an automapping device listens for, so it gets its own entry
+  // point. The default forwards to memRead, so a flat bus needs no change.
+  virtual u8 memFetch(u16 addr, u32 t) { return memRead(addr, t); }
+
   // I/O access.
   virtual u8 ioRead(u16 port, u32 t) = 0;
   virtual void ioWrite(u16 port, u8 value, u32 t) = 0;

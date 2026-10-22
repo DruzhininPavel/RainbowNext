@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cstddef>
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
@@ -18,6 +19,18 @@ namespace mynext {
 namespace {
 
 constexpr size_t kHostSize = sizeof(mynext_host_v1);
+
+// The fields that were there from ABI 1. A plugin is accepted when it declares
+// at least this much, so a newer header with appended fields stays compatible
+// with an older plugin and the other way round.
+constexpr uint32_t kPeripheralMinimum =
+    uint32_t(offsetof(mynext_peripheral_v1, tick) + sizeof(void (*)(void*, uint32_t)));
+constexpr uint32_t kPeripheralMemory =
+    uint32_t(offsetof(mynext_peripheral_v1, mem_write) +
+             sizeof(int (*)(void*, uint16_t, uint8_t, uint32_t)));
+constexpr uint32_t kPeripheralFetch =
+    uint32_t(offsetof(mynext_peripheral_v1, mem_fetch) +
+             sizeof(int (*)(void*, uint16_t, uint32_t, uint8_t*)));
 
 void* openLibrary(const std::string& path, std::string& error) {
 #if defined(_WIN32)
@@ -114,6 +127,30 @@ bool PluginPeripheral::ioWrite(u16 port, u8 value, u32 t) {
   return api_->io_write(self_, port, value, t) != 0;
 }
 
+bool PluginPeripheral::interceptsMemory() const {
+  if (api_ == nullptr || api_->struct_size < kPeripheralMemory) return false;
+  return api_->mem_read != nullptr || api_->mem_write != nullptr ||
+         (api_->struct_size >= kPeripheralFetch && api_->mem_fetch != nullptr);
+}
+
+bool PluginPeripheral::memRead(u16 addr, u32 t, bool m1, u8& value) {
+  if (!interceptsMemory()) return false;
+  int (*read)(void*, uint16_t, uint32_t, uint8_t*) = api_->mem_read;
+  if (m1 && api_->struct_size >= kPeripheralFetch && api_->mem_fetch != nullptr) {
+    read = api_->mem_fetch;
+  }
+  if (read == nullptr) return false;
+  u8 byte = value;
+  if (read(self_, addr, t, &byte) == 0) return false;
+  value = byte;
+  return true;
+}
+
+bool PluginPeripheral::memWrite(u16 addr, u8 value, u32 t) {
+  if (!interceptsMemory() || api_->mem_write == nullptr) return false;
+  return api_->mem_write(self_, addr, value, t) != 0;
+}
+
 void PluginPeripheral::tick(u32 cycles) {
   if (api_ != nullptr && api_->tick != nullptr) api_->tick(self_, cycles);
 }
@@ -164,7 +201,7 @@ PluginLoader::Result PluginLoader::scan(const std::string& directory,
       continue;
     }
     if (api->abi_version != MYNEXT_PLUGIN_ABI_VERSION ||
-        api->struct_size != sizeof(mynext_peripheral_v1)) {
+        api->struct_size < kPeripheralMinimum) {
       result.errors.push_back(path + ": built for ABI " + std::to_string(api->abi_version) +
                               ", this emulator speaks " +
                               std::to_string(MYNEXT_PLUGIN_ABI_VERSION));

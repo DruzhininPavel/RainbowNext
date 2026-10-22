@@ -8,6 +8,7 @@
 #include <utility>
 
 #include "peripherals/cartridge.h"
+#include "peripherals/divmmc.h"
 #include "peripherals/kempston.h"
 #include "peripherals/kempston_mouse.h"
 #include "peripherals/printer.h"
@@ -321,7 +322,30 @@ void Machine::runCycles(u32 cycles) {
 // The +2A/+3 "special" paging mode replaces the whole 64K with RAM banks 0-3,
 // which is what CP/M runs in. Every other machine keeps bank 5 at 0x4000 and
 // bank 2 at 0x8000, with 0xC000 switchable.
-u8 Machine::memRead(u16 addr, u32) {
+u8 Machine::memRead(u16 addr, u32 t) {
+  if (expansion_.memoryHooked()) {
+    u8 value = 0xFF;
+    if (expansion_.memRead(addr, t, false, value)) return value;
+  }
+  return memReadBase(addr, t);
+}
+
+// The M1 cycle is where an automapping device earns its keep, so it is offered
+// to the bus with the flag set before the machine decodes the address.
+u8 Machine::memFetch(u16 addr, u32 t) {
+  if (expansion_.memoryHooked()) {
+    u8 value = 0xFF;
+    if (expansion_.memRead(addr, t, true, value)) return value;
+  }
+  return memReadBase(addr, t);
+}
+
+void Machine::memWrite(u16 addr, u8 value, u32 t) {
+  if (expansion_.memoryHooked() && expansion_.memWrite(addr, value, t)) return;
+  memWriteBase(addr, value, t);
+}
+
+u8 Machine::memReadBase(u16 addr, u32) {
   // A cartridge takes over the bottom 16K entirely, exactly as an Interface 2
   // does: the machine's own ROM is not reachable while it is plugged in.
   if (cartRom_ != nullptr && addr < 0x4000) {
@@ -332,7 +356,7 @@ u8 Machine::memRead(u16 addr, u32) {
   return page.ram ? ram_[offset] : rom_[offset];
 }
 
-void Machine::memWrite(u16 addr, u8 value, u32) {
+void Machine::memWriteBase(u16 addr, u8 value, u32) {
   const Page& page = page_[addr >> 13];
   if (!page.ram) return;
   ram_[size_t(page.page) * PageSize + (addr & (PageSize - 1))] = value;
@@ -486,10 +510,10 @@ void Machine::installPeripherals() {
     static_cast<Machine*>(self)->ioWriteBase(port, value, t);
   };
   host.memRead = [](void* self, u16 addr, u32 t) {
-    return static_cast<Machine*>(self)->memRead(addr, t);
+    return static_cast<Machine*>(self)->memReadBase(addr, t);
   };
   host.memWrite = [](void* self, u16 addr, u8 value, u32 t) {
-    static_cast<Machine*>(self)->memWrite(addr, value, t);
+    static_cast<Machine*>(self)->memWriteBase(addr, value, t);
   };
   host.nextRegRead = [](void* self, u8 reg) {
     return static_cast<Machine*>(self)->readNextReg(reg);
@@ -508,6 +532,9 @@ void Machine::installPeripherals() {
   expansion_.add(std::make_unique<KempstonMouse>(), false);
   expansion_.add(std::make_unique<ZxPrinter>(), false);
   expansion_.add(std::make_unique<Cartridge>(), false);
+  // Last, because its status port shares 0x1F with the Kempston joystick and
+  // the joystick is the one most software expects to find there.
+  expansion_.add(std::make_unique<DivMmc>(), false);
   refreshCartridge();
 }
 

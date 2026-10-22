@@ -47,13 +47,24 @@ private:
   void pushAudio();
 
   void setMachine(MachineType type);
-  enum class DialogKind { Rom, Snapshot, Tape, Disk, Cartridge, Printout };
+  enum class DialogKind {
+    Rom,
+    Snapshot,
+    Tape,
+    Disk,
+    Cartridge,
+    DivMmcRom,
+    DivMmcCard,
+    Printout
+  };
 
   bool loadRom(const std::string& path);
   bool loadSnapshot(const std::string& path);
   bool loadTape(const std::string& path);
   bool loadDisk(const std::string& path);
   bool loadCartridge(const std::string& path);
+  bool loadDivMmcRom(const std::string& path);
+  bool loadDivMmcCard(const std::string& path);
   bool savePrintout(const std::string& path);
   void openFileDialog(DialogKind kind);
   void openSaveDialog(DialogKind kind);

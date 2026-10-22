@@ -26,7 +26,7 @@ void Z80::reset() {
 
 u8 Z80::fetch() {
   const u32 t = bus_.now();
-  const u8 value = bus_.memRead(regs_.pc, t);
+  const u8 value = bus_.memFetch(regs_.pc, t);
   const u8 wait = bus_.contention(regs_.pc, t);
   tick(4 + wait);
   ++regs_.pc;

@@ -130,9 +130,14 @@ a multicolour demo renders correctly; `z80test` passes.
       skips a broken library instead of failing, and a worked example
       (`plugins/fuller`)
 * [ ] `.nex` snapshot format
-* [ ] SD card image access for NextZXOS, and a DivMMC module that uses it
-      (needs memory access in the `Peripheral` contract, since the automap
-      overlay has to shadow `0x0000`/`0x2000`)
+* [x] Memory in the `Peripheral` contract: `interceptsMemory()`, `memRead` with
+      an M1 flag, `memWrite`, and `Bus::memFetch` so a module can map itself in
+      on an opcode fetch and shadow `0x0000`/`0x2000`
+* [x] DivMMC: an 8K or 32K esxDOS ROM, sixteen 8K RAM banks, `mapram`, the
+      automap on `0x0000`/`0x0008`/`0x0038`/`0x0066`/`0x04C6`/`0x0562`, and an
+      SPI SD card on an in-memory sector image (`CMD0`-`CMD59`, SDHC, block
+      addressing). Loaded from the `Peripherals` menu
+* [ ] SD card image access for NextZXOS, sharing the `SdCard` state machine
 * [ ] Video pipeline: Timex modes, ULA+ palettes, blending modes 6 and 7 of the
       `0x15` priority byte (the ULA → tilemap → Layer 2 → sprite compositor and
       the palette path are in place)
@@ -187,13 +192,24 @@ These are deliberate simplifications, tracked here so they are not forgotten:
     always live, so a program that leaves them off still hears its writes. The
     DAC outputs are not low-pass filtered, so a fast stream of samples aliases
     instead of rolling off.
-14. A module can only intercept I/O ports. `Peripheral` has no memory callbacks,
-    so a device that shadows RAM or ROM (DivMMC, a ROM cartridge with its own
-    paging, the Multiface) has to be built into the core for now; a cartridge
-    gets in only because `rom()` is a special case in the machine.
+14. A module can claim memory as well as ports, but only inside
+    `0x0000-0xFFFF` with no notion of contention, and the bus offers every
+    access to the modules in plug-in order, so a module in the chain costs a
+    virtual call per memory access. The DivMMC is plugged in last because its
+    status port shares `0x1F` with the Kempston joystick, and the joystick wins
+    that address.
 15. Plugging or unplugging a module resets the machine instead of hot-plugging
     it, and the plugin ABI is version 1, so a module built against a future
-    header is refused rather than adapted.
+    header is refused rather than adapted. Memory hooks were appended to the
+    ABI without a version bump, because `struct_size` makes them optional.
+16. The DivMMC's SD card is written in place in memory and never flushed back to
+    the image file, so a save from esxDOS survives until the card is ejected or
+    the emulator exits. The SPI clock is not modelled: a command is answered on
+    the next byte instead of after the few hundred cycles a real card needs, so
+    a driver that polls for readiness simply sees it at once.
+17. The DivMMC does not decode NextReg `0xB8`-`0xBB`, the programmable automap
+    entry points, and its status port at `0x1F` is an approximation (card detect
+    and busy only); the exact bit layout of a real board was not available.
 
 ## Open decisions
 

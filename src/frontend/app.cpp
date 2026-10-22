@@ -14,6 +14,7 @@
 #include "frontend/debugger.h"
 #include "frontend/ui.h"
 #include "peripherals/cartridge.h"
+#include "peripherals/divmmc.h"
 #include "peripherals/kempston_mouse.h"
 #include "peripherals/printer.h"
 #include "plugin/loader.h"
@@ -233,6 +234,8 @@ void App::run() {
         case DialogKind::Disk: loadDisk(path); break;
         case DialogKind::Rom: loadRom(path); break;
         case DialogKind::Cartridge: loadCartridge(path); break;
+        case DialogKind::DivMmcRom: loadDivMmcRom(path); break;
+        case DialogKind::DivMmcCard: loadDivMmcCard(path); break;
         case DialogKind::Printout: savePrintout(path); break;
       }
       dialogSave_ = false;
@@ -439,6 +442,10 @@ void App::openFileDialog(DialogKind kind) {
       {"Disk images", "dsk;edsk"}, {"All files", "*"}};
   static const SDL_DialogFileFilter cartridgeFilters[] = {
       {"Cartridge images", "rom;bin;cart"}, {"All files", "*"}};
+  static const SDL_DialogFileFilter divMmcRomFilters[] = {
+      {"DivMMC ROM", "rom"}, {"All files", "*"}};
+  static const SDL_DialogFileFilter divMmcCardFilters[] = {
+      {"SD card images", "mmc;img;iso;bin"}, {"All files", "*"}};
 
   dialogKind_ = kind;
   dialogOpen_ = true;
@@ -448,6 +455,8 @@ void App::openFileDialog(DialogKind kind) {
   if (kind == DialogKind::Tape) filters = tapeFilters;
   if (kind == DialogKind::Disk) filters = diskFilters;
   if (kind == DialogKind::Cartridge) filters = cartridgeFilters;
+  if (kind == DialogKind::DivMmcRom) filters = divMmcRomFilters;
+  if (kind == DialogKind::DivMmcCard) filters = divMmcCardFilters;
   SDL_ShowOpenFileDialog(onFileDialog, this, window_, filters, 2, nullptr, false);
 }
 
@@ -478,6 +487,35 @@ bool App::loadCartridge(const std::string& path) {
   machine_->expansion().setEnabled("cartridge", true);
   syncConfigFromBus();
   status_ = "Cartridge: " + path;
+  return true;
+}
+
+bool App::loadDivMmcRom(const std::string& path) {
+  auto* div = static_cast<DivMmc*>(machine_->expansion().find("divmmc"));
+  if (div == nullptr) return false;
+  std::string error;
+  if (!div->loadRomFile(path, error)) {
+    status_ = "DivMMC ROM failed: " + error;
+    return false;
+  }
+  machine_->expansion().setEnabled("divmmc", true);
+  syncConfigFromBus();
+  status_ = "DivMMC ROM: " + path;
+  return true;
+}
+
+bool App::loadDivMmcCard(const std::string& path) {
+  auto* div = static_cast<DivMmc*>(machine_->expansion().find("divmmc"));
+  if (div == nullptr) return false;
+  std::string error;
+  if (!div->loadCardFile(path, error)) {
+    status_ = "SD card failed: " + error;
+    return false;
+  }
+  machine_->expansion().setEnabled("divmmc", true);
+  syncConfigFromBus();
+  status_ = "SD card: " + path + " (" + std::to_string(div->card().sectors()) +
+            " sectors)";
   return true;
 }
 
@@ -578,6 +616,23 @@ void App::drawPeripheralsMenu() {
       syncConfigFromBus();
       status_ = "Cartridge ejected";
     }
+  }
+  auto* divmmc = static_cast<DivMmc*>(bus.find("divmmc"));
+  if (divmmc != nullptr) {
+    ImGui::Separator();
+    if (ImGui::MenuItem("Load DivMMC ROM...")) openFileDialog(DialogKind::DivMmcRom);
+    if (ImGui::MenuItem("Insert SD card image...")) {
+      openFileDialog(DialogKind::DivMmcCard);
+    }
+    if (ImGui::MenuItem("Eject SD card", nullptr, false, divmmc->card().inserted())) {
+      divmmc->card().eject();
+      status_ = "SD card ejected";
+    }
+    ImGui::TextDisabled("ROM: %s", divmmc->romLoaded() ? "loaded" : "none");
+    ImGui::TextDisabled("Card: %s",
+                        divmmc->card().inserted()
+                            ? (std::to_string(divmmc->card().sectors()) + " sectors").c_str()
+                            : "none");
   }
   if (printer != nullptr) {
     if (ImGui::MenuItem("Save printout...", nullptr, false, printer->used())) {

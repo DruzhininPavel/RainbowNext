@@ -27,6 +27,9 @@ public:
   void reset() override;
   bool ioRead(u16 port, u32 t, u8& value) override;
   bool ioWrite(u16 port, u8 value, u32 t) override;
+  bool interceptsMemory() const override;
+  bool memRead(u16 addr, u32 t, bool m1, u8& value) override;
+  bool memWrite(u16 addr, u8 value, u32 t) override;
   void tick(u32 cycles) override;
 
   // The path the library was loaded from, for the settings menu.
