@@ -27,6 +27,7 @@ void printUsage() {
       "  --snapshot FILE   SNA, Z80 snapshot or NEX program to load at startup\n"
       "  --disk FILE       DSK or EDSK image to insert into the +3 disk drive\n"
       "  --sd FILE         SD card image for the DivMMC; NextZXOS boots from it\n"
+      "  --debugger        start paused with the debugger window open\n"
       "  -h, --help        this message\n");
 }
 
@@ -39,6 +40,10 @@ int main(int argc, char** argv) {
     const std::string argument = argv[i];
     const bool hasValue = i + 1 < argc;
 
+    if (argument == "--debugger") {
+      options.debugger = true;
+      continue;
+    }
     if (argument == "-h" || argument == "--help") {
       printUsage();
       return 0;

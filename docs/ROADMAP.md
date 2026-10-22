@@ -168,7 +168,11 @@ a multicolour demo renders correctly; `z80test` passes.
 
 ## M3 — Tooling and shipping
 
-* [ ] Debugger: breakpoints, memory editor, disassembler, profiler
+* [x] Debugger: breakpoints, memory editor, disassembler, profiler. `F1` opens
+      the window, `F3`/`F4` step and step over, a breakpoint stops the frame
+      before the instruction runs, the CPU tab lists the disassembly around PC
+      (click a line to toggle a breakpoint), the Memory tab pokes bytes and the
+      Profiler tab ranks addresses by how often they were executed
 * [ ] RZX replay and recording, rewind buffer
 * [ ] Save states in a versioned binary format
 * [ ] CRT/scanline shaders (SDL_GPU backend)

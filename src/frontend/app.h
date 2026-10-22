@@ -9,6 +9,7 @@
 #include "core/machine.h"
 #include "frontend/audio.h"
 #include "frontend/config.h"
+#include "frontend/debugger.h"
 #include "frontend/input.h"
 #include "frontend/ui.h"
 
@@ -30,6 +31,7 @@ public:
     std::string snapshot;
     std::string disk;
     std::string sd;
+    bool debugger = false;  // start paused with the debugger open
   };
 
   bool init(const Options& options);
@@ -124,6 +126,7 @@ private:
 
   bool running_ = true;
   bool paused_ = false;
+  DebuggerUi debuggerUi_;
   bool showDebugger_ = false;
   bool showAbout_ = false;
   bool fullscreen_ = false;

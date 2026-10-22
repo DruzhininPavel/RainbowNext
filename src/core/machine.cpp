@@ -410,12 +410,53 @@ void Machine::applyNex(const formats::NexFile& nex) {
 void Machine::stepInstruction() {
   if (irqLine_) cpu_.interrupt();
   if (cpu_.regs().pc == 0x0556 && tape_.fastLoad() && applyTapeFastLoad()) return;
+  // Sampled after the interrupt, so the profile blames the handler rather than
+  // the instruction the interrupt pushed off.
+  if (profiling_) {
+    ++samples_[cpu_.regs().pc];
+    ++sampleTotal_;
+  }
   cpu_.step();
 }
 
-void Machine::runFrame() {
+std::optional<u16> Machine::runFrame() {
   const u64 target = frames_ + 1;
-  while (frames_ < target) stepInstruction();
+  while (frames_ < target) {
+    // Only pay for the search once something is armed.
+    if (!breakpoints_.empty()) {
+      const u16 pc = cpu_.regs().pc;
+      if (std::binary_search(breakpoints_.begin(), breakpoints_.end(), pc)) return pc;
+    }
+    stepInstruction();
+  }
+  return std::nullopt;
+}
+
+void Machine::setBreakpoint(u16 address) {
+  const auto at = std::lower_bound(breakpoints_.begin(), breakpoints_.end(), address);
+  if (at == breakpoints_.end() || *at != address) breakpoints_.insert(at, address);
+}
+
+void Machine::clearBreakpoint(u16 address) {
+  const auto at = std::lower_bound(breakpoints_.begin(), breakpoints_.end(), address);
+  if (at != breakpoints_.end() && *at == address) breakpoints_.erase(at);
+}
+
+bool Machine::hasBreakpoint(u16 address) const {
+  return std::binary_search(breakpoints_.begin(), breakpoints_.end(), address);
+}
+
+void Machine::clearBreakpoints() { breakpoints_.clear(); }
+
+void Machine::setProfiling(bool on) {
+  if (on == profiling_) return;
+  profiling_ = on;
+  if (on) resetProfile();
+}
+
+void Machine::resetProfile() {
+  samples_.fill(0);
+  sampleTotal_ = 0;
 }
 
 void Machine::runCycles(u32 cycles) {
