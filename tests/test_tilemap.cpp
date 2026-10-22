@@ -380,3 +380,49 @@ TEST(layer2_covers_the_tilemap_when_the_priority_says_so) {
   renderOneFrame(m);
   CHECK_EQ(surfacePixel(m, 32, 32), Green);
 }
+
+// NextReg 0x14 makes the ULA see-through where its colour matches, which is how
+// a game shows Layer 2 under a ULA layer it leaves switched on.
+TEST(ula_transparency_reveals_the_layer_below) {
+  Machine m(MachineType::Next);
+  greenTilemap(m);
+  enableUla(m);
+  fillMap(m, 1, 0x01); // attribute bit 0 keeps the tile under the ULA
+  // Bank 5 is empty, so every ULA cell is paper of attribute 0.
+  m.writeNextReg(0x43, 0x00); // bits 6:4 = 000 -> the first ULA palette
+  writePalette8(m, 0x10, 0xE3); // paper 0 becomes magenta
+  m.writeNextReg(0x15, 0x08);   // bits 4:2 = 010 -> S U L, the ULA on top
+
+  m.writeNextReg(0x14, 0xAA);
+  renderOneFrame(m);
+  CHECK_EQ(surfacePixel(m, 32, 32), Magenta);
+
+  m.writeNextReg(0x14, 0xE3);
+  renderOneFrame(m);
+  CHECK_EQ(surfacePixel(m, 32, 32), Green);
+}
+
+// The comparison drops the ninth bit: 0x1C7 and 0x1C6 are both transparent when
+// 0x14 holds 0xE3.
+TEST(ula_transparency_ignores_the_low_bit_of_the_nine_bit_colour) {
+  Machine m(MachineType::Next);
+  greenTilemap(m);
+  enableUla(m);
+  fillMap(m, 1, 0x01);
+  m.writeNextReg(0x43, 0x00);
+  m.writeNextReg(0x40, 0x10);
+  m.writeNextReg(0x44, 0xE3); // high byte
+  m.writeNextReg(0x44, 0x01); // low bit set -> 0x1C7
+  m.writeNextReg(0x43, 0x00);
+  m.writeNextReg(0x15, 0x08);
+  m.writeNextReg(0x14, 0xE3);
+  renderOneFrame(m);
+  CHECK_EQ(surfacePixel(m, 32, 32), Green);
+
+  m.writeNextReg(0x40, 0x10);
+  m.writeNextReg(0x44, 0xE2); // 0x1C5, so the top eight bits differ
+  m.writeNextReg(0x44, 0x01);
+  m.writeNextReg(0x43, 0x00);
+  renderOneFrame(m);
+  CHECK_EQ(surfacePixel(m, 32, 32), argb8(0xE2));
+}
