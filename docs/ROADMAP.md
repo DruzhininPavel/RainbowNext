@@ -102,7 +102,13 @@ a multicolour demo renders correctly; `z80test` passes.
       the four modes of `0x62` (stop, restart, continue, restart every frame),
       a repeated mode that only moves the write index, and a compositor that
       samples the register file per scanline so a write shows up on its line.
-* [ ] DMA
+* [x] zxnDMA on port `0x6B`, with `0x0B` as the Zilog compatibility port that
+      moves one byte more than the programmed length: the WR0-WR6 register
+      groups with their parameter lists, port A and B each memory or IO and
+      incrementing, decrementing or fixed, `LOAD`, `ENABLE`, `CONTINUE`, the
+      prescalar that paces a byte every `32 * prescalar` master clocks so the
+      DMA can feed the DAC, auto restart at the end of a block, and the masked
+      read sequence that reports the status byte and the live pointers
 * [ ] 3× AY with stereo, specdrum, `.nex` snapshot format
 * [ ] SD card image access for NextZXOS
 * [ ] Video pipeline: Timex modes, ULA+ palettes, blending modes 6 and 7 of the
@@ -144,6 +150,12 @@ These are deliberate simplifications, tracked here so they are not forgotten:
     instruction: the compositor samples the register file once per scanline, so
     a Copper write lands at the start of its line rather than at its column.
     Likewise a `MOVE` costs no T-states in the frame budget.
+11. A DMA block with no prescalar is copied inside the `ENABLE` write, so the
+    CPU loses no time to it; on hardware the transfer does stop the CPU and can
+    swallow a maskable interrupt. The prescalar is counted from the CPU clock
+    rather than from a fixed 28 MHz, so a turbo machine paces its transfers
+    faster. The variable cycle lengths of ports A and B are stored but do not
+    slow anything down.
 
 ## Open decisions
 

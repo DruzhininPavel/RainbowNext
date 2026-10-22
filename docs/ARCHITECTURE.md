@@ -216,6 +216,42 @@ instruction past the start of its line. That is the one deliberate
 simplification in the model; it is what the pixel-accurate version would need
 mid-line register sampling for.
 
+## DMA
+
+`src/core/dma.*` is the zxnDMA, one channel that can copy a block between two
+addresses where either side may be memory or an IO port. Like the Copper it
+does not know about `Machine`: the constructor of the machine hands it two
+`std::function` callbacks that read and write a byte through `memRead`,
+`memWrite`, `ioRead` or `ioWrite`, so a test can drive it against a flat buffer
+and count the accesses.
+
+The CPU writes the control bytes into `0x6B` (or `0x0B` for the Zilog
+compatibility port, which moves one byte more than the programmed length) and
+the device decodes them in the order the datasheet expects: a base register
+byte first, then the parameter bytes that its bits requested. `WR0` carries the
+direction and the requests for the start address of port A and the length,
+`WR1` and `WR2` describe port A and its timing, `WR4` describes port B, `WR5`
+holds auto restart, and `WR6` is a command. The parameter list is reset by every
+base byte, which is what makes an interrupted sequence harmless.
+
+`LOAD` copies the programmed start addresses into the live pointers and the
+length into the counter; `ENABLE` starts the transfer. Without a prescalar the
+whole block is copied inside the `ENABLE` write, because the DMA is faster than
+the CPU and the block always finishes before the next instruction. With a
+prescalar the transfer becomes asynchronous: `Machine::tick()` calls
+`ZxnDma::advance()` with the elapsed master clocks, and a byte moves every
+`32 * prescalar` of them, which is the 875 kHz of the datasheet divided down.
+That is the mode a program uses to stream samples to the DAC while the CPU
+keeps running.
+
+At the end of a block the end-of-block flag of the status byte is cleared, and
+either auto restart rewinds the pointers and the counter for the next block or
+the channel disables itself. Reading `0x6B` returns a sequence of seven bytes --
+status, counter, port A, port B -- masked by the read mask, which `WR6` can
+narrow so a program polls only the status byte. The read index wraps, so a
+program that reads past the end of its mask starts over instead of reading
+garbage.
+
 ## Frame buffer
 
 `Machine::framebuffer()` is `320x256` ARGB8888: a 32-pixel border around a

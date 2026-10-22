@@ -86,6 +86,7 @@ add_library(mynext_core STATIC
   src/core/palette.cpp
   src/core/sprites.cpp
   src/core/copper.cpp
+  src/core/dma.cpp
   src/formats/dsk.cpp
   src/formats/sna.cpp
   src/formats/tape.cpp
@@ -128,6 +129,7 @@ if(MYNEXT_BUILD_TESTS)
     tests/test_sprites.cpp
     tests/test_sprites_relative.cpp
     tests/test_copper.cpp
+    tests/test_dma.cpp
     tests/test_tilemap.cpp
     tests/test_nextreg.cpp
     tests/test_ula.cpp

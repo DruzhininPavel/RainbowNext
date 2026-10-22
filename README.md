@@ -43,6 +43,12 @@ Status: M1 — 48K and 128K/+2/+3 boot with AY sound, tape loading, disk images
   and `MOVE` instructions, the four control modes of `0x62`, and a compositor
   that samples the register file once per scanline so a Copper write lands on
   the line it was made for.
+* **zxnDMA** — the single DMA channel of port `0x6B`, with `0x0B` as the Zilog
+  compatibility port: WR0-WR6 register groups and their parameter lists, both
+  ports memory or IO and incrementing, decrementing or fixed, `LOAD` and
+  `ENABLE`, `CONTINUE`, auto restart at the end of a block, and the prescalar
+  that paces a byte every `32 * prescalar` clocks so a block can be streamed
+  out as sampled audio while the CPU keeps running.
 * **ULA** — port `0xFE` read/write, border, beeper, 8×5 keyboard matrix,
   Fuse-compatible memory contention, floating bus.
 * **Machines** — 48K, 128K, +2, +3 and Pentagon, each with its own timings
@@ -146,10 +152,10 @@ roms/           user-supplied ROMs (empty by design)
 ctest --test-dir build --output-on-failure
 ```
 
-239 tests cover the Z80 core (timings, flags, undocumented opcodes,
+263 tests cover the Z80 core (timings, flags, undocumented opcodes,
 interrupts), the Z80N extension, the Next MMU, palette, Layer 2, sprites
-(including relative and unified sprites and the collision flags), the tilemap
-and the Copper, ULA
+(including relative and unified sprites and the collision flags), the tilemap,
+the Copper and the zxnDMA, ULA
 behaviour, contention, floating bus, frame length, audio rate, both snapshot
 formats, the AY, 128K/+3 paging and timings, tape blocks, the µPD765 and the DSK
 parser, and end-to-end runs of

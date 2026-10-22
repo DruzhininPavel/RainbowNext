@@ -84,6 +84,19 @@ Machine::Machine(MachineType type)
   framebuffer_.assign(FrameWidth * FrameHeight, Palette[0]);
   borderLines_.fill(0);
   reset();
+  // The DMA reaches memory and IO through the machine, but is otherwise a
+  // self-contained device.
+  dma_.connect(
+      [this](bool isIo, u16 address) {
+        return isIo ? ioRead(address, cpuTstates_) : memRead(address, cpuTstates_);
+      },
+      [this](bool isIo, u16 address, u8 value) {
+        if (isIo) {
+          ioWrite(address, value, cpuTstates_);
+        } else {
+          memWrite(address, value, cpuTstates_);
+        }
+      });
 }
 
 void Machine::reset() {
@@ -102,6 +115,7 @@ void Machine::reset() {
   palette_.reset();
   sprites_.reset();
   copper_.reset();
+  dma_.reset();
   layer2Clip_ = {0, 255, 0, 191};
   layer2ClipIndex_ = 0;
   tilemapClip_ = {0, 159, 0, 255};
@@ -323,6 +337,10 @@ u8 Machine::ioRead(u16 port, u32) {
       sprites_.clearStatus();
       return status;
     }
+    // 0x6B is the zxnDMA; 0x0B is the same device in Zilog compatibility mode,
+    // where a block is one byte longer than the programmed length.
+    if ((port & 0x00FF) == 0x6B) return dma_.read(false);
+    if ((port & 0x00FF) == 0x0B) return dma_.read(true);
   }
 
   if ((port & 0x0001) == 0) {
@@ -368,6 +386,14 @@ void Machine::ioWrite(u16 port, u8 value, u32) {
     }
     if ((port & 0x00FF) == 0x5B) { // sprite pattern bytes
       sprites_.writePattern(value);
+      return;
+    }
+    if ((port & 0x00FF) == 0x6B) { // zxnDMA
+      dma_.write(value, false);
+      return;
+    }
+    if ((port & 0x00FF) == 0x0B) { // zxnDMA in Zilog compatibility mode
+      dma_.write(value, true);
       return;
     }
   }
@@ -709,6 +735,13 @@ void Machine::setSampleRate(int hz) {
 
 void Machine::tick(u32 cycles) {
   cpuTstates_ += cycles;
+
+  // A DMA transfer with a prescalar hands the bus back to the CPU between
+  // bytes, so it advances with the clock rather than inside one instruction.
+  if (dma_.running() && dma_.timed()) {
+    const u32 mult = turboMultiplier();
+    dma_.advance(u64(cycles) * 8 / mult);
+  }
 
   // See turboMultiplier(): the ULA sees only a fraction of the CPU cycles.
   u32 remaining = cycles;

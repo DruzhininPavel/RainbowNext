@@ -8,6 +8,7 @@
 #include "core/beeper.h"
 #include "core/bus.h"
 #include "core/copper.h"
+#include "core/dma.h"
 #include "core/keyboard.h"
 #include "core/nextreg.h"
 #include "core/palette.h"
@@ -142,6 +143,7 @@ public:
   const NextPalette& palette() const { return palette_; }
   const Sprites& sprites() const { return sprites_; }
   const Copper& copper() const { return copper_; }
+  const ZxnDma& dma() const { return dma_; }
   u8 readNextReg(u8 reg) const;
   void writeNextReg(u8 reg, u8 value);
   u32 tstatesPerLineValue() const { return tstatesPerLine_; }
@@ -246,6 +248,7 @@ private:
   NextPalette palette_;
   Sprites sprites_;
   Copper copper_;
+  ZxnDma dma_;
   // Register 0x18 takes four writes in a row, so the position needs a counter.
   std::array<u8, 4> layer2Clip_ = {0, 255, 0, 191};
   u8 layer2ClipIndex_ = 0;
