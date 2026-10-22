@@ -220,17 +220,23 @@ bool Machine::loadDisk(const std::string& path, std::string& error) {
   return true;
 }
 
-// Serves the ROM's LD-BYTES routine (0x0556) from the loaded image instead of
-// waiting for the real pulse train. On entry A holds the flag byte the caller
-// expects, IX the destination and DE the length; on success the routine would
-// leave with DE = 0 and carry set, which the exit at 0x05DF reproduces by
-// loading A from a zero checksum and comparing it against 1.
-bool Machine::applyTapeFastLoad() {
+// Serves the ROM's LD-BYTES routine from the loaded image instead of waiting
+// for the real pulse train. On entry A holds the flag byte the caller expects,
+// IX the destination and DE the length; on success the routine would leave
+// with DE = 0 and carry set, which the exit at 0x05DF reproduces by loading A
+// from a zero checksum and comparing it against 1.
+//
+// Custom loaders often copy LD-BYTES' own `INC D / EX AF,AF' / DEC D` prologue
+// and jump straight to 0x0562, skipping the DI / OUT / PUSH HL part they have
+// already done. The ROM picks the flag byte back up from AF' at 0x05A9, so that
+// entry expects it in the shadow accumulator instead of A.
+bool Machine::applyTapeFastLoad(u16 entry) {
   const formats::TapeBlock* block = tape_.seekDataBlock();
   if (block == nullptr || block->data.empty()) return false;
 
   Z80::Registers& regs = cpu_.regs();
-  if (block->data[0] != regs.a) return false; // misaligned tape: let the ROM wait
+  const u8 expected = entry == 0x0562 ? regs.a2 : regs.a;
+  if (block->data[0] != expected) return false; // misaligned tape: let the ROM wait
 
   const size_t length = size_t(regs.d) << 8 | regs.e;
   const size_t available = block->data.size() - 1;
@@ -437,12 +443,13 @@ void Machine::applyNex(const formats::NexFile& nex) {
 
 void Machine::stepInstruction() {
   if (irqLine_) cpu_.interrupt();
-  if (cpu_.regs().pc == 0x0556 && tape_.fastLoad() && applyTapeFastLoad()) return;
-  if (cpu_.regs().pc == 0x0008 && esxDos_.trap(*this, cpu_.regs())) return;
+  const u16 pc = cpu_.regs().pc;
+  if ((pc == 0x0556 || pc == 0x0562) && tape_.fastLoad() && applyTapeFastLoad(pc)) return;
+  if (pc == 0x0008 && esxDos_.trap(*this, cpu_.regs())) return;
   // Sampled after the interrupt, so the profile blames the handler rather than
   // the instruction the interrupt pushed off.
   if (profiling_) {
-    ++samples_[cpu_.regs().pc];
+    ++samples_[pc];
     ++sampleTotal_;
   }
   ++instructions_;

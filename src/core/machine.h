@@ -339,7 +339,7 @@ private:
   void mapBank(int slot, int bank, bool ram);
   void applySnapshot(const formats::Snapshot& snapshot);
   void applyNex(const formats::NexFile& nex);
-  bool applyTapeFastLoad();
+  bool applyTapeFastLoad(u16 entry);
 
   // The body of a save state, shared by both directions. Defined in
   // machine.cpp and instantiated for the reader and the writer, so the two can

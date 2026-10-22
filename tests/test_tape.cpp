@@ -329,6 +329,51 @@ TEST(tape_fast_load_ignores_a_misaligned_block) {
   CHECK_EQ(machine.tape().blockIndex(), 0);
 }
 
+// Custom loaders copy LD-BYTES' prologue and enter at 0x0562, leaving the
+// expected flag byte in AF' for the ROM to swap back in at 0x05A9.
+TEST(tape_fast_load_serves_a_loader_that_enters_at_0x0562) {
+  Machine machine(MachineType::Spectrum48);
+  if (!machine.loadRom(RAINBOW_SOURCE_DIR "/roms/48.rom")) return;
+  machine.reset();
+
+  std::vector<u8> tap;
+  appendTapBlock(tap, kData);
+
+  TapeImage image;
+  std::string error;
+  CHECK(rainbow::formats::parseTap(tap, image, error));
+  machine.tape().loadImage(image);
+  machine.tape().setFastLoad(true);
+
+  auto& regs = machine.cpu().regs();
+  regs.a = 0x00;      // the live accumulator is stale on this entry
+  regs.a2 = 0xFF;     // the flag byte lives in AF'
+  regs.ix = 0x9000;
+  regs.d = 0x00;
+  regs.e = u8(kData.size() - 1);
+  regs.sp = 0x7FFE;
+  regs.pc = 0x0562;
+  machine.memWrite(0x7FFE, 0x34, 0);
+  machine.memWrite(0x7FFF, 0x12, 0);
+
+  machine.stepInstruction();
+  CHECK_EQ(regs.pc, 0x05DF);
+  CHECK_EQ(regs.d, 0);
+  CHECK_EQ(regs.e, 0);
+  CHECK_EQ(regs.h, 0);
+  CHECK_EQ(regs.ix, 0x9000 + kData.size() - 1);
+  for (size_t i = 0; i < kData.size() - 1; ++i) {
+    CHECK_EQ(machine.memRead(u16(0x9000 + i), 0), kData[1 + i]);
+  }
+  CHECK_EQ(machine.tape().blockIndex(), 1);
+
+  machine.stepInstruction(); // LD A,H
+  machine.stepInstruction(); // CP 1
+  CHECK_EQ(regs.f & 0x01, 0x01);
+  machine.stepInstruction(); // RET, straight back to the loader's caller
+  CHECK_EQ(regs.pc, 0x1234);
+}
+
 namespace {
 
 void tapKey(Machine& machine, int row, int column) {
