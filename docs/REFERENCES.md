@@ -184,3 +184,29 @@ register in question is one it actually implements.
   snapshot is one we understand, which in practice means they cannot.
 * If a future contribution needs to lift code from a GPL project, the whole
   project must move to a GPL-compatible license first.
+
+## What the official distribution does and does not contain
+
+The System/Next image (`research/sn-complete-24.11/`) ships the firmware C
+sources, and it is worth knowing up front that they cannot answer a NextZXOS
+boot question. `src/firmware/firmware/src/main.c` is a block packer: it
+concatenates `boot.bin`, `updater.bin`, `editor.bin`, `cores.bin`,
+`videotest.bin`, `reset.bin` and `screens.bin` into the `TBBLUE.FW` block
+stream. The application half (`src/firmware/app/src/`) is the hardware
+config/menu/loader UI -- cores, layers, video test, the config editor. Grepping
+the whole tree for `ensystem`, `autoexec`, `nextzxos` or `.sys` turns up only
+`editor.c`, and only because the editor honours a couple of config settings that
+NextZXOS also reads. **The firmware never boots the OS and never touches the
+card beyond its own files.** `src/vhdl/` holds nothing but `read.me`, so the
+FPGA core sources are not in this distribution despite what `readme.txt` claims.
+
+The OS itself is a binary on the card (`NEXTZXOS/ENSYSTEM.SYS`, 27698 bytes,
+plus `ENMF1-6.SYS`), and the boot ROM is a closed 64 KB blob, so there is no
+readable specification of the handover anywhere in the tree. That is exactly
+why the black-box oracle above exists.
+
+`NEXTZXOS/AUTOEXEC.1ST` is not a boot script either. Decoded, it is a NextBASIC
+program with `setup()`, `banner()`, `showpage(p)` and `disable()`: the "Welcome
+to NextZXOS" page carousel, whose page 13 reads *"Have fun with NextZXOS! Press
+SPACE to exit, or D to disable this program."* SPACE leaves the welcome
+program; it does not start the OS, which must already be running around it.
