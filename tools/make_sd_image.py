@@ -70,8 +70,12 @@ def build_tree(root: Path) -> Node:
 
 
 def lfn_checksum(short: str) -> int:
+    # The checksum covers the eleven byte directory name, so a name that is
+    # shorter than 8.3 has to be space padded before it is folded. Folding the
+    # unpadded name produces a value no real driver will ever match, and a
+    # driver that validates it drops the long name that follows.
     total = 0
-    for ch in short:
+    for ch in short.upper().ljust(11)[:11]:
         total = (((total & 1) << 7) + (total >> 1) + ord(ch)) & 0xFF
     return total
 

@@ -96,12 +96,20 @@ public:
   static constexpr int PageSize = 0x2000;
   static constexpr int RamPages = 256; // 2 MB
   static constexpr int RomPages = 8;   // 64 KB
+  static constexpr int AltRomPages = 4;  // 32 KB, the two 0x8C alt banks
 
   explicit Machine(MachineType type = MachineType::Spectrum48);
 
   // A power-on reset also clears the RAM. A soft or hard reset triggered from
   // NextReg 0x02 leaves the SRAM contents intact, as on real hardware.
   void reset(bool preserveRam = false);
+
+  // Brings a Next up the way its own firmware does. TBBLUE.FW does not load a
+  // program: it configures the FPGA through the Next registers and then soft
+  // resets, leaving NextZXOS to run from the card. Reproducing those writes is
+  // the whole of the firmware, so the real boot ROM never has to run. Call it
+  // once the ROM set is loaded; a hard reset does not repeat it.
+  void nextFirmwareBoot();
 
   bool loadRom(const std::string& path);
   // Loads a multi-bank ROM image (128K, +2, +2A, +3). A 16K file fills one
@@ -277,6 +285,10 @@ private:
   void writePort1ffd(u8 value);
   void updatePaging();
   void updateNextMmu();
+  u8 nextRomBank() const;
+  u8 nextAltRomBank() const;
+  bool nextAltRomPage(u16 addr, bool write, u8& page) const;
+  bool nextDivMmcRom3() const;
   u32 turboMultiplier() const;
   // Layer 2 state, resolved once per scanline because the fetch runs per pixel.
   struct Layer2View {
@@ -413,6 +425,9 @@ private:
   std::array<bool, FrameWidth> spriteDrawn_{};
 
   std::vector<u8> rom_;
+  // The two 16K alt ROM banks behind the main ROM (register 0x8C). NextZXOS
+  // copies enAltZX.rom in here at boot and switches to it for +3 mode.
+  std::vector<u8> altRom_;
   std::vector<u8> ram_;
   std::vector<u32> framebuffer_;
   std::array<u8, 400> borderLines_{};

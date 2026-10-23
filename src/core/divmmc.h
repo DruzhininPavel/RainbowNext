@@ -44,11 +44,22 @@ public:
   bool loadRom(std::vector<u8> rom, std::string& error);
   bool loadRomFile(const std::string& path, std::string& error);
   bool romLoaded() const { return !rom_.empty(); }
-  void unloadRom() { rom_.clear(); control_ = 0; }
+  void unloadRom() {
+    rom_.clear();
+    control_ = 0;
+    held_ = false;
+    mapPending_ = false;
+    unmapPending_ = false;
+  }
 
   u8 control() const { return control_; }
   void setControl(u8 value) { control_ = value; }
   bool mappedIn() const { return (control_ & Conmem) != 0; }
+  // Whether the block answers memory at all: the latch asks for it, or the
+  // automap still holds it in. The two are separate flip-flops on the Next, so
+  // clearing bit 7 of the latch does not by itself take the ROM away.
+  bool shown() const { return mappedIn() || held_; }
+  bool held() const { return held_; }
   bool mapram() const { return (control_ & Mapram) != 0; }
   int bank() const { return control_ & 0x0F; }
   // A single 8K image has one page; a 32K image carries the four esxDOS pages
@@ -85,6 +96,14 @@ public:
   // Whether an opcode fetch at `addr` pulls the block in, entry points and the
   // ROM3 condition included. The automap master switch is not consulted.
   bool hookEnabled(u16 addr) const;
+  // Whether the entry point at `addr` maps in before the fetch is answered
+  // (NextReg 0xBA for the RST vectors, 0xBB bit 7 for 0x3Dxx) rather than after
+  // the instruction that fetched it.
+  bool hookInstant(u16 addr) const;
+  // The way back out: a fetch at 0x1FF8-0x1FFF drops the automap once the
+  // instruction has run, which is how the boot ROM hands control to the
+  // machine's own ROM without the divMMC ROM disappearing mid-instruction.
+  bool offTrap(u16 addr) const;
 
   bool ioRead(u16 port, u8& value) const;
   bool ioWrite(u16 port, u8 value);
@@ -103,6 +122,11 @@ private:
   u8 control_ = 0;
   bool automap_ = false;
   bool rom3Present_ = false;
+  // The automap's own view of the block: `held_` is what a hook fetch sets and
+  // the 0x1FF8 trap clears, `mapPending_` is a hook that has to wait for the
+  // current instruction to finish.
+  bool held_ = false;
+  bool mapPending_ = false;
   bool unmapPending_ = false;
   u8 entryPoints0_ = 0x83;
   u8 entryPointsValid0_ = 0x01;

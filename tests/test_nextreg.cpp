@@ -225,19 +225,25 @@ TEST(nextreg_classic_machines_have_no_next_registers) {
 TEST(nextreg_alternate_rom_swaps_the_low_rom_bank) {
   Machine m(MachineType::Next);
   loadPatternRom(m); // bank 0
-  u8 bank1[0x4000];
-  for (size_t i = 0; i < sizeof bank1; ++i) bank1[i] = u8(i * 11 + 5);
-  m.loadRomData(bank1, sizeof bank1, 1);
 
   CHECK_EQ(m.memRead(0x0000, 0), 0x03);
   CHECK_EQ(m.memRead(0x0001, 0), 0x0A);
 
+  // Bit 6 makes the window writable, which is how the boot ROM fills the alt
+  // banks before switching to them with bit 7.
+  m.writeNextReg(0x8C, 0xC0);
+  m.memWrite(0x0000, 0x55, 0);
+  m.memWrite(0x0001, 0xAA, 0);
+  m.memWrite(0x2000, 0x11, 0); // the upper half of the same 16K alt bank
+
   m.writeNextReg(0x8C, 0x80);
-  CHECK_EQ(m.memRead(0x0000, 0), 0x05);
-  CHECK_EQ(m.memRead(0x0001, 0), 0x10);
+  CHECK_EQ(m.memRead(0x0000, 0), 0x55);
+  CHECK_EQ(m.memRead(0x0001, 0), 0xAA);
+  CHECK_EQ(m.memRead(0x2000, 0), 0x11);
 
   m.writeNextReg(0x8C, 0x00);
   CHECK_EQ(m.memRead(0x0000, 0), 0x03);
+  CHECK_EQ(m.memRead(0x0001, 0), 0x0A);
 }
 
 // Register 0x8E exposes the whole 128K memory map at once, which is what the

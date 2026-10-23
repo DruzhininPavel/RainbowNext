@@ -26,12 +26,16 @@ bool readWholeFile(const std::string& path, std::vector<u8>& data, std::string& 
 
 void DivMmc::hardReset() {
   control_ = 0;
+  held_ = false;
+  mapPending_ = false;
   unmapPending_ = false;
   std::fill(ram_.begin(), ram_.end(), u8(0));
 }
 
 void DivMmc::softReset() {
   control_ = 0;
+  held_ = false;
+  mapPending_ = false;
   unmapPending_ = false;
 }
 
@@ -52,19 +56,44 @@ bool DivMmc::hookEnabled(u16 addr) const {
     case 0x0028: bit = 0x20; break;
     case 0x0030: bit = 0x40; break;
     case 0x0038: bit = 0x80; break;
-    case 0x0066: points = entryPoints1_; bit = 0x01; break;
+    // 0x0066 is the divMMC NMI button's entry point and only fires while that
+    // button is held; the machine has no button, so it never does.
+    case 0x0066: return false;
     case 0x04C6: points = entryPoints1_; bit = 0x04; break;
     case 0x04D7: points = entryPoints1_; bit = 0x10; break;
     case 0x0562: points = entryPoints1_; bit = 0x08; break;
     case 0x056A: points = entryPoints1_; bit = 0x20; break;
-    default: return false;
+    default:
+      // The whole 0x3D00 page is a single entry point, the esxDOS RST 8 hook.
+      if ((addr & 0xFF00) == 0x3D00) {
+        points = entryPoints1_;
+        bit = 0x80;
+        break;
+      }
+      return false;
   }
   if ((points & bit) == 0) return false;
   // 0xB9 only covers the eight RST and reset vectors. A clear bit there means
-  // the point fires only while the +3 DOS ROM is paged, which is why RST 8 is
-  // not hooked on a stock Next.
-  if (addr < 0x0066 && (entryPointsValid0_ & bit) == 0 && !rom3Present_) return false;
+  // the point fires only while the divMMC's ROM3 is paged -- the 48K ROM on the
+  // Next, the +3 DOS ROM elsewhere. That is why RST 0 is hooked on a stock Next
+  // and RST 8 is not.
+  if (addr < 0x0066) {
+    if ((entryPointsValid0_ & bit) == 0 && !rom3Present_) return false;
+  } else if (!rom3Present_) {
+    return false;
+  }
   return true;
+}
+
+bool DivMmc::hookInstant(u16 addr) const {
+  if ((addr & 0xFF00) == 0x3D00) return true;
+  if (addr >= 0x0066) return false;
+  const u8 bit = u8(1u << ((addr >> 3) & 0x07));
+  return (entryPointsTiming0_ & bit) != 0;
+}
+
+bool DivMmc::offTrap(u16 addr) const {
+  return (addr & 0xFFF8) == 0x1FF8 && (entryPoints1_ & 0x40) != 0;
 }
 
 bool DivMmc::ioRead(u16 port, u8& value) const {
@@ -82,18 +111,26 @@ bool DivMmc::ioWrite(u16 port, u8 value) {
 }
 
 bool DivMmc::read(u16 addr, bool m1, u8 a, u8& value) {
+  (void)a;
   if (rom_.empty() || addr >= 0x4000) return false;
 
-  // The automap: an opcode fetch at a hook address maps the block in before the
-  // fetch is answered, which is the whole point of the M1 flag. It only happens
-  // while the board option is on.
-  if (m1 && automap_ && hookEnabled(addr)) control_ |= Conmem;
-  if (!mappedIn()) return false;
+  // The automap, as the Next's VHDL has it: a hook fetch sets a flip-flop that
+  // keeps the block in, but for a delayed entry point the byte that fetch
+  // returns still comes from the machine's own memory -- only the next access
+  // sees the divMMC. An instant entry point answers its own fetch.
+  if (m1 && automap_ && hookEnabled(addr)) {
+    if (hookInstant(addr)) {
+      held_ = true;
+    } else {
+      mapPending_ = true;
+    }
+  }
+  // The trap at 0x1FF8-0x1FFF is the way back out, and it also has to answer
+  // itself: the boot ROM jumps there and returns to an address in the ROM the
+  // divMMC has just uncovered.
+  if (m1 && offTrap(addr)) unmapPending_ = true;
 
-  // The esxDOS exit stubs sit at 0x1FF8-0x1FFF and unmap on the way out, but
-  // only after the instruction has run, so the stub itself still comes from the
-  // divMMC ROM.
-  if (m1 && addr >= 0x1FF8 && a == 0x83) unmapPending_ = true;
+  if (!shown()) return false;
 
   if (addr < 0x2000) {
     const u32 page = mapram() ? 3u : romPage();
@@ -109,7 +146,7 @@ bool DivMmc::read(u16 addr, bool m1, u8 a, u8& value) {
 }
 
 bool DivMmc::write(u16 addr, u8 value) {
-  if (rom_.empty() || addr >= 0x4000 || !mappedIn()) return false;
+  if (rom_.empty() || addr >= 0x4000 || !shown()) return false;
   if (addr < 0x2000) {
     if (!mapram()) return true;  // the ROM half is read-only, but still ours
     ram_[size_t(3) * BankSize + addr] = value;
@@ -120,9 +157,15 @@ bool DivMmc::write(u16 addr, u8 value) {
 }
 
 void DivMmc::afterInstruction() {
-  if (!unmapPending_) return;
-  control_ &= u8(~Conmem);
-  unmapPending_ = false;
+  if (mapPending_) {
+    held_ = true;
+    mapPending_ = false;
+  }
+  if (unmapPending_) {
+    held_ = false;
+    control_ &= u8(~Conmem);
+    unmapPending_ = false;
+  }
 }
 
 bool DivMmc::loadRom(std::vector<u8> rom, std::string& error) {
@@ -142,6 +185,9 @@ bool DivMmc::loadRom(std::vector<u8> rom, std::string& error) {
   }
   rom_ = std::move(rom);
   control_ &= u8(~Conmem);
+  held_ = false;
+  mapPending_ = false;
+  unmapPending_ = false;
   return true;
 }
 

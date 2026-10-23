@@ -508,9 +508,9 @@ TEST(nex_preserve_next_registers_keeps_them) {
   m.writeNextReg(0x12, 0x2A);
   std::string error;
   CHECK(m.loadNex(path, error));
-  // reset() still runs, so the register file goes back to its boot state rather
+  // reset() still runs, so the register file goes back to its reset state rather
   // than the loader's; what matters is that 0x12 is not forced to 9.
-  CHECK_EQ(m.readNextReg(0x12), 0x00);
+  CHECK_EQ(m.readNextReg(0x12), 0x08);
 }
 
 TEST(nex_zero_pc_means_load_without_running) {

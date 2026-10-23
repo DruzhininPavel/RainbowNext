@@ -3,21 +3,75 @@
 namespace rainbow {
 
 void NextRegFile::reset(bool hard) {
-  values_.fill(0);
-  selected_ = 0;
   lastResetHard_ = hard;
 
-  values_[0x03] = 0x00; // machine type: configuration mode
-  values_[0x06] = 0xA0; // the F3 and F8 hotkeys are enabled after a soft reset
-  values_[0x12] = 0x00; // Layer 2 active bank
-  values_[0x13] = 0x00; // Layer 2 shadow bank
-  values_[0x14] = 0xE3; // global transparency index
-  values_[0x42] = 0x07; // ULANext ink mask: eight inks, eight papers
-  values_[0x4A] = 0xE3; // fallback colour
-  values_[0x4B] = 0xE3; // sprite transparency index
-  values_[0x4C] = 0x0F; // tilemap transparency index
-  values_[0x6E] = 0x6C; // tilemap at 0x6C00 in bank 5
-  values_[0x6F] = 0x4C; // tile definitions at 0x4C00 in bank 5
+  // A hard reset wipes the file first; a soft reset is the FPGA's reset tree,
+  // not a wipe. The VHDL only gives the registers below a reset branch, so
+  // everything the firmware programmed before handing over -- the machine
+  // configuration in 0x0A, the Layer 2 mapping in 0x80-0x8F, the palette in
+  // 0x40-0x44 -- survives a soft reset. NextZXOS depends on that: it is handed
+  // a configured machine and reads back the values it set rather than assuming
+  // defaults. Power-on asserts the same branches, so both kinds run the list.
+  if (hard) {
+    values_.fill(0);
+    selected_ = 0;
+  }
+
+  values_[0x02] &= 0x80;                  // the ESP reset bit latches
+  values_[0x03] &= 0x7F;                  // leave configuration mode
+  values_[0x06] = u8((values_[0x06] & 0x5F) | 0xA0);
+  values_[0x07] = 0x00;
+  values_[0x08] &= 0x3F;
+  values_[0x09] &= 0xEF;
+  values_[0x0B] = 0x01;
+  values_[0x12] = 0x08;                   // Layer 2 active bank
+  values_[0x13] = 0x0B;                   // Layer 2 shadow bank
+  values_[0x14] = 0xE3;                   // global transparency index
+  values_[0x15] = values_[0x16] = values_[0x17] = 0x00;
+  values_[0x22] = values_[0x23] = 0x00;
+  values_[0x26] = values_[0x27] = 0x00;
+  values_[0x2F] = 0x00;
+  for (int reg = 0x30; reg <= 0x34; ++reg) values_[u8(reg)] = 0x00;
+  values_[0x40] = 0x00;                   // palette index
+  values_[0x42] = 0x07;                   // ULANext ink mask: eight and eight
+  values_[0x43] = 0x00;
+  values_[0x4A] = 0xE3;                   // fallback colour
+  values_[0x4B] = 0xE3;                   // sprite transparency index
+  values_[0x4C] = 0x0F;                   // tilemap transparency index
+  values_[0x62] = 0x00;
+  values_[0x64] = 0x00;
+  values_[0x68] = 0x00;
+  values_[0x6A] = values_[0x6B] = values_[0x6C] = 0x00;
+  values_[0x6E] = 0x2C;                   // tilemap at 0x6C00 in bank 5
+  values_[0x6F] = 0x0C;                   // tile definitions at 0x4C00
+  values_[0x70] = values_[0x71] = 0x00;
+  // The low nibble of the Layer 2 offset and of the fallback colour is
+  // duplicated into the high one, so both halves of the byte agree.
+  values_[0x80] = u8((values_[0x80] & 0x0F) * 0x11);
+  values_[0x8C] = u8((values_[0x8C] & 0x0F) * 0x11);
+  // A palette that is still in its "write through the old index" mode is
+  // parked on its first colour, which is what the VHDL does so that the
+  // first drawing after a reset is not in a random colour.
+  if ((values_[0x85] & 0x80) != 0) {
+    values_[0x82] = values_[0x83] = values_[0x84] = 0xFF;
+    values_[0x85] |= 0x0F;
+  }
+  if ((values_[0x89] & 0x80) == 0) {
+    values_[0x86] = values_[0x87] = values_[0x88] = 0xFF;
+    values_[0x89] |= 0x0F;
+  }
+  for (int reg = 0x90; reg <= 0x93; ++reg) values_[u8(reg)] = 0x00;
+  values_[0xA0] = 0x00;
+  values_[0xA2] = 0x00;
+  values_[0xA8] = 0x00;
+  values_[0xA9] = 0x01;
+  values_[0xC0] = 0x00;
+  values_[0xC2] = values_[0xC3] = 0x00;
+  values_[0xC4] = 0x81;                   // both Pi I/O lines float high
+  values_[0xC5] = values_[0xC6] = 0x00;
+  values_[0xCC] = values_[0xCD] = values_[0xCE] = 0x00;
+  values_[0xD8] = values_[0xD9] = 0x00;
+
   // The divMMC entry points. The defaults hook 0x0000 and 0x0038 everywhere and
   // 0x0008 only while the +3 DOS ROM is paged, which is what esxDOS expects.
   values_[0xB8] = 0x83; // entry points 0: 0x0038 and 0x0000

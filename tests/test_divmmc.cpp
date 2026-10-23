@@ -119,18 +119,19 @@ TEST(divmmc_automap_needs_both_the_master_switch_and_a_hook) {
   // bits are all set so that the ROM3 condition is not what stops it.
   d.setEntryPoints(0xFF, 0xFF, 0x00, 0x00);
   CHECK(!d.read(0x0008, true, 0, value));
-  CHECK(!d.mappedIn());
+  CHECK(!d.held());
 
   // Automap on but the point not armed.
   d.setAutomap(true);
   d.setEntryPoints(0x00, 0xFF, 0x00, 0x00);
   CHECK(!d.read(0x0008, true, 0, value));
-  CHECK(!d.mappedIn());
+  CHECK(!d.held());
 
   // Armed and automapping.
   d.setEntryPoints(0x02, 0xFF, 0x00, 0x00);
-  CHECK(d.read(0x0008, true, 0, value));
-  CHECK(d.mappedIn());
+  d.read(0x0008, true, 0, value);
+  d.afterInstruction();
+  CHECK(d.held());
 }
 
 TEST(divmmc_automap_only_reacts_to_opcode_fetches) {
@@ -139,7 +140,36 @@ TEST(divmmc_automap_only_reacts_to_opcode_fetches) {
   d.setEntryPoints(0x02, 0xFF, 0x00, 0x00);
   u8 value = 0;
   CHECK(!d.read(0x0008, false, 0, value));
-  CHECK(!d.mappedIn());
+  CHECK(!d.held());
+}
+
+TEST(divmmc_delayed_hook_maps_in_after_its_own_fetch) {
+  DivMmc d = makeLoaded();
+  d.setAutomap(true);
+  // 0x0000 is armed and valid on any ROM, but 0xBA is clear, so it is delayed:
+  // the fetch that trips it still comes from the machine's own memory.
+  d.setEntryPoints(0x01, 0x01, 0x00, 0x00);
+  u8 value = 0;
+  CHECK(!d.read(0x0000, true, 0, value));
+  CHECK(!d.shown());
+  d.afterInstruction();
+  CHECK(d.held());
+  // From the next fetch on the block answers, and it stays in after the latch
+  // is cleared -- the boot ROM writes 0x00 to port 0xE3 and expects to keep
+  // reading its own ROM until it reaches the 0x1FF8 trap.
+  CHECK(d.read(0x0001, true, 0, value));
+  d.setControl(0);
+  CHECK(d.read(0x0001, false, 0, value));
+  CHECK(d.shown());
+}
+
+TEST(divmmc_instant_hook_answers_its_own_fetch) {
+  DivMmc d = makeLoaded();
+  d.setAutomap(true);
+  d.setEntryPoints(0x01, 0x01, 0x01, 0x00);  // 0xBA bit 0: instant
+  u8 value = 0;
+  CHECK(d.read(0x0000, true, 0, value));
+  CHECK(d.shown());
 }
 
 TEST(divmmc_rom3_condition_gates_the_rst_vectors) {
@@ -151,14 +181,17 @@ TEST(divmmc_rom3_condition_gates_the_rst_vectors) {
   u8 value = 0;
 
   CHECK(!d.read(0x0008, true, 0, value));
-  CHECK(!d.mappedIn());
-  CHECK(d.read(0x0038, true, 0, value));
-  CHECK(d.mappedIn());
+  d.afterInstruction();
+  CHECK(!d.held());
+  d.read(0x0038, true, 0, value);
+  d.afterInstruction();
+  CHECK(d.held());
 
   d.setControl(0);
   d.setRom3Present(true);
-  CHECK(d.read(0x0008, true, 0, value));
-  CHECK(d.mappedIn());
+  d.read(0x0008, true, 0, value);
+  d.afterInstruction();
+  CHECK(d.held());
 }
 
 TEST(divmmc_exit_stub_unmaps_after_the_instruction) {
@@ -171,10 +204,18 @@ TEST(divmmc_exit_stub_unmaps_after_the_instruction) {
   // ...and only lets go once it has run.
   d.afterInstruction();
   CHECK(!d.mappedIn());
+  CHECK(!d.shown());
 
-  // A different accumulator is not the exit stub.
+  // The trap is the address, not the accumulator: the boot ROM reaches it with
+  // A zeroed and still has to be let go.
   d.setControl(DivMmc::Conmem);
   CHECK(d.read(0x1FF8, true, 0x00, value));
+  d.afterInstruction();
+  CHECK(!d.mappedIn());
+
+  // Outside 0x1FF8-0x1FFF nothing unmaps.
+  d.setControl(DivMmc::Conmem);
+  CHECK(d.read(0x1FF7, true, 0x00, value));
   d.afterInstruction();
   CHECK(d.mappedIn());
 }

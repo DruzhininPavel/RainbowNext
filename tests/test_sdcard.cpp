@@ -212,8 +212,10 @@ TEST(sdcard_initialises_through_acmd41) {
 
   const Exchange ocr = command(card, 58, 0);
   CHECK_EQ(ocr.bytes[0], u8(0x00));
-  CHECK_EQ(ocr.bytes[1], u8(0x40));
-  CHECK_EQ(ocr.bytes[2], u8(0xFF));  // the HCS bit: block addressing
+  // Bit 7 is the power-up status and bit 6 is CCS: a ready SDHC card reports
+  // both, and a driver that needs them together sees an SDSC card otherwise.
+  CHECK_EQ(ocr.bytes[1], u8(0xC0));
+  CHECK_EQ(ocr.bytes[2], u8(0xFF));
 }
 
 TEST(sdcard_reads_a_single_block) {

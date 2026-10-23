@@ -114,6 +114,7 @@ Machine::Machine(MachineType type)
   tstatesPerLine_ = tstatesPerLine(timings_);
   tstatesPerFrame_ = tstatesPerFrame(timings_);
   rom_.assign(RomPages * PageSize, 0);
+  altRom_.assign(AltRomPages * PageSize, 0);
   ram_.assign(RamPages * PageSize, 0);
   framebuffer_.assign(FrameWidth * FrameHeight, Palette[0]);
   borderLines_.fill(0);
@@ -134,6 +135,42 @@ Machine::Machine(MachineType type)
       });
 }
 
+void Machine::nextFirmwareBoot() {
+  if (type_ != MachineType::Next) return;
+
+  // The writes TBBLUE.FW 1.44 makes before it hands over, in the order it
+  // makes them. Register 0x02 is left out on purpose: the firmware's only use
+  // of it here is holding the ESP in reset, and there is no ESP to hold. The
+  // keyjoy remapping is left out too, because the emulator reads the keyboard
+  // directly instead of going through the PS/2 matrix the mapping describes.
+  static constexpr u8 Writes[][2] = {
+      {0x07, 0x03}, // 28 MHz
+      {0x06, 0xA0}, // PS/2 keyboard takes priority over the matrix
+      {0x03, 0x00}, // the boot ROM is done, leave configuration mode
+      {0x05, 0xFB}, // joysticks come from the keyboard
+      {0x11, 0x80}, // video mode 0, 50 Hz, scandoubler on
+      {0x05, 0xFB},
+      {0x09, 0x00}, // ROM bank select
+      {0x04, 0x03},
+      {0x05, 0x71}, // joy 1 and 2 enabled, no mouse buttons
+      {0x06, 0x9D}, // PS/2 and matrix keyboard, both enabled
+      {0x08, 0x1E}, // line interrupt off, 48K ULA
+      {0x09, 0x00},
+      {0x0A, 0x11}, // divMMC automap on, mouse DPI 1
+      {0x82, 0xDA}, // Layer 2 RAM page and offset
+      {0x83, 0x3F},
+      {0x84, 0xFF},
+      {0x85, 0x01},
+      {0x03, 0xB3}, // machine type +3 with +3 timing, config mode off
+  };
+  for (const auto& write : Writes) writeNextReg(write[0], write[1]);
+
+  // The firmware's last act is a soft reset, which is what turns the
+  // configuration above into a running NextZXOS: the reset keeps the
+  // registers, drops into the boot mapping and starts the CPU at 0x0000.
+  reset(true);
+}
+
 void Machine::reset(bool preserveRam) {
   cpu_.reset();
   cpu_.setExtendedInstructions(type_ == MachineType::Next);
@@ -142,7 +179,12 @@ void Machine::reset(bool preserveRam) {
   beeper_.reset();
   tape_.rewind();
 
-  if (!preserveRam) ram_.assign(RamPages * PageSize, 0);
+  if (!preserveRam) {
+    ram_.assign(RamPages * PageSize, 0);
+    // The alt ROM is loaded by the boot ROM on every boot, so a cold start
+    // leaves it blank rather than serving the previous session's image.
+    altRom_.assign(AltRomPages * PageSize, 0);
+  }
   framebuffer_.assign(FrameWidth * FrameHeight, Palette[0]);
   borderLines_.fill(0);
 
@@ -748,13 +790,23 @@ u8 Machine::memReadBase(u16 addr, u32) {
     return (*cartRom_)[addr & (cartRom_->size() - 1)];
   }
   const Page& page = page_[addr >> 13];
+  u8 alt = 0;
+  if (!page.ram && nextAltRomPage(addr, false, alt)) {
+    return altRom_[size_t(alt) * PageSize + (addr & (PageSize - 1))];
+  }
   const size_t offset = size_t(page.page) * PageSize + (addr & (PageSize - 1));
   return page.ram ? ram_[offset] : rom_[offset];
 }
 
 void Machine::memWriteBase(u16 addr, u8 value, u32) {
   const Page& page = page_[addr >> 13];
-  if (!page.ram) return;
+  if (!page.ram) {
+    u8 alt = 0;
+    if (nextAltRomPage(addr, true, alt)) {
+      altRom_[size_t(alt) * PageSize + (addr & (PageSize - 1))] = value;
+    }
+    return;
+  }
   ram_[size_t(page.page) * PageSize + (addr & (PageSize - 1))] = value;
 }
 
@@ -807,7 +859,10 @@ u8 Machine::ioReadBase(u16 port, u32) {
     }
     // Reading the SPI data port clocks one byte out of the selected device, so
     // this is a read with a side effect rather than a plain register.
-    if ((port & 0x00FF) == 0xEB) return sdCard_.transfer(0xFF);
+    if ((port & 0x00FF) == 0xEB) {
+      u8 v = sdCard_.transfer(0xFF);
+      return v;
+    }
     if ((port & 0x00FF) == 0xE7) return spiSelect_;
   }
 
@@ -1021,23 +1076,81 @@ void Machine::writePort1ffd(u8 value) {
   updatePaging();
 }
 
-void Machine::updatePaging() {
-  u8 rom = u8((port7ffd_ & 0x10) ? 1 : 0);
-  if (isPlus3() || isNext()) rom = u8(rom | ((port1ffd_ & 0x04) ? 2 : 0));
-  romBank_ = u8(rom & 0x03);
-  // The divMMC only fires RST 8 while the +3 DOS ROM is the one at 0x0000.
-  divmmc_.setRom3Present(romBank_ == 3);
+// The Next selects one of four 16K ROM banks from three sources: the machine
+// type in register 0x03, the 0x7FFD/0x1FFD bits the classic machines use, and
+// the lock in register 0x8C bits 4-5, which overrides both. This mirrors the
+// ROM multiplexer in zxnext.vhd, and it matters far beyond cosmetics: the
+// divMMC only automaps while the bank it shadows is the one paged in, and
+// NextZXOS switches banks constantly.
+u8 Machine::nextRomBank() const {
+  const u8 type = u8(next_.read(0x03) & 0x07);
+  const u8 lock = u8((next_.read(0x8C) >> 4) & 0x03);
+  const u8 from7ffd = u8((port7ffd_ >> 4) & 0x01);
+  // Types 0 and 1 are 48K modes: the low ROM is always selected.
+  if (type == 0x00 || type == 0x01) return 0;
+  // Types 2 and 4 are 128K modes: only one ROM bit, so the lock contributes a
+  // single bit as well.
+  if (type == 0x02 || type == 0x04) return lock ? u8((lock >> 1) & 0x01) : from7ffd;
+  // Everything else is the +3 layout, with a second bit from 0x1FFD bit 2.
+  return lock ? lock : u8((((port1ffd_ >> 2) & 0x01) << 1) | from7ffd);
+}
 
+// Which of the two 16K alt ROM banks register 0x8C selects. The lock bits 4-5
+// name it directly when they are set; otherwise it follows the same ROM bit the
+// main ROM does, so the alt ROM tracks the machine's ROM switch.
+u8 Machine::nextAltRomBank() const {
+  const u8 type = u8(next_.read(0x03) & 0x07);
+  const u8 lock = u8((next_.read(0x8C) >> 4) & 0x03);
+  // A 48K machine has no 0x7FFD ROM bit to follow, so only lock value 1 picks
+  // the low bank and everything else the high one.
+  if (type == 0x00 || type == 0x01) return (lock == 0x01) ? 0 : 1;
+  return lock ? u8(lock >> 1) : u8((port7ffd_ >> 4) & 0x01);
+}
+
+// Register 0x8C puts the alt ROM behind the main ROM: bit 7 enables it and bit
+// 6 says which side is writable. With bit 6 clear reads come from the alt ROM
+// and writes fall through to the (read-only) main ROM; with it set the boot ROM
+// can fill the alt banks by writing to the ROM window.
+bool Machine::nextAltRomPage(u16 addr, bool write, u8& page) const {
+  if (!isNext()) return false;
+  const u8 reg = next_.read(0x8C);
+  if ((reg & 0x80) == 0) return false;
+  if (((reg & 0x40) != 0) != write) return false;
+  page = u8(nextAltRomBank() * 2 + ((addr >> 13) & 0x01));
+  return true;
+}
+
+// divMMC entry points are only live while the ROM the divMMC shadows is paged
+// in, so that an ordinary RST 8 in a running program is not intercepted. On a
+// +3 machine that is ROM 3, on a 128K machine ROM 1, and in 48K mode always.
+bool Machine::nextDivMmcRom3() const {
+  const u8 type = u8(next_.read(0x03) & 0x07);
+  if (type == 0x00 || type == 0x01) return true;
+  if (type == 0x02 || type == 0x04) return romBank_ == 1;
+  return romBank_ == 3;
+}
+
+void Machine::updatePaging() {
   if (isNext()) {
     // The Next keeps its map in the MMU registers, and the classic paging
     // ports only write into those same registers. The ULA still takes its
     // screen bank from 0x7FFD bit 3, which is how a game swaps between the
     // shadow screen and the one Layer 2 uses.
+    romBank_ = nextRomBank();
+    divmmc_.setRom3Present(nextDivMmcRom3());
     updateNextMmu();
     ramBank_ = u8(port7ffd_ & 0x07);
     screenBank_ = (port7ffd_ & 0x08) ? 7 : 5;
     return;
   }
+
+  u8 rom = u8((port7ffd_ & 0x10) ? 1 : 0);
+  if (isPlus3()) rom = u8(rom | ((port1ffd_ & 0x04) ? 2 : 0));
+  romBank_ = u8(rom & 0x03);
+  // The divMMC's ROM3 condition: on the +2A/+3 it is the DOS ROM. Automapping
+  // RST 8 and the esxDOS traps only happens while that one is paged in, which
+  // is what keeps a cold boot's RST 0 free of it.
+  divmmc_.setRom3Present(romBank_ == 3);
 
   specialPaging_ = isPlus3() && (port1ffd_ & 0x01) != 0;
   // Bit 3 of 0x1FFD is the disk motor; nothing in the emulator needs it, but
@@ -1084,17 +1197,12 @@ void Machine::mapBank(int slot, int bank, bool ram) {
 // The Next's MMU is eight byte-wide registers, one per 8K slot. A value of 255
 // shows the ROM instead of RAM, and the ROM half follows the slot's parity.
 void Machine::updateNextMmu() {
-  // Register 0x8C swaps the two low ROM banks, which is how NextZXOS brings
-  // in the 48K ROM; bit 6 keeps the swap to the write half of the bus.
-  u8 rom = romBank_;
-  if ((next_.read(0x8C) & 0x80) != 0) rom = u8(rom ^ 0x01);
-
   for (int slot = 0; slot < 8; ++slot) {
     const u8 value = next_.mmuSlot(slot);
     Page& page = page_[size_t(slot)];
     if (value == NextRegFile::RomPage) {
       page.ram = false;
-      page.page = u16(rom * 2 + (slot & 1));
+      page.page = u16(romBank_ * 2 + (slot & 1));
     } else {
       page.ram = true;
       page.page = value;
@@ -1157,6 +1265,8 @@ void Machine::writeNextReg(u8 reg, u8 value) {
       u8 type = next_.read(0x03);
       if ((value & 0x80) != 0) type = u8((type & 0x8F) | (value & 0x70));
       next_.write(0x03, type);
+      // The machine type decides which ROM the classic paging ports select.
+      updatePaging();
       return;
     }
     case 0x50: case 0x51: case 0x52: case 0x53:
