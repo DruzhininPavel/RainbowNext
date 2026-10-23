@@ -229,7 +229,9 @@ TEST(lores_radastan_display_file_select) {
   renderOneFrame(m);
   CHECK_EQ(pixelAt(m, 0, 0), argb8(0x0E));
 
-  // Setting the Timex bit as well cancels it again.
+  // Setting the Timex bit as well cancels it again. Port 0xFF only reaches the
+  // SCLD while Timex mode is enabled in NR 0x82 bit 0.
+  m.writeNextReg(0x82, u8(m.readNextReg(0x82) | 0x01));
   m.ioWrite(0x00FF, 0x01, 0);
   renderOneFrame(m);
   CHECK_EQ(pixelAt(m, 0, 0), argb8(0x04));

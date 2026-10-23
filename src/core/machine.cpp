@@ -988,9 +988,12 @@ void Machine::ioWriteBase(u16 port, u8 value, u32) {
   }
 
   // Timex SCLD register. The port is decoded on the low byte alone, so 0xBFFF
-  // and 0xFFFF reach it too, but the AY has already claimed 0xFFFF above.
+  // and 0xFFFF reach it too, but the AY has already claimed 0xFFFF above. On
+  // the Next the address only carries the Timex register while Timex mode is
+  // enabled in NR 0x82 bit 0; otherwise the firmware's palette traffic on the
+  // same port must not be read as a display-mode change, so it is dropped.
   if (isNext() && (port & 0x00FF) == 0xFF) {
-    ula_.writeTimex(value);
+    if ((next_.read(0x82) & 0x01) != 0) ula_.writeTimex(value);
     return;
   }
 
@@ -1219,6 +1222,15 @@ u8 Machine::readNextReg(u8 reg) const {
   // The raster counters are the only registers whose value lives in the
   // machine rather than in the file itself.
   if (reg == 0x40) return palette_.index();
+  // 0x41 and 0x44 read back the colour of the entry the index register points
+  // at, not the last byte written. The Next boot ROM snapshots the palette with
+  // them before it starts a program and restores it afterwards, so a stale
+  // answer here wipes the palette.
+  if (reg == 0x41) return palette_.read8(palette_.selected(), palette_.index());
+  if (reg == 0x44) {
+    const u16 colour = palette_.colour9(palette_.selected(), palette_.index());
+    return u8((((colour >> 9) & 0x03) << 6) | (colour & 0x01));
+  }
   if (reg == 0x61) return copper_.addressLsb();
   if (reg == 0x62) return copper_.control();
   if (reg == 0x2C) return dacs_.dac(1);
@@ -1227,6 +1239,13 @@ u8 Machine::readNextReg(u8 reg) const {
   if (reg == 0x1E || reg == 0x1F) {
     const u32 line = u32(tstates_ % tstatesPerFrame_) / tstatesPerLine_;
     return reg == 0x1E ? u8(line) : u8(line >> 8);
+  }
+  if (reg == 0x69) {
+    // Composed from the classic ports, exactly like NR 0x8E: bit 6 is the Layer
+    // 2 enable of port 0x123B, bit 3 the screen bank of port 0x7FFD and bits
+    // 5:0 the Timex SCLD register. Bit 7 is the file's own Layer 2 enable.
+    return u8((next_.read(0x69) & 0x80) | ((port123b_ & 0x02) << 6) |
+              ((port7ffd_ & 0x08) << 3) | (ula_.timex() & 0x3F));
   }
   if (reg == 0x8E) {
     // Composed from the classic ports, so a guest that reads the register back
@@ -1380,6 +1399,19 @@ void Machine::writeNextReg(u8 reg, u8 value) {
       next_.write(reg, value);
       tilemapClip_[tilemapClipIndex_ & 0x03] = value;
       ++tilemapClipIndex_;
+      return;
+    case 0x69: // Layer 2 control is mostly a mirror of the classic ports, so
+               // the write is copied into them as well: bit 6 is the Layer 2
+               // enable of port 0x123B, bit 3 the screen bank of port 0x7FFD
+               // and bits 5:0 the Timex SCLD register. Bit 7 keeps its own
+               // storage in the file, which is what enables Layer 2 here.
+      next_.write(reg, value);
+      port123b_ = u8((port123b_ & ~0x02) | ((value >> 6) & 0x02));
+      if (u8(value & 0x08) != (port7ffd_ & 0x08)) {
+        port7ffd_ = u8((port7ffd_ & ~0x08) | (value & 0x08));
+        updatePaging();
+      }
+      ula_.writeTimex(u8(value & 0x3F));
       return;
     default:
       next_.write(reg, value);

@@ -34,8 +34,12 @@ void clearScreen(Machine& m) {
 }
 
 // Port 0xFF selects the Timex display mode in bits 2:0 and the two hi-res
-// colours in bits 5:3.
-void writeTimex(Machine& m, u8 value) { m.ioWrite(0x00FF, value, 0); }
+// colours in bits 5:3. On the Next the address only reaches the SCLD while
+// Timex mode is enabled in NR 0x82 bit 0, so the helper turns it on first.
+void writeTimex(Machine& m, u8 value) {
+  m.writeNextReg(0x82, u8(m.readNextReg(0x82) | 0x01));
+  m.ioWrite(0x00FF, value, 0);
+}
 
 // The classic ULA palette the Next starts with, as 8-bit ARGB.
 const u32 Black = 0xFF000000u;
@@ -188,4 +192,42 @@ TEST(timex_reset_returns_to_the_standard_screen) {
   // The reset emptied both files and put the mode back to standard, so the
   // first file is what shows.
   CHECK_EQ(pixelAt(m, 0, 0), BrightWhite);
+}
+
+// On the Next the Timex register shares its address with the firmware's palette
+// traffic, so NR 0x82 bit 0 decides whether the write reaches the SCLD at all.
+TEST(timex_port_needs_the_next_enable_bit) {
+  Machine m(MachineType::Next);
+  clearScreen(m);
+  m.memWrite(AltBase, 0xFF, 0);
+  m.memWrite(u16(AltBase + 0x1800), 0x47, 0);
+
+  m.writeNextReg(0x82, u8(m.readNextReg(0x82) & 0xFE));
+  m.ioWrite(0x00FF, 0x01, 0); // ALTDFILE, but the SCLD never sees it
+  renderOneFrame(m);
+  CHECK_EQ(pixelAt(m, 0, 0), Black);
+
+  m.writeNextReg(0x82, u8(m.readNextReg(0x82) | 0x01));
+  m.ioWrite(0x00FF, 0x01, 0);
+  renderOneFrame(m);
+  CHECK_EQ(pixelAt(m, 0, 0), BrightWhite);
+}
+
+// NR 0x69 is the Next-register view of the same controls, so writing it moves
+// the classic ports and reading it back recomposes them.
+TEST(timex_next_reg_mirrors_the_scld_register) {
+  Machine m(MachineType::Next);
+  clearScreen(m);
+  m.memWrite(AltBase, 0xFF, 0);
+  m.memWrite(u16(AltBase + 0x1800), 0x47, 0);
+
+  m.writeNextReg(0x69, 0x01); // ALTDFILE through the Next register
+  renderOneFrame(m);
+  CHECK_EQ(pixelAt(m, 0, 0), BrightWhite);
+  CHECK_EQ(m.readNextReg(0x69) & 0x3F, 0x01);
+
+  m.writeNextReg(0x69, 0x00);
+  renderOneFrame(m);
+  CHECK_EQ(pixelAt(m, 0, 0), Black);
+  CHECK_EQ(m.readNextReg(0x69) & 0x3F, 0x00);
 }

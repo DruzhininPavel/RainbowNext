@@ -190,7 +190,10 @@ TEST(golden_frame_timex_hires) {
     m.memWrite(u16(0x6000 + column), u8((column * 7) & 0xFF), 0);
   }
 
-  m.ioWrite(0x00FF, 0x06, 0); // HIRES, paper black on ink white
+  // HIRES, paper black on ink white. Port 0xFF only reaches the SCLD while
+  // Timex mode is enabled in NR 0x82 bit 0.
+  m.writeNextReg(0x82, u8(m.readNextReg(0x82) | 0x01));
+  m.ioWrite(0x00FF, 0x06, 0);
   renderOneFrame(m);
 
   CHECK_EQ(pixelAt(m, 0, 0), 0xFFFFFFFFu); // hi-res pixels 0 and 1 both ink

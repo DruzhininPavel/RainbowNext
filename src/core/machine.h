@@ -437,6 +437,9 @@ private:
   u8 romBank_ = 0;
   u8 port7ffd_ = 0;
   u8 port1ffd_ = 0;
+  // Port 0x123B bit 1, the legacy Layer 2 enable. Only bit 1 is modelled,
+  // because the CPU mapping the rest of the port selects is not wired up.
+  u8 port123b_ = 0;
   bool pagingLocked_ = false;
   bool specialPaging_ = false;
   bool romLoaded_ = false;

@@ -81,8 +81,40 @@ TEST(palette_write8_stores_an_rrrgggbb_colour) {
   writePalette8(m, 0x21, 0x1C); // red 0, green 7, blue 0
   CHECK_EQ(m.palette().colour(NextPalette::Ula0, 0x21), 0xFF00FF00u);
 
-  // 0x41 reads back the last byte written.
+  // 0x41 reads back the colour the index register points at, not the last byte
+  // written: the boot ROM snapshots the palette with it.
+  m.writeNextReg(0x40, 0x20);
+  CHECK_EQ(m.readNextReg(0x41), 0xE3);
+  m.writeNextReg(0x40, 0x21);
   CHECK_EQ(m.readNextReg(0x41), 0x1C);
+}
+
+TEST(palette_reads_back_the_nine_bit_colour) {
+  Machine m(MachineType::Next);
+
+  // 0x41 in 8-bit mode, written through the auto-incrementing index.
+  m.writeNextReg(0x43, 0x00);
+  m.writeNextReg(0x40, 0x10);
+  m.writeNextReg(0x41, 0xE3); // red 7, green 0, blue 3
+
+  // 0x44 reports bits 9:8 in 7:6 and bit 0 of the blue field in bit 0. The
+  // eighth blue bit of an 8-bit write is duplicated into the ninth.
+  m.writeNextReg(0x40, 0x10);
+  CHECK_EQ(m.readNextReg(0x44), 0x01);
+
+  // A 9-bit write takes the colour first and the ninth bit second, and keeps
+  // the index parked on the entry.
+  m.writeNextReg(0x43, 0x80); // bit 7 stops the auto-increment
+  m.writeNextReg(0x40, 0x20);
+  m.writeNextReg(0x44, 0xE0); // red 7, green 0, blue 0
+  m.writeNextReg(0x44, 0x00);
+  CHECK_EQ(m.readNextReg(0x41), 0xE0);
+  CHECK_EQ(m.readNextReg(0x44), 0x00);
+
+  m.writeNextReg(0x44, 0xE0);
+  m.writeNextReg(0x44, 0x01); // blue LSB set
+  CHECK_EQ(m.readNextReg(0x41), 0xE0);
+  CHECK_EQ(m.readNextReg(0x44), 0x01);
 }
 
 TEST(palette_write8_auto_increments_the_index) {
