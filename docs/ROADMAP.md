@@ -457,6 +457,19 @@ These are deliberate simplifications, tracked here so they are not forgotten:
     and both finish with the same eight MMU slots, `FF FF 0A 0B 04 05 0E 0F`.
     So the paging and the firmware path are not in question.
 
+    *The ULA is reading the right bank, and this was worth proving.* It is easy
+    to misread `screenBank_ * BankSize` as an 8K page index and conclude that
+    the ULA shows RAM page 5 while the OS keeps its console in page `0x0A`.
+    It does not: `BankSize` is `0x4000`, so bank 5 is the pair of 8K pages 10
+    and 11, and MMU page `0x0A` *is* 8K page 10. NextZXOS simply maps the
+    classic screen bank at `0x4000` the way a 128K Spectrum does, and the
+    renderer and the MMU therefore address the same bytes. A cell-by-cell
+    comparison of the framebuffer against every one of the 256 8K pages
+    confirms it: page `0x0A` matches the drawn attributes, page 5 does not,
+    because 8K page 5 is the bottom half of a different 16K bank. Dumping "RAM
+    page 5" through the MMU and finding stale boot-UI text there is expected,
+    not a symptom.
+
     What is still open is why the OS stops at an empty text page instead of
     starting the desktop. The card goes untouched after frame 44: 197 `CMD17`
     reads load `AUTOEXEC.1ST`, `RTC.SYS`, `RTCSIG.SYS` and `BIOSEXT.BIN`, and
