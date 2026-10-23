@@ -30,6 +30,15 @@ std::optional<float> parseFloat(const std::string& text) {
 
 float clamp01(float value) { return value < 0.0f ? 0.0f : (value > 1.0f ? 1.0f : value); }
 
+// `rom.next` and `divmmc.next` carry a machine id after the dot, so the key is
+// split once and the rest is the id.
+std::optional<std::string> suffixAfter(const std::string& key, const std::string& prefix) {
+  if (key.size() <= prefix.size() + 1) return std::nullopt;
+  if (key.compare(0, prefix.size(), prefix) != 0) return std::nullopt;
+  if (key[prefix.size()] != '.') return std::nullopt;
+  return key.substr(prefix.size() + 1);
+}
+
 void appendIds(const std::string& list, std::vector<std::string>& out) {
   std::string current;
   for (const char c : list) {
@@ -50,6 +59,8 @@ bool Config::load(const std::string& path) {
   if (!in) return false;
 
   enabledPeripherals.clear();
+  roms.clear();
+  machine.clear();
   std::string line;
   while (std::getline(in, line)) {
     line = trim(line);
@@ -60,6 +71,12 @@ bool Config::load(const std::string& path) {
     const std::string value = trim(line.substr(equals + 1));
     if (key == "plugin_dir") {
       pluginDir = value;
+    } else if (key == "machine") {
+      machine = value;
+    } else if (const auto id = suffixAfter(key, "rom")) {
+      if (!id->empty()) roms[*id].main = value;
+    } else if (const auto id = suffixAfter(key, "divmmc")) {
+      if (!id->empty()) roms[*id].divMmc = value;
     } else if (key == "peripheral") {
       appendIds(value, enabledPeripherals);
     } else if (key == "peripherals") {
@@ -83,6 +100,11 @@ bool Config::save(const std::string& path) const {
   std::ofstream out(path, std::ios::trunc);
   if (!out) return false;
   out << "# RainbowNext settings\n";
+  if (!machine.empty()) out << "machine = " << machine << '\n';
+  for (const auto& [id, choice] : roms) {
+    if (!choice.main.empty()) out << "rom." << id << " = " << choice.main << '\n';
+    if (!choice.divMmc.empty()) out << "divmmc." << id << " = " << choice.divMmc << '\n';
+  }
   out << "plugin_dir = " << pluginDir << '\n';
   for (const std::string& id : enabledPeripherals) out << "peripheral = " << id << '\n';
   out << "crt = " << (crtEnabled ? "on" : "off") << '\n';

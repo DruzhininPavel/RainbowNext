@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.24)
-project(RainbowNext VERSION 0.3.0 LANGUAGES CXX)
+project(RainbowNext VERSION 0.4.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -196,6 +196,7 @@ if(RAINBOW_BUILD_TESTS)
     tests/test_nex.cpp
     tests/test_esxdos.cpp
     src/frontend/config.cpp
+    tests/test_config.cpp
     src/frontend/autoload.cpp
     tests/test_turbosound.cpp
     tests/test_tilemap.cpp

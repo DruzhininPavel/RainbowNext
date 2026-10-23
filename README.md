@@ -203,6 +203,16 @@ A bare path is routed by extension: `.rom`, `.tap`/`.tzx`, `.sna`/`.z80`,
 `.nex`, `.dsk`/`.edsk`/`.trd`, `.img`, `.rbn`. The same files can be dropped onto the
 window.
 
+Pick a ROM once and the emulator remembers it. **Machine > ROM images...** lists
+every machine with the image it will boot from: `Choose...` stores a path for
+that machine, `Forget` drops it and goes back to searching `roms/`. Machines that
+need a second image alongside their board ROM — the Next, which will not boot
+without its DivMMC/esxDOS ROM — get a sub-row of their own, so the companion is
+configured next to the board ROM instead of showing up later as a complaint.
+Opening a ROM by hand (`File > Open ROM...`, or dropping a file on the window)
+writes the same setting, so the next start comes up exactly where this one did,
+on the same machine.
+
 `--esxdos DIR` points the program's `RST 8` calls at a host directory instead of
 booting the DivMMC firmware: `F_OPEN`, `F_READ`, `F_WRITE`, `F_SEEK` and the
 rest are answered from the emulator, so a Next game that keeps its data next to
@@ -360,7 +370,16 @@ on macOS and in the SDL pref path on Linux, and is a flat `key = value` file:
 plugin_dir = /path/to/peripherals
 peripheral = kempston
 peripheral = printer
+machine = next
+rom.next = /path/to/roms/next.rom
+divmmc.next = /path/to/roms/nxtmmc.rom
 ```
+
+`machine` is the machine the last session ran, and the `rom.<id>` /
+`divmmc.<id>` pairs are the images picked in **Machine > ROM images...** (ids are
+`48`, `128`, `plus2`, `plus3`, `pentagon`, `next`). A missing `rom.<id>` means
+"search `roms/`", which is what a fresh install does. Unknown keys are ignored,
+so an older build still opens a newer file.
 
 ## Testing
 
@@ -368,7 +387,7 @@ peripheral = printer
 ctest --test-dir build --output-on-failure
 ```
 
-503 tests cover the Z80 core (timings, flags, undocumented opcodes,
+507 tests cover the Z80 core (timings, flags, undocumented opcodes,
 interrupts), the disassembler (base, CB, ED, indexed and Z80N forms, lengths and
 flow), the debugger's breakpoints and profiler, save states (round trips of the
 CPU, memory, paging and peripherals, and the refusals for a damaged, truncated,

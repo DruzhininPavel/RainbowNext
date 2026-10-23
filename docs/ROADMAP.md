@@ -260,6 +260,15 @@ a multicolour demo renders correctly; `z80test` passes.
       layer that sits beside the matrix so releasing the pad cannot clear a key
       the keyboard holds. `Start` summons the toolbar for a pad with no pointer,
       `Back` pauses. See `docs/ARCHITECTURE.md`, "Input and handhelds"
+* [x] Persistent ROM settings. `Machine > ROM images...` lists every machine
+      with the image it boots from, `Choose...` stores a path and `Forget` drops
+      it, both written to `rainbow.cfg` as `rom.<id>` so a fresh start needs no
+      `--rom`. Machines that need a second image get a sub-row: the Next has a
+      divMMC slot (`divmmc.<id>`), which is where the esxDOS ROM belongs, so it
+      is loaded together with the board ROM instead of surfacing later as a
+      warning. The machine itself is stored too (`machine`), and picking a ROM
+      by hand writes the same setting, so the window and the manual path cannot
+      disagree
 
 ## Known gaps
 

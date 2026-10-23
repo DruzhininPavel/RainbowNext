@@ -45,6 +45,21 @@ the Next (and only for the Next), looking for `nxtmmc`, `nextmmc`, `divmmc` and
 and in the working directory. On the other machines the divMMC stays the user's
 choice and is not touched.
 
+## Picking the images once
+
+Instead of passing `--rom` on every start, open **Machine > ROM images...** and
+press `Choose...` on the machine you want. The path is written to `rainbow.cfg`
+next to the other settings and is used from then on; `Forget` clears it and goes
+back to searching `roms/`. Each machine keeps its own images, so switching
+between a 128K and a Next never picks up the wrong-sized ROM, and the machine
+itself is remembered too, so the next start comes up where the last one ended.
+
+The Next's row has a divMMC sub-row, which is where the companion image above
+belongs — the emulator then loads it together with the board ROM instead of
+telling you later that it is missing. The toolbar shows `NO DIVMMC` while a
+machine that needs one does not have it; the chip disappears once the image is
+loaded.
+
 If no `next` set is found the Next falls back to the `128` set, so a Next without
 its own ROM still boots the 128K machine. The ROMs only cover the board and
 divMMC; NextZXOS lives on the SD card image and is loaded separately with `--sd`
