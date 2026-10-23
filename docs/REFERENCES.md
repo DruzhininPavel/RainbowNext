@@ -40,7 +40,8 @@ port semantics, memory layouts) was reimplemented.
 | [Sprite and Layers System Register](https://wiki.specnext.dev/Sprite_and_Layers_System_Register) | — | `0x15` bits 4:2 priority order and the blending modes 110/111 |
 | [ULANext Attribute Byte Format Register](https://wiki.specnext.dev/ULANext_Attribute_Byte_Format_Register) | — | The `0x42` ink mask and the `0x4A` fallback colour for full-ink mode |
 | [ULAplus](https://sinclair.wiki.zxnet.co.uk/wiki/ULAplus) | — | The `0xBF3B`/`0xFF3B` register pair, the `GGGRRRBB` byte, the `ink = (FLASH*2+BRIGHT)*16 + INK` and `paper = … + 8` layout, border from entry 8 |
-| [DivMMC](https://wiki.specnext.dev/DIVMMC) | — | Port map (`0xE3` control, `0xDF` SPI, `0xE7`/`0xEB` map/unmap), the automap hook addresses, `conmem`/`mapram` |
+| [Next I/O port map](https://wiki.specnext.dev/Next_ZX_Spectrum_Hardware) | — | Ports `0xE7` (SPI chip select, active low per device) and `0xEB` (SPI data); the same document set is mirrored in `research/sn-complete-24.11/docs/extra-hw/io-port-system/ports.txt` |
+| [DivMMC](https://wiki.specnext.dev/DIVMMC) | — | Port map (`0xE3` control, `0xDF` SPI), the automap hook addresses, `conmem`/`mapram`. Kept as the reference for the plugin; no divMMC ships in the core |
 | [SD Specifications, Part 1: Physical Layer](https://www.sdcard.org/downloads/pls/) | — | SPI command set, R1/R7 responses, the `CSD`/`CID` layouts, `ACMD41` and the HCS bit |
 
 ## Conformance suites

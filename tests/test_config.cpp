@@ -27,19 +27,35 @@ TEST(config_remembers_the_machine_and_its_roms) {
   const std::string path = tempPath("rainbow_cfg_roundtrip.cfg");
   Config saved;
   saved.machine = "next";
-  saved.roms["next"].main = "/games/enNextZX.rom";
-  saved.roms["next"].divMmc = "/games/enNxtmmc.rom";
-  saved.roms["48"].main = "/games/48.rom";
+  saved.roms["next"] = "/games/enNextZX.rom";
+  saved.roms["48"] = "/games/48.rom";
   CHECK(saved.save(path));
 
   Config loaded;
   CHECK(loaded.load(path));
   CHECK(loaded.machine == "next");
   CHECK_EQ(loaded.roms.size(), 2u);
-  CHECK(loaded.roms["next"].main == "/games/enNextZX.rom");
-  CHECK(loaded.roms["next"].divMmc == "/games/enNxtmmc.rom");
-  CHECK(loaded.roms["48"].main == "/games/48.rom");
-  CHECK(loaded.roms["48"].divMmc.empty());
+  CHECK(loaded.roms["next"] == "/games/enNextZX.rom");
+  CHECK(loaded.roms["48"] == "/games/48.rom");
+  std::filesystem::remove(path);
+}
+
+// The card a machine boots from is remembered the same way as its ROM: the
+// Next is not usable without one, so picking it by hand every start is exactly
+// what this key exists to avoid.
+TEST(config_remembers_the_card_chosen_for_a_machine) {
+  const std::string path = tempPath("rainbow_cfg_sd.cfg");
+  Config saved;
+  saved.machine = "next";
+  saved.sdCards["next"] = "/games/nextzxos.img";
+  CHECK(saved.save(path));
+
+  Config loaded;
+  CHECK(loaded.load(path));
+  CHECK_EQ(loaded.sdCards.size(), 1u);
+  CHECK(loaded.sdCards["next"] == "/games/nextzxos.img");
+  // A card key must not be read as a ROM key, even though both end in an id.
+  CHECK(loaded.roms.empty());
   std::filesystem::remove(path);
 }
 
@@ -56,6 +72,7 @@ TEST(config_still_reads_a_file_without_rom_keys) {
   CHECK(loaded.load(path));
   CHECK(loaded.machine.empty());
   CHECK(loaded.roms.empty());
+  CHECK(loaded.sdCards.empty());
   CHECK(loaded.pluginDir == "/plugins");
   CHECK_EQ(loaded.enabledPeripherals.size(), 1u);
   CHECK(!loaded.crtEnabled);
@@ -68,17 +85,17 @@ TEST(config_ignores_keys_it_does_not_understand) {
                   "rom.plus3 = /roms/plus3.rom\n"
                   "rom = nobody\n"
                   "rom. = broken\n"
-                  "divmmc.next = /roms/nxtmmc.rom\n"
+                  "sd. = broken\n"
                   "future_option = 7\n");
   Config loaded;
   CHECK(loaded.load(path));
   CHECK(loaded.machine == "plus3");
-  CHECK(loaded.roms["plus3"].main == "/roms/plus3.rom");
+  CHECK(loaded.roms["plus3"] == "/roms/plus3.rom");
   // `rom = nobody` has no machine id and `rom. = broken` has an empty one, so
   // neither may invent an entry.
   CHECK_EQ(loaded.roms.count(""), 0u);
   CHECK_EQ(loaded.roms.count("nobody"), 0u);
-  CHECK(loaded.roms["next"].divMmc == "/roms/nxtmmc.rom");
+  CHECK(loaded.sdCards.empty());
   std::filesystem::remove(path);
 }
 
@@ -96,6 +113,19 @@ TEST(config_reload_clears_the_previous_roms) {
   CHECK(loaded.machine == "48");
   CHECK_EQ(loaded.roms.size(), 1u);
   CHECK_EQ(loaded.roms.count("next"), 0u);
-  CHECK(loaded.roms["48"].main == "/a/48.rom");
+  CHECK(loaded.roms["48"] == "/a/48.rom");
+  std::filesystem::remove(path);
+}
+
+TEST(config_reload_clears_the_previous_cards) {
+  const std::string path = tempPath("rainbow_cfg_reload_sd.cfg");
+  writeText(path, "machine = next\nsd.next = /a/nextzxos.img\n");
+  Config loaded;
+  CHECK(loaded.load(path));
+  CHECK_EQ(loaded.sdCards.size(), 1u);
+
+  writeText(path, "machine = 48\n");
+  CHECK(loaded.load(path));
+  CHECK(loaded.sdCards.empty());
   std::filesystem::remove(path);
 }

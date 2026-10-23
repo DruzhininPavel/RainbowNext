@@ -18,7 +18,7 @@ flowchart TD
         FDC["µPD765<br/>+3 disk controller,<br/>two ports, non-DMA"]
         FMT["Formats<br/>SNA, Z80, TAP, TZX, DSK"]
         EXP["Expansion bus<br/>edge connector, I/O + memory,<br/>built-in + plugin modules"]
-        MMC["DivMMC (in development)<br/>esxDOS ROM, RAM window,<br/>SPI SD card, ships unplugged"]
+        SD["SD card<br/>SPI device on ports<br/>0xE7 / 0xEB (Next)"]
     end
 
     subgraph host["Frontend (SDL3 + Dear ImGui)"]
@@ -85,8 +85,7 @@ There are two levels of module, and the difference is only who compiles them:
 * **Built-in** (`src/peripherals/`) are compiled into `rainbow_core`, created by
   a factory in `Machine::installPeripherals()` and type-safe. They can reach the
   rest of the core directly when they need to; `kempston`, `kempston-mouse`,
-  `printer`, `cartridge` and `divmmc` ship this way. `divmmc` is the one that
-  arrives unplugged (see [DivMMC and the SD card](#divmmc-and-the-sd-card)).
+  `printer` and `cartridge` ship this way.
 * **Plugins** are shared libraries (`.dylib` / `.so` / `.dll`) in a folder next
   to the executable, found at startup and after `Rescan plugin folder`. They
   talk to the emulator through the plain C ABI of `src/plugin/plugin_api.h` and
@@ -121,11 +120,12 @@ then rather than on every access.
 
 ### Memory, and the M1 cycle
 
-Ports are not enough for everything. The DivMMC and DivIDE map themselves over
-the bottom 8K, and — this is the part that shapes the contract — they map in on
-their *own*, in the middle of an opcode fetch, whenever the CPU executes a byte
-at one of a handful of hook addresses. A driver that never writes to the control
-port still gets its NMI handler.
+Ports are not enough for everything. A mass-storage interface such as the
+DivMMC or DivIDE maps itself over the bottom 8K, and — this is the part that
+shapes the contract — it maps in on its *own*, in the middle of an opcode fetch,
+whenever the CPU executes a byte at one of a handful of hook addresses. A driver
+that never writes to the control port still gets its NMI handler. No module
+ships that does this today; the memory half of the contract exists so one can.
 
 So a module opts into memory with `interceptsMemory()`, and the bus keeps a
 separate list of the modules that said yes. `Machine::memRead()` and
@@ -143,76 +143,70 @@ is empty. The three memory methods are:
 
 `true` means the module answered and the access stops there; `false` falls
 through to the next module and then to the machine. Because a module can claim
-an address and still decline to store anything — a DivMMC's ROM half is
-read-only — the boolean means "mine", not "changed".
+an address and still decline to store anything — a ROM window is read-only —
+the boolean means "mine", not "changed".
 
 The bus owns its modules and knows nothing about `Machine`, so a test can build
 one, plug in a fake module and drive it without a CPU or a ROM — see
-`tests/test_expansion.cpp` and `tests/test_divmmc.cpp`.
+`tests/test_expansion.cpp` and the `SpiBus` harness in
+`tests/test_sdcard.cpp`.
 
-## DivMMC and the SD card
+## The SD card
 
-`src/peripherals/divmmc.*` is the mass-storage interface esxDOS runs on, and it
-is the first module that uses the memory half of the contract. It owns two
-things.
+`src/core/sdcard.*` is a plain sector image in memory with the SPI state machine
+in front of it, which is why it is testable without a file. It is **not** a
+peripheral and has no ports of its own: `Machine` owns it and exposes
+`sdCard()`, and whoever brings the bus wiring decides which ports reach it. On
+the Next that is the built-in interface described below; a DivMMC-style module,
+if one is ever written, would share the same object through its own `0xDF`.
 
-> **Status: in development, unplugged by default.** The module is created on
-> every machine but `Machine::installPeripherals()` adds it disabled, so
-> `rainbow.cfg`, the `Peripherals` menu, `--sd` and `Load DivMMC ROM...` are
-> what switch it on. Classic 128K + esxDOS is the configuration it is being
-> worked on. Its Next support is unfinished: on `MachineType::Next` the hook
-> returns into what is a `+3DOS` data table in the real ROM, the boot ROM then
-> executes data and soft-resets, so NextZXOS never reaches its menu. The
-> intended fix is to rework it as a separate out-of-tree plugin (the expansion
-> bus is the natural integration path) rather than keep it on the Next's boot
-> path.
-
-**The memory window.** When `conmem` is set the module replaces `0x0000-0x1FFF`
-with its ROM and `0x2000-0x3FFF` with one of sixteen 8K RAM banks, so `control`
-(the latch on port `0xE3`) selects the bank in bits 3:0, `mapram` in bit 6 puts
-RAM bank 3 over the ROM half, and bits 5:4 pick one of four pages when the ROM
-image is 32K. An opcode fetch at `0x0000`, `0x0008`, `0x0038`, `0x0066`,
-`0x04C6` or `0x0562` sets `conmem` by itself; a plain read of the same address
-does not.
-
-**The card.** The SD card lives in the core as `src/core/sdcard.*`: a plain
-sector image in memory with the SPI state machine in front of it, which is why
-it is testable without a file. It sits outside the module because the Next's
-own firmware talks to the same card over the same port, and because a test
-should not have to plug in a DivMMC to exercise it. A driver sends a six-byte
-command frame (`0x40 | cmd`, four argument bytes, a CRC that SPI mode ignores)
-and reads an R1 back; `CMD0`, `CMD8`, `CMD9`, `CMD10`, `CMD12`, `CMD13`,
-`CMD16`, `CMD17`, `CMD18`, `CMD23`, `CMD24`, `CMD25`, `CMD55`+`ACMD41`,
-`CMD58` and `CMD59` are answered, and everything else gets the
-illegal-command bit. The card reports SDHC and block addressing once `ACMD41`
-sets the HCS bit, and its `CSD` is rewritten to match the size of the image,
-because that is the one field a driver sanity-checks.
+A driver sends a six-byte command frame (`0x40 | cmd`, four argument bytes, a
+CRC that SPI mode ignores) and reads an R1 back; `CMD0`, `CMD8`, `CMD9`,
+`CMD10`, `CMD12`, `CMD13`, `CMD16`, `CMD17`, `CMD18`, `CMD23`, `CMD24`,
+`CMD25`, `CMD55`+`ACMD41`, `CMD58` and `CMD59` are answered, and everything else
+gets the illegal-command bit. The card reports SDHC and block addressing once
+`ACMD41` sets the HCS bit, and its `CSD` is rewritten to match the size of the
+image, because that is the one field a driver sanity-checks.
 
 `CMD18` streams: the next block is generated on demand as the driver clocks
 bytes out, so a multi-block read of a 64M image never copies it. `CMD25`
 collects the blocks until the `0xFD` stop token and answers with the usual
 data-response token. `CMD12` aborts either direction.
 
-Two details are worth knowing:
+One detail catches out every new test: a response is delivered **one clock
+late**. The byte that finishes the command frame is still part of the frame, so
+the R1 appears on the *next* transfer. Likewise the card only leaves its
+response state on a clock, so a driver wastes a few `0xFF` bytes before starting
+the next frame. Real drivers are written that way anyway.
 
-* **Chip select is not a port.** The board ties it to the mapping latch, so the
-  card listens exactly while the module is mapped out. That is why esxDOS unmaps
-  before every SPI access, and why `0xE7`/`0xEB` exist at all.
-* **The SPI port is one register.** A write to `0xDF` clocks a byte through the
-  card and latches what came back; a read hands that byte over without clocking
-  again. Drivers are written as `out (0xDF),a : in a,(0xDF)`, so treating a read
-  as a second transfer would run the card at twice the clock rate.
+### The Next's built-in interface
 
-The `0x1F` status port shares its address with the Kempston joystick, so the
-module is plugged in last and the joystick wins `0x1F`; the module answers on
-`0x3F`, `0x9F` and `0xBF` instead.
+The Next does not need a module to reach a card. Port `0xE7` is the chip select
+and `0xEB` is the data register, both decoded in `Machine::ioReadBase()` /
+`ioWriteBase()` under `isNext()`:
 
-The frontend offers `Load DivMMC ROM...` and `Insert SD card image...` under
-**Peripherals**, and `--sd FILE` / a dropped `.img` does the same at startup.
-Both switch the module on. The card image is owned by the app rather than the
-module, so switching the machine type rebuilds the bus without ejecting the
-card. The ROM is not shipped — put `esxdos.rom` (8K, or 32K for a DivMMC+)
-wherever you keep your ROMs and load it from there.
+| Port | Direction | Meaning |
+|---|---|---|
+| `0xE7` | write | chip select, **active low per device**: bit 0 = SD card 0, bit 1 = SD card 1, bit 2/3 = the Pi's two SPI sockets, bit 7 = the FPGA's config flash. Only one bit may be low. |
+| `0xE7` | read | the latch last written |
+| `0xEB` | any | one byte through the card: a write clocks it out, a read clocks `0xFF` in and returns what came back |
+
+The emulator computes `~value & 0x0F` and selects the card only when that is
+`0x01` or `0x02`, so the Pi's sockets cannot reach it. Masking with `0x0F`
+rather than `0x03` is deliberate: it keeps bit 7 (the flash) from looking like a
+selection too.
+
+This is not a guess about the hardware — the board ROM's own SD driver uses it.
+In `next.rom` page 2 the routine at `0x18D6` does `LD A,0xFE / OUT (0xE7),A`
+for card 0 and `0xFD` for card 1, then streams with `IN A,(0xEB)` and the
+`ED 79` block-transfer form with `C=0xEB`. There are sixteen `IN A,(0xEB)` and
+three `OUT (0xEB),A` in that page alone.
+
+The frontend offers **Tools > Insert SD card image...** and `--sd FILE`; a
+dropped `.img` or `.mmc` does the same. The image is owned by `Machine`, so
+switching the machine type rebuilds the bus without ejecting the card, and the
+path picked in **Machine > ROM images...** is written to `rainbow.cfg` so the
+next start comes up with it already in.
 
 ## Timings
 

@@ -10,7 +10,6 @@
 #include <utility>
 
 #include "peripherals/cartridge.h"
-#include "peripherals/divmmc.h"
 #include "peripherals/kempston.h"
 #include "peripherals/kempston_mouse.h"
 #include "peripherals/printer.h"
@@ -182,10 +181,9 @@ void Machine::reset(bool preserveRam) {
   } else {
     expansion_.reset();
   }
-  // The Next drives the automap option from NextReg 0x0A bit 4, which a hard
-  // reset clears so the boot ROM keeps the RST 0/8 vectors. A classic machine
-  // has no such register and the module is only useful with automap on.
-  syncDivMmcAutomap();
+  // The card keeps its image across a reset; only the SPI handshake restarts.
+  sdCard_.reset();
+  spiSelect_ = 0xFF;
 
   tstates_ = 0;
   cpuTstates_ = 0;
@@ -774,6 +772,10 @@ u8 Machine::ioReadBase(u16 port, u32) {
       if ((reg & 0xC0) == 0x00) return palette_.read8(ulaPalette(), u8(reg & 0x3F));
       return u8(ula_.ulaPlusMode() & 0x01);
     }
+    // Reading the SPI data port clocks one byte out of the selected device, so
+    // this is a read with a side effect rather than a plain register.
+    if ((port & 0x00FF) == 0xEB) return sdCard_.transfer(0xFF);
+    if ((port & 0x00FF) == 0xE7) return spiSelect_;
   }
 
   if ((port & 0x0001) == 0) {
@@ -833,6 +835,19 @@ void Machine::ioWriteBase(u16 port, u8 value, u32) {
     }
     if ((port & 0xC0FF) == 0x803B) { // ULA+ register select
       ula_.writeUlaPlusRegister(value);
+      return;
+    }
+    if ((port & 0x00FF) == 0xE7) { // SPI chip select, active low per device
+      spiSelect_ = value;
+      // One device is selected by pulling exactly one of bits 3:0 low, so
+      // 0xFE reaches card 0 and 0xFD card 1. Anything else -- no bit low, two
+      // bits low, or one of the Pi's own SPI sockets -- releases the card.
+      const u8 selected = u8(~value & 0x0F);
+      sdCard_.select(selected == 0x01 || selected == 0x02);
+      return;
+    }
+    if ((port & 0x00FF) == 0xEB) { // SPI data: clock one byte into the card
+      sdCard_.transfer(value);
       return;
     }
     if ((port & 0xC0FF) == 0xC03B) { // ULA+ data
@@ -938,31 +953,7 @@ void Machine::installPeripherals() {
   expansion_.add(std::make_unique<KempstonMouse>(), false);
   expansion_.add(std::make_unique<ZxPrinter>(), false);
   expansion_.add(std::make_unique<Cartridge>(), false);
-  // Last, because its status port shares 0x1F with the Kempston joystick and
-  // the joystick is the one most software expects to find there. The Next has
-  // the module built in, but the emulation is still a work in progress and it
-  // derails the Next boot ROM, so it starts unplugged everywhere and has to be
-  // switched on deliberately.
-  auto divmmc = std::make_unique<DivMmc>();
-  divmmc->setRom3PresentProvider([this] { return romBank() == 3; });
-  // The Next moved the SPI byte to 0xEB and its chip select to 0xE7, leaving
-  // 0xDF to the Kempston joystick and DAC D; the older boards decode 0xDF.
-  divmmc->setLegacySpiPort(!isNext());
-  expansion_.add(std::move(divmmc), false);
   refreshCartridge();
-  syncDivMmcAutomap();
-}
-
-// The automap is board state that lives in the Next register file: the master
-// switch is 0x0A bit 4 and 0xB8-0xBB say which addresses are entry points.
-// A classic machine has no such registers, so there the module is only useful
-// with automap on.
-void Machine::syncDivMmcAutomap() {
-  auto* div = static_cast<DivMmc*>(expansion_.find("divmmc"));
-  if (div == nullptr) return;
-  div->setAutomap(!isNext() || (next_.read(0x0A) & 0x10) != 0);
-  div->setEntryPoints(next_.read(0xB8), next_.read(0xB9), next_.read(0xBA),
-                      next_.read(0xBB));
 }
 
 void Machine::refreshCartridge() {
@@ -1108,13 +1099,14 @@ void Machine::writeNextReg(u8 reg, u8 value) {
       if ((value & 0x0C) != 0) cpu_.nmi();
       if ((value & 0x03) != 0) reset((value & 0x02) == 0);
       return;
-    case 0x0A:   // peripheral 5: the divMMC automap master switch is bit 4
-    case 0xB8:   // divMMC entry points 0
+    case 0x0A:   // peripheral 5
+    case 0xB8:   // the entry points a divMMC module would watch
     case 0xB9:   // ...which of them need the +3 DOS ROM paged in
     case 0xBA:   // ...and whether the map happens before or after the fetch
-    case 0xBB:   // divMMC entry points 1
+    case 0xBB:   // ...and the second entry-point group
+      // Stored only: nothing on the bus acts on them until a module is
+      // plugged in, but a program that writes them must read them back.
       next_.write(reg, value);
-      syncDivMmcAutomap();
       return;
     case 0x03: {
       // The display timing bits are locked unless bit 7 unlocks them.

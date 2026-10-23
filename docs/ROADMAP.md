@@ -176,17 +176,18 @@ a multicolour demo renders correctly; `z80test` passes.
 * [x] Memory in the `Peripheral` contract: `interceptsMemory()`, `memRead` with
       an M1 flag, `memWrite`, and `Bus::memFetch` so a module can map itself in
       on an opcode fetch and shadow `0x0000`/`0x2000`
-* [x] DivMMC: an 8K or 32K esxDOS ROM, sixteen 8K RAM banks, `mapram`, the
-      automap on `0x0000`/`0x0008`/`0x0038`/`0x0066`/`0x04C6`/`0x0562`, and an
-      SPI SD card on an in-memory sector image (`CMD0`-`CMD59`, SDHC, block
-      addressing). Loaded from the `Peripherals` menu. Ships **unplugged** --
-      classic 128K + esxDOS is the configuration it is being finished on, and
-      its Next support currently derails the Next boot ROM (see item 17)
-* [x] SD card image access for NextZXOS: the card is `src/core/sdcard.*`, shared
-      by the DivMMC and the Next firmware instead of hidden inside the module,
-      with `CMD18`/`CMD25`/`CMD12`/`CMD23` for the multi-block reads and writes
-      NextZXOS issues. The frontend owns the image, so it survives a machine
-      switch, and `--sd FILE` or a dropped `.img` inserts it
+* [x] The Next's built-in SD card interface on ports `0xE7` (chip select,
+      active low per device) and `0xEB` (data), which is what the board ROM's
+      own driver uses. The card itself is `src/core/sdcard.*`: an in-memory
+      sector image with the SPI state machine in front of it (`CMD0`-`CMD59`,
+      SDHC, block addressing, `CMD18`/`CMD25`/`CMD12`/`CMD23` for the
+      multi-block transfers NextZXOS issues). `Machine` owns the card, so it
+      survives a machine switch, and `--sd FILE` or a dropped `.img` inserts it
+* [x] divMMC removed. It used to map an esxDOS ROM over the bottom 8K on the
+      Next's boot path, which is not how the Next reaches a card. It is meant to
+      come back as an out-of-tree plugin over the expansion bus, so the memory
+      half of the `Peripheral` contract is kept and exercised, but nothing in
+      the core depends on it
 * [x] Video pipeline: the ULA → tilemap → Layer 2 → sprite compositor and the
       palette path are in place, plus:
   * Timex SCLD modes on port `0xBF3F`/`0xFF`: standard, `ALTDFILE` (the second
@@ -263,11 +264,11 @@ a multicolour demo renders correctly; `z80test` passes.
 * [x] Persistent ROM settings. `Machine > ROM images...` lists every machine
       with the image it boots from, `Choose...` stores a path and `Forget` drops
       it, both written to `rainbow.cfg` as `rom.<id>` so a fresh start needs no
-      `--rom`. Machines that need a second image get a sub-row: the Next has a
-      divMMC slot (`divmmc.<id>`), which is where the esxDOS ROM belongs, so it
-      is loaded together with the board ROM instead of surfacing later as a
-      warning. The machine itself is stored too (`machine`), and picking a ROM
-      by hand writes the same setting, so the window and the manual path cannot
+      `--rom`. Machines that need a second image get a sub-row: the Next has an
+      SD card slot (`sd.<id>`), so the card it boots from is loaded together
+      with the board ROM instead of being inserted by hand every start. The
+      machine itself is stored too (`machine`), and picking a ROM or a card by
+      hand writes the same setting, so the window and the manual path cannot
       disagree
 
 ## Known gaps
@@ -317,9 +318,9 @@ These are deliberate simplifications, tracked here so they are not forgotten:
 14. A module can claim memory as well as ports, but only inside
     `0x0000-0xFFFF` with no notion of contention, and the bus offers every
     access to the modules in plug-in order, so a module in the chain costs a
-    virtual call per memory access. The DivMMC is plugged in last because its
-    status port shares `0x1F` with the Kempston joystick, and the joystick wins
-    that address.
+    virtual call per memory access. A mass-storage module would also have to be
+    plugged in last, because its status port shares `0x1F` with the Kempston
+    joystick, and the joystick wins that address.
 15. Plugging or unplugging a module resets the machine instead of hot-plugging
     it, and the plugin ABI is version 1, so a module built against a future
     header is refused rather than adapted. Memory hooks were appended to the
@@ -336,33 +337,38 @@ These are deliberate simplifications, tracked here so they are not forgotten:
     paging trampoline, the RAM probe and the `LDIR` copies all behave. The
     observed cycle is `0x0000` -> `0x00EF` (init, RAM test over all 112 8K
     pages) -> `0x018E` -> `0x3E17` paging -> `0x1F3D` (`KEY-INT` idle) -> back
-    through `0x3E17` -> `0x0000`, where the divMMC hook unmaps itself and the
-    bank 3 reset stub at `0x3BE8` writes `NEXTREG 0x02,0x81` (soft reset). That
-    reset is deliberate: the boot ROM only soft-resets once it has something to
-    boot, so the real fault is that it never finds NextZXOS. Its SD driver sits
-    at ROM page 2 `0x18D6`-`0x1AE8` (`0x19DD` is the CMD0/CMD8/CMD55/ACMD41
-    init, `0x1904` the multi-block read) and none of it is ever called. The only
-    card traffic is a stream of malformed `CMD17` frames with garbage arguments
-    (`51 47 D5 F9 AF`), which means something is shifting memory through `0xEB`
-    rather than driving the driver. Finding that caller is what is left.
+    through `0x3E17` -> `0x0000`, where the bank 3 reset stub at `0x3BE8`
+    writes `NEXTREG 0x02,0x81` (soft reset). That reset is deliberate: the boot
+    ROM only soft-resets once it has something to boot, so the real fault is
+    that it never finds NextZXOS.
 
-    Two earlier diagnoses were wrong. One blamed a `JP 0x3CFC` trampoline in
-    ROM page 2; that address is never reached. The other claimed a third,
-    unidentified ROM image was executing, because `memRead(0x0E44)` returned
-    `C5` while `memRead(0x0000)` returned the boot ROM's `F3` under an identical
-    MMU. Those bytes are `nxtmmc.rom` content served by the divMMC overlay,
-    which answers every read below `0x4000` while mapped in -- nothing exotic.
-    The divMMC ROM does genuinely run during the failed boot (its `0x0038` entry
-    point is `JP 0x00E5`, so an IM 1 interrupt maps the module in and the
-    handler pokes the port `0xE3` latch), about 112 times per five million
-    instructions, but suppressing that hook does not make NextZXOS appear, so
-    it is a symptom and not the cause. A hot `pc=0x0168` looked like a loop but
-    is the boot ROM's own `LDDR` memory clear at bank 0 `0x0168` -- expected to
-    dominate, since each pass moves `BC=0x3FFE` bytes. The plan is still to
-    finish divMMC as a separate out-of-tree plugin over the expansion bus rather
-    than keep it on the Next's boot path. Its status port at `0x1F` is also an
-    approximation (card detect and busy only); the exact bit layout of a real
-    board was not available.
+    Its SD driver sits at ROM page 2 `0x18D6`-`0x1AE8` (`0x19DD` is the
+    CMD0/CMD8/CMD55/ACMD41 init, `0x1904` the multi-block read) and is never
+    called. Note that this is *not* a divMMC problem: `0x18E5` is
+    `OUT (0xE7),A` with `0xFE`/`0xFD` for card 0/1 and the rest of the routine
+    streams through `IN A,(0xEB)` and the `ED 79` form with `C=0xEB`, so the
+    board ROM drives the machine's own SPI ports. Those ports are implemented
+    now (see the checklist above), so the remaining question is what makes the
+    ROM decide there is a card to read: with a valid image inserted the driver
+    still never runs, and the only card traffic observed is a stream of
+    malformed `CMD17` frames with garbage arguments (`51 47 D5 F9 AF`), which
+    means something is shifting memory through `0xEB` rather than driving the
+    driver. Finding that caller is what is left.
+
+    Two earlier diagnoses were wrong and are recorded here so they are not
+    retried. One blamed a `JP 0x3CFC` trampoline in ROM page 2; that address is
+    never reached. The other claimed a third, unidentified ROM image was
+    executing, because `memRead(0x0E44)` returned `C5` while `memRead(0x0000)`
+    returned the boot ROM's `F3` under an identical MMU. Those bytes were
+    `nxtmmc.rom` content served by the divMMC overlay, which answered every
+    read below `0x4000` while mapped in -- nothing exotic, and the module has
+    since been removed. A hot `pc=0x0168` looked like a loop but is the boot
+    ROM's own `LDDR` memory clear at bank 0 `0x0168` -- expected to dominate,
+    since each pass moves `BC=0x3FFE` bytes.
+
+    A divMMC is still planned, as an out-of-tree plugin over the expansion bus
+    rather than something on the Next's boot path. When it returns it shares
+    `src/core/sdcard.*` through its own `0xDF` port instead of owning a card.
 18. A `.nex` loading screen is loaded into memory but never shown: the
     `loadingBar`, `loadingDelay` and `startDelay` fields are parsed and ignored,
     so the program starts at once instead of after an animated bar. The

@@ -15,7 +15,6 @@
 #include "frontend/debugger.h"
 #include "frontend/ui.h"
 #include "peripherals/cartridge.h"
-#include "peripherals/divmmc.h"
 #include "peripherals/kempston_mouse.h"
 #include "peripherals/printer.h"
 #include "plugin/loader.h"
@@ -44,16 +43,6 @@ std::vector<std::string> romCandidates(MachineType type) {
     case MachineType::Next: return {"next", "128"};
   }
   return {"48"};
-}
-
-// Machines whose board ROM hands control to a second image while booting. The
-// Next's RST 38 stub writes 0x80 to port 0xE3 to map the divMMC in and then
-// falls into the esxDOS code at 0x0048, which is not in the board ROM at all,
-// so a Next without that image restarts forever. Listing the names here keeps
-// the auto-load and the ROM window describing the same requirement.
-std::vector<std::string> divMmcCandidates(MachineType type) {
-  if (type == MachineType::Next) return {"nxtmmc", "nextmmc", "divmmc", "esxdos"};
-  return {};
 }
 
 // A ROM set is either a single image (`128.rom`) or one file per 16K bank
@@ -108,40 +97,6 @@ bool loadRomFromAnywhere(Machine& machine, MachineType type, std::string* used) 
     if (loadRomFor(machine, type, std::string(base) + "roms/", used)) return true;
   }
   return loadRomFor(machine, type, "", used);
-}
-
-// The Next's board ROM hands control to the divMMC ROM while it boots: its
-// RST 0x38 stub writes 0x80 to port 0xE3 to map the module in and then falls
-// into the esxDOS code at 0x0048, which is not in the board ROM at all. A Next
-// without that image restarts forever, so it is looked up next to the main ROM
-// set and skipped when it is missing. Only the Next needs it - on the other
-// machines the divMMC is the user's choice and is left alone.
-bool loadDivMmcRomFor(Machine& machine, MachineType type, const std::string& dir,
-                      std::string* used) {
-  const std::vector<std::string> candidates = divMmcCandidates(type);
-  if (candidates.empty()) return false;
-  auto* div = static_cast<DivMmc*>(machine.expansion().find("divmmc"));
-  if (div == nullptr) return false;
-  std::string error;
-  for (const std::string& base : candidates) {
-    for (const char* ext : {".rom", ".bin"}) {
-      const std::string path = dir + base + ext;
-      if (div->loadRomFile(path, error)) {
-        machine.expansion().setEnabled("divmmc", true);
-        if (used != nullptr) *used = path;
-        return true;
-      }
-    }
-  }
-  return false;
-}
-
-bool loadDivMmcRomFromAnywhere(Machine& machine, MachineType type, std::string* used) {
-  if (loadDivMmcRomFor(machine, type, "roms/", used)) return true;
-  if (const char* base = SDL_GetBasePath()) {
-    if (loadDivMmcRomFor(machine, type, std::string(base) + "roms/", used)) return true;
-  }
-  return loadDivMmcRomFor(machine, type, "", used);
 }
 
 // Strips the extension and a trailing bank number, so both halves of a split
@@ -293,7 +248,7 @@ bool App::init(const Options& options) {
     romPath_ = options.rom;
     // A ROM named on the command line is a deliberate choice, so it becomes the
     // one this machine starts from next time.
-    setRomChoice(machineType, options.rom, romChoice(machineType).divMmc, false);
+    setRomChoice(machineType, options.rom, false);
     loaded = true;
   }
   // The remembered image is tried before the roms/ lookup, so a machine that
@@ -314,10 +269,12 @@ bool App::init(const Options& options) {
 
   scanPeripherals();
   applyPeripheralConfig();
-  // After the peripheral list has been replayed, so a divMMC the config turns
-  // off does not get quietly switched back on by its own ROM.
-  applyDivMmcChoice(machineType);
-  if (!options.sd.empty()) loadDivMmcCard(options.sd);
+  // The remembered card is tried only when none was named on the command line.
+  if (!options.sd.empty()) {
+    loadSdCard(options.sd, false);
+  } else {
+    applySdChoice(machineType);
+  }
   if (!options.esxdos.empty()) mountEsxDos(options.esxdos);
   if (!options.state.empty()) loadStateFile(options.state);
   if (!options.rzx.empty()) loadRzxFile(options.rzx);
@@ -394,7 +351,7 @@ void App::run() {
           if (romDialogTarget_ && *romDialogTarget_ != machine_->type()) {
             // A row in the ROM window for a machine that is not running: the
             // choice is only stored, and applies when that machine is selected.
-            setRomChoice(*romDialogTarget_, path, romChoice(*romDialogTarget_).divMmc);
+            setRomChoice(*romDialogTarget_, path);
             status_ = std::string(machineName(*romDialogTarget_)) + " ROM: " + path;
           } else {
             loadRom(path);
@@ -402,16 +359,17 @@ void App::run() {
           romDialogTarget_.reset();
           break;
         case DialogKind::Cartridge: loadCartridge(path); break;
-        case DialogKind::DivMmcRom:
+        case DialogKind::SdCard:
           if (romDialogTarget_ && *romDialogTarget_ != machine_->type()) {
-            setRomChoice(*romDialogTarget_, romChoice(*romDialogTarget_).main, path);
-            status_ = std::string(machineName(*romDialogTarget_)) + " divMMC ROM: " + path;
+            // A row in the ROM window for a machine that is not running: the
+            // card is only remembered, and goes in when that machine starts.
+            setSdChoice(*romDialogTarget_, path);
+            status_ = std::string(machineName(*romDialogTarget_)) + " SD card: " + path;
           } else {
-            loadDivMmcRom(path);
+            loadSdCard(path);
           }
           romDialogTarget_.reset();
           break;
-        case DialogKind::DivMmcCard: loadDivMmcCard(path); break;
         case DialogKind::Printout: savePrintout(path); break;
         case DialogKind::StateSave: saveStateFile(path); break;
         case DialogKind::StateLoad: loadStateFile(path); break;
@@ -580,8 +538,8 @@ void App::handleEvent(const SDL_Event& event) {
         loadTape(path);
       } else if (extension == ".dsk" || extension == ".edsk" || extension == ".trd") {
         loadDisk(path);
-      } else if (extension == ".img") {
-        loadDivMmcCard(path);
+      } else if (extension == ".img" || extension == ".mmc") {
+        loadSdCard(path);
       } else if (extension == ".rbn") {
         loadStateFile(path);
       } else if (extension == ".rzx") {
@@ -632,11 +590,11 @@ void App::setMachine(MachineType type) {
   // the user's choices replayed.
   scanPeripherals();
   applyPeripheralConfig();
-  // The Next cannot boot without its divMMC image, so a machine switch has to
-  // look for it again rather than keep the previous bus's choice.
-  applyDivMmcChoice(type);
-  // The card lives in the frontend, so it goes back in whichever bus exists now.
-  insertSdCard();
+  // A card belongs to the machine it was chosen for, so the previous machine's
+  // is not carried over: the new one gets whatever it was set up with.
+  sdImage_.clear();
+  sdPath_.clear();
+  applySdChoice(type);
   // Remembering the machine is what makes a remembered ROM useful: without it
   // the next start would come up as a 48K and ignore the Next's image.
   config_.machine = machineId(type);
@@ -647,63 +605,43 @@ void App::setMachine(MachineType type) {
 // ROM images
 // ---------------------------------------------------------------------------
 
-const RomChoice& App::romChoice(MachineType type) const {
-  static const RomChoice empty;
+const std::string& App::romChoice(MachineType type) const {
+  static const std::string empty;
   const auto it = config_.roms.find(machineId(type));
   return it == config_.roms.end() ? empty : it->second;
 }
 
-void App::setRomChoice(MachineType type, const std::string& main, const std::string& divMmc,
-                       bool persist) {
-  RomChoice& choice = config_.roms[machineId(type)];
-  choice.main = main;
-  choice.divMmc = divMmc;
-  // An empty pair carries no information, so it is dropped rather than written
-  // out as a pair of blank keys.
-  if (choice.main.empty() && choice.divMmc.empty()) config_.roms.erase(machineId(type));
+void App::setRomChoice(MachineType type, const std::string& path, bool persist) {
+  // An empty path carries no information, so it is dropped rather than written
+  // out as a blank key.
+  if (path.empty()) {
+    config_.roms.erase(machineId(type));
+  } else {
+    config_.roms[machineId(type)] = path;
+  }
   if (persist) saveConfig();
 }
 
 bool App::applyRomChoice(MachineType type) {
-  const RomChoice& choice = romChoice(type);
+  const std::string& saved = romChoice(type);
   bool loaded = false;
-  if (!choice.main.empty()) {
+  if (!saved.empty()) {
     // The stored path may be either half of a split set, so it goes through the
     // same base-name resolution the discovery path uses.
-    loaded = loadRomSet(*machine_, romBaseFromPath(choice.main));
+    loaded = loadRomSet(*machine_, romBaseFromPath(saved));
     if (loaded) {
-      romPath_ = choice.main;
+      romPath_ = saved;
     } else {
-      status_ = "Saved ROM is missing: " + choice.main;
+      status_ = "Saved ROM is missing: " + saved;
     }
   }
   if (!loaded) loaded = loadRomFromAnywhere(*machine_, type, &romPath_);
   return loaded;
 }
 
-bool App::applyDivMmcChoice(MachineType type) {
-  auto* div = static_cast<DivMmc*>(machine_->expansion().find("divmmc"));
-  if (div == nullptr) return false;
-  std::string error;
-  const std::string& saved = romChoice(type).divMmc;
-  if (!saved.empty() && div->loadRomFile(saved, error)) {
-    machine_->expansion().setEnabled("divmmc", true);
-    return true;
-  }
-  if (!saved.empty()) status_ = "Saved divMMC ROM is missing: " + saved;
-  // Nothing remembered, or the file has moved: fall back to the well-known
-  // names so a Next still boots from a roms/ folder the user never configured.
-  if (loadDivMmcRomFromAnywhere(*machine_, type, nullptr)) return true;
-  if (!divMmcCandidates(type).empty()) {
-    status_ = std::string(machineName(type)) + " needs " + divMmcCandidates(type).front() +
-              ".rom next to its board ROM";
-  }
-  return false;
-}
-
 std::string App::effectiveRomPath(MachineType type) const {
-  const RomChoice& choice = romChoice(type);
-  if (!choice.main.empty() && fileExists(choice.main)) return choice.main;
+  const std::string& saved = romChoice(type);
+  if (!saved.empty() && fileExists(saved)) return saved;
   for (const std::string& base : romCandidates(type)) {
     if (const std::string found = romSetPath("roms/" + base); !found.empty()) return found;
     if (const char* dir = SDL_GetBasePath()) {
@@ -716,6 +654,33 @@ std::string App::effectiveRomPath(MachineType type) const {
   return {};
 }
 
+const std::string& App::sdChoice(MachineType type) const {
+  static const std::string empty;
+  const auto it = config_.sdCards.find(machineId(type));
+  return it == config_.sdCards.end() ? empty : it->second;
+}
+
+void App::setSdChoice(MachineType type, const std::string& path, bool persist) {
+  if (path.empty()) {
+    config_.sdCards.erase(machineId(type));
+  } else {
+    config_.sdCards[machineId(type)] = path;
+  }
+  if (persist) saveConfig();
+}
+
+bool App::applySdChoice(MachineType type) {
+  const std::string& saved = sdChoice(type);
+  if (saved.empty()) return false;
+  if (!loadSdCard(saved, false)) {
+    // The card is remembered but unreadable, which is worth saying out loud:
+    // the machine will come up without one and look stuck.
+    status_ = "Saved SD card is missing: " + saved;
+    return false;
+  }
+  return true;
+}
+
 bool App::loadRom(const std::string& path) {
   if (!machine_->loadRom(path)) {
     status_ = "Failed to load ROM: " + path;
@@ -724,10 +689,7 @@ bool App::loadRom(const std::string& path) {
   romPath_ = path;
   // Choosing a ROM by hand is the user deciding where this machine boots from,
   // so it replaces whatever the ROM window had for it.
-  setRomChoice(machine_->type(), path, romChoice(machine_->type()).divMmc);
-  // A board ROM that hands control to a second image needs it straight away;
-  // waiting for the next start would leave the machine in a reset loop.
-  applyDivMmcChoice(machine_->type());
+  setRomChoice(machine_->type(), path);
   // States are fingerprinted against the ROM, so a new ROM makes them all stale.
   clearRewind();
   status_ = "ROM loaded: " + path;
@@ -803,10 +765,8 @@ void App::openFileDialog(DialogKind kind) {
       {"Disk images", "dsk;edsk;trd"}, {"All files", "*"}};
   static const SDL_DialogFileFilter cartridgeFilters[] = {
       {"Cartridge images", "rom;bin;cart"}, {"All files", "*"}};
-  static const SDL_DialogFileFilter divMmcRomFilters[] = {
-      {"DivMMC ROM", "rom"}, {"All files", "*"}};
-  static const SDL_DialogFileFilter divMmcCardFilters[] = {
-      {"SD card images", "mmc;img;iso;bin"}, {"All files", "*"}};
+  static const SDL_DialogFileFilter sdCardFilters[] = {
+      {"SD card images", "img;mmc;iso;bin"}, {"All files", "*"}};
   static const SDL_DialogFileFilter stateFilters[] = {
       {"RainbowNext save state", "rbn"}, {"All files", "*"}};
   static const SDL_DialogFileFilter rzxFilters[] = {
@@ -815,16 +775,15 @@ void App::openFileDialog(DialogKind kind) {
   dialogKind_ = kind;
   dialogOpen_ = true;
   dialogSave_ = false;
-  // Only the ROM dialogs carry a machine target; anything else clears a stale
-  // one left behind by a cancelled ROM dialog.
-  if (kind != DialogKind::Rom && kind != DialogKind::DivMmcRom) romDialogTarget_.reset();
+  // The ROM and SD card dialogs carry a machine target; anything else clears a
+  // stale one left behind by a cancelled dialog.
+  if (kind != DialogKind::Rom && kind != DialogKind::SdCard) romDialogTarget_.reset();
   const SDL_DialogFileFilter* filters = romFilters;
   if (kind == DialogKind::Snapshot) filters = snapshotFilters;
   if (kind == DialogKind::Tape) filters = tapeFilters;
   if (kind == DialogKind::Disk) filters = diskFilters;
   if (kind == DialogKind::Cartridge) filters = cartridgeFilters;
-  if (kind == DialogKind::DivMmcRom) filters = divMmcRomFilters;
-  if (kind == DialogKind::DivMmcCard) filters = divMmcCardFilters;
+  if (kind == DialogKind::SdCard) filters = sdCardFilters;
   if (kind == DialogKind::StateLoad) filters = stateFilters;
   if (kind == DialogKind::RzxLoad) filters = rzxFilters;
   SDL_ShowOpenFileDialog(onFileDialog, this, window_, filters, 2, nullptr, false);
@@ -867,24 +826,7 @@ bool App::loadCartridge(const std::string& path) {
   return true;
 }
 
-bool App::loadDivMmcRom(const std::string& path) {
-  auto* div = static_cast<DivMmc*>(machine_->expansion().find("divmmc"));
-  if (div == nullptr) return false;
-  std::string error;
-  if (!div->loadRomFile(path, error)) {
-    status_ = "DivMMC ROM failed: " + error;
-    return false;
-  }
-  machine_->expansion().setEnabled("divmmc", true);
-  // Same rule as the board ROM: a file picked by hand is remembered for this
-  // machine, so the Next comes back with its module ROM already in place.
-  setRomChoice(machine_->type(), romChoice(machine_->type()).main, path);
-  syncConfigFromBus();
-  status_ = "DivMMC ROM: " + path;
-  return true;
-}
-
-bool App::loadDivMmcCard(const std::string& path) {
+bool App::loadSdCard(const std::string& path, bool persist) {
   std::ifstream in(path, std::ios::binary);
   if (!in) {
     status_ = "SD card failed: cannot open " + path;
@@ -906,15 +848,24 @@ bool App::loadDivMmcCard(const std::string& path) {
 
   sdImage_ = std::move(image);
   sdPath_ = path;
-  insertSdCard();
-  status_ = "SD card: " + path + " (" + std::to_string(sdImage_.size() / 512) +
+  std::string error;
+  if (!machine_->sdCard().load(sdImage_, error)) {
+    status_ = "SD card failed: " + error;
+    sdImage_.clear();
+    sdPath_.clear();
+    return false;
+  }
+  // Picking a card is the user deciding what this machine boots from, so it
+  // replaces whatever the ROM window had for it.
+  setSdChoice(machine_->type(), path, persist);
+  status_ = "SD card: " + path + " (" + std::to_string(machine_->sdCard().sectors()) +
             " sectors)";
   return true;
 }
 
-// Answers `RST 8` out of a host directory instead of booting the DivMMC
-// firmware, which is what a Next program that loads files needs. Nothing has to
-// be supplied alongside it: the calls are answered from the machine, so the
+// Answers `RST 8` out of a host directory instead of running a real esxDOS
+// image, which is what a Next program that loads files needs. Nothing has to be
+// supplied alongside it: the calls are answered from the machine, so the
 // directory alone is enough.
 bool App::mountEsxDos(const std::string& path) {
   if (!machine_) return false;
@@ -928,26 +879,11 @@ bool App::mountEsxDos(const std::string& path) {
   return true;
 }
 
-void App::insertSdCard() {
-  if (sdImage_.empty()) return;
-  auto* div = static_cast<DivMmc*>(machine_->expansion().find("divmmc"));
-  if (div == nullptr) return;
-  std::string error;
-  if (!div->loadCard(sdImage_, error)) {
-    status_ = "SD card failed: " + error;
-    return;
-  }
-  // The card is useless unless the ports that reach it are decoded. The module
-  // ships unplugged, so inserting a card is what plugs it in.
-  machine_->expansion().setEnabled("divmmc", true);
-  syncConfigFromBus();
-}
-
 void App::ejectSdCard() {
   sdImage_.clear();
   sdPath_.clear();
-  auto* div = static_cast<DivMmc*>(machine_->expansion().find("divmmc"));
-  if (div != nullptr) div->card().eject();
+  machine_->sdCard().eject();
+  setSdChoice(machine_->type(), {});
 }
 
 bool App::savePrintout(const std::string& path) {
@@ -1256,22 +1192,17 @@ void App::drawPeripheralsMenu() {
       status_ = "Cartridge ejected";
     }
   }
-  auto* divmmc = static_cast<DivMmc*>(bus.find("divmmc"));
-  if (divmmc != nullptr) {
+  // The Next's SD card is part of the machine rather than the bus, so this is
+  // offered whenever a Next is running instead of behind a peripheral.
+  if (machine_->type() == MachineType::Next) {
     ImGui::Separator();
-    if (ImGui::MenuItem("Load DivMMC ROM...")) {
-      openRomDialog(DialogKind::DivMmcRom, machine_->type());
-    }
-    if (ImGui::MenuItem("Insert SD card image...")) {
-      openFileDialog(DialogKind::DivMmcCard);
-    }
-    if (ImGui::MenuItem("Eject SD card", nullptr, false, divmmc->card().inserted())) {
+    if (ImGui::MenuItem("Insert SD card image...")) openRomDialog(DialogKind::SdCard, machine_->type());
+    if (ImGui::MenuItem("Eject SD card", nullptr, false, machine_->sdCard().inserted())) {
       ejectSdCard();
       status_ = "SD card ejected";
     }
-    ImGui::TextDisabled("ROM: %s", divmmc->romLoaded() ? "loaded" : "none");
-    if (divmmc->card().inserted()) {
-      ImGui::TextDisabled("Card: %s (%u sectors)", sdPath_.c_str(), divmmc->card().sectors());
+    if (machine_->sdCard().inserted()) {
+      ImGui::TextDisabled("Card: %s (%u sectors)", sdPath_.c_str(), machine_->sdCard().sectors());
     } else {
       ImGui::TextDisabled("Card: none");
     }
@@ -1539,11 +1470,10 @@ void App::drawToolbar() {
   if (rzx_.recording()) placeChip("REC", ui::kDanger, ui::kOnAccent);
   if (rzx_.playing()) placeChip("REPLAY", ui::kAccent, ui::kOnAccent);
   if (!machine_->romLoaded()) placeChip("NO ROM", ui::kAccent, ui::kOnAccent);
-  // A machine that boots through a second image says so here instead of only
-  // failing on screen: the Next restarts forever without its divMMC ROM.
-  if (!divMmcCandidates(machine_->type()).empty()) {
-    const auto* div = static_cast<DivMmc*>(machine_->expansion().find("divmmc"));
-    if (div == nullptr || !div->romLoaded()) placeChip("NO DIVMMC", ui::kAccent, ui::kOnAccent);
+  // The Next boots from its SD card, so a machine with no card in it is worth
+  // saying out loud: it will stop at the browser rather than at a program.
+  if (machine_->type() == MachineType::Next && !machine_->sdCard().inserted()) {
+    placeChip("NO SD CARD", ui::kSurface, ui::kTextMuted);
   }
   placeChip(machineName(machine_->type()), ui::kSurface, ui::kTextMuted);
 
@@ -1702,7 +1632,7 @@ void App::drawRomsWindow() {
 
     for (MachineType type : AllMachines) {
       ImGui::PushID(machineId(type));
-      const RomChoice& choice = romChoice(type);
+      const std::string& choice = romChoice(type);
       const bool running = machine_->type() == type;
 
       // Main ROM row.
@@ -1711,9 +1641,9 @@ void App::drawRomsWindow() {
       ImGui::TextUnformatted(machineName(type));
       if (running) ImGui::SameLine(), ImGui::TextDisabled("(running)");
       ImGui::TableNextColumn();
-      if (!choice.main.empty()) {
-        ImGui::TextUnformatted(choice.main.c_str());
-        if (!fileExists(choice.main)) {
+      if (!choice.empty()) {
+        ImGui::TextUnformatted(choice.c_str());
+        if (!fileExists(choice)) {
           ImGui::SameLine();
           ImGui::TextColored(ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled), "(missing)");
         }
@@ -1724,34 +1654,39 @@ void App::drawRomsWindow() {
       }
       ImGui::TableNextColumn();
       if (ImGui::SmallButton("Choose...")) openRomDialog(DialogKind::Rom, type);
-      if (!choice.main.empty()) {
+      if (!choice.empty()) {
         ImGui::SameLine();
-        if (ImGui::SmallButton("Forget")) setRomChoice(type, {}, choice.divMmc);
+        if (ImGui::SmallButton("Forget")) setRomChoice(type, {});
       }
 
-      // Companion row: always shown for a machine that needs one, and for any
-      // machine that has one stored -- a divMMC ROM picked by hand is
-      // remembered too, even where the board does not require it.
-      const std::vector<std::string> companions = divMmcCandidates(type);
-      if (!companions.empty() || !choice.divMmc.empty()) {
+      // The Next's card is not a ROM, but it is the other thing it needs before
+      // it can do anything, so it belongs on the same row of the same window.
+      if (type == MachineType::Next) {
         ImGui::TableNextRow();
         ImGui::TableNextColumn();
-        ImGui::TextDisabled("  divMMC");
+        ImGui::TextDisabled("  SD card");
         ImGui::TableNextColumn();
-        if (!choice.divMmc.empty()) {
-          ImGui::TextUnformatted(choice.divMmc.c_str());
-          if (!fileExists(choice.divMmc)) {
+        const std::string& card = sdChoice(type);
+        if (!card.empty()) {
+          ImGui::TextUnformatted(card.c_str());
+          if (!fileExists(card)) {
             ImGui::SameLine();
             ImGui::TextColored(ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled), "(missing)");
           }
         } else {
-          ImGui::TextDisabled("none - looks for %s.rom in roms/", companions.front().c_str());
+          ImGui::TextDisabled("none");
         }
         ImGui::TableNextColumn();
-        if (ImGui::SmallButton("Choose...")) openRomDialog(DialogKind::DivMmcRom, type);
-        if (!choice.divMmc.empty()) {
+        if (ImGui::SmallButton("Choose...")) openRomDialog(DialogKind::SdCard, type);
+        if (!card.empty()) {
           ImGui::SameLine();
-          if (ImGui::SmallButton("Forget")) setRomChoice(type, choice.main, {});
+          if (ImGui::SmallButton("Forget")) {
+            if (running) {
+              ejectSdCard();
+            } else {
+              setSdChoice(type, {});
+            }
+          }
         }
       }
       ImGui::PopID();

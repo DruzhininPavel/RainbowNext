@@ -94,14 +94,14 @@ Status: v0.1.3 — M1 and M2 done: 48K and 128K/+2/+3 boot with AY sound, tape
   `rainbow.cfg`. Further modules are shared libraries dropped into a
   `peripherals/` folder next to the executable — the emulator finds them at
   startup and needs no rebuild (see [Writing a peripheral](#writing-a-peripheral)).
-* **DivMMC and SD card (in development)** — the mass-storage interface esxDOS
-  runs on: an 8K (or 32K) DivMMC ROM, sixteen 8K RAM banks, the automap on the
-  hook addresses, and an SPI SD card that talks to a plain sector image. The
-  module ships **unplugged**: its Next support is unfinished and the hook
-  derails the Next boot ROM, so it has to be switched on deliberately in
-  `Peripherals`, then given an `esxdos.rom` and a card image (both yours to
-  supply). Classic 128K + esxDOS is the configuration it is being developed
-  against. See [DivMMC](#divmmc) for the current state and what is still open.
+* **SD card** — an SPI card on a plain sector image, with the full command set
+  a driver needs (`CMD0`/`CMD8`/`ACMD41` init, single- and multi-block reads and
+  writes, `CMD12` abort, `CMD58`/`CMD59`). On the Next it sits on the machine's
+  own ports `0xE7` (chip select) and `0xEB` (data), which is the interface the
+  board ROM's SD driver uses. There is no divMMC: it was removed to come back
+  later as a plugin, so nothing gets mapped over the bottom 8K on the Next's
+  boot path. See [The SD card](docs/ARCHITECTURE.md#the-sd-card) for the port
+  map and what a driver has to do.
 * **Frontend** — resizable window, integer scaling, speed 1×/2×/4×/8×,
   drag & drop loading, Dear ImGui menus and a debugger with breakpoints, a
   disassembly listing, a memory editor and a profiler.
@@ -194,7 +194,7 @@ ROM images are not bundled — see [`roms/README.md`](roms/README.md).
 ./build/rainbow game.tap             # ROM from roms/, tape inserted
 ./build/rainbow --rom 48.rom --tape game.tzx --snapshot save.z80
 ./build/rainbow --rom roms/plus3-0.rom --disk game.dsk
-./build/rainbow --rom roms/128.rom --sd nextzxos.img  # DivMMC SD card (in development)
+./build/rainbow --rom roms/next.rom --sd nextzxos.img # Next with an SD card in
 ./build/rainbow --rom roms/next.rom --esxdos gamefiles/ # RST 8 from a directory
 ./build/rainbow --state quick.rbn      # carry on from a saved state
 ```
@@ -205,16 +205,15 @@ window.
 
 Pick a ROM once and the emulator remembers it. **Machine > ROM images...** lists
 every machine with the image it will boot from: `Choose...` stores a path for
-that machine, `Forget` drops it and goes back to searching `roms/`. Machines that
-need a second image alongside their board ROM — the Next, which will not boot
-without its DivMMC/esxDOS ROM — get a sub-row of their own, so the companion is
-configured next to the board ROM instead of showing up later as a complaint.
+that machine, `Forget` drops it and goes back to searching `roms/`. The Next
+gets an **SD card** sub-row, so the card it boots from is configured next to the
+board ROM instead of being inserted by hand after every start.
 Opening a ROM by hand (`File > Open ROM...`, or dropping a file on the window)
 writes the same setting, so the next start comes up exactly where this one did,
 on the same machine.
 
 `--esxdos DIR` points the program's `RST 8` calls at a host directory instead of
-booting the DivMMC firmware: `F_OPEN`, `F_READ`, `F_WRITE`, `F_SEEK` and the
+reading them off a card: `F_OPEN`, `F_READ`, `F_WRITE`, `F_SEEK` and the
 rest are answered from the emulator, so a Next game that keeps its data next to
 the loader runs without a card image. Paths are resolved inside that directory
 only and matched case-insensitively, so an image built on FAT still works on a
@@ -321,8 +320,7 @@ only: Fuse and other RZX players will refuse them.
 src/core/          Z80, ULA, AY, DACs, µPD765, SD card, Machine — no OS deps
 src/core/          peripheral.h and expansion.h: the bus and the module contract
 src/peripherals/   built-in modules: kempston, kempston mouse, printer,
-                   cartridge, divmmc (SPI SD card shared from src/core/sdcard;
-                   ships unplugged, still in development)
+                   cartridge
 src/plugin/        the C ABI and the loader for out-of-tree modules
 plugins/           example plugin: a Fuller Audio Box joystick interface
 src/formats/       SNA / Z80 / NEX images, TAP / TZX tapes, DSK / EDSK / TRD disks
@@ -345,7 +343,7 @@ A module that needs memory instead of (or as well as) ports overrides
 `interceptsMemory()` to return true, and then `memRead`/`memWrite`. `memRead`
 gets an `m1` flag that is true only for an opcode fetch, so a module can map
 itself in when the CPU *executes* at an address without reacting to an ordinary
-read of the same address — that is how the DivMMC automaps. Claiming an address
+read of the same address — that is how a DivMMC automaps. Claiming an address
 and storing nothing is allowed; the boolean means "mine", not "changed".
 
 Two ways to ship it:
@@ -372,14 +370,14 @@ peripheral = kempston
 peripheral = printer
 machine = next
 rom.next = /path/to/roms/next.rom
-divmmc.next = /path/to/roms/nxtmmc.rom
+sd.next = /path/to/nextzxos.img
 ```
 
-`machine` is the machine the last session ran, and the `rom.<id>` /
-`divmmc.<id>` pairs are the images picked in **Machine > ROM images...** (ids are
-`48`, `128`, `plus2`, `plus3`, `pentagon`, `next`). A missing `rom.<id>` means
-"search `roms/`", which is what a fresh install does. Unknown keys are ignored,
-so an older build still opens a newer file.
+`machine` is the machine the last session ran, and the `rom.<id>` / `sd.<id>`
+pairs are the images picked in **Machine > ROM images...** (ids are `48`, `128`,
+`plus2`, `plus3`, `pentagon`, `next`). A missing `rom.<id>` means "search
+`roms/`", which is what a fresh install does. Unknown keys are ignored, so an
+older build still opens a newer file.
 
 ## Testing
 
@@ -387,7 +385,7 @@ so an older build still opens a newer file.
 ctest --test-dir build --output-on-failure
 ```
 
-507 tests cover the Z80 core (timings, flags, undocumented opcodes,
+484 tests cover the Z80 core (timings, flags, undocumented opcodes,
 interrupts), the disassembler (base, CB, ED, indexed and Z80N forms, lengths and
 flow), the debugger's breakpoints and profiler, save states (round trips of the
 CPU, memory, paging and peripherals, and the refusals for a damaged, truncated,
@@ -400,8 +398,8 @@ its per-machine phase, floating bus, frame length, audio rate, both snapshot for
 application to the machine, the AY, the TurboSound chip select and stereo bits,
 the SpecDrum and SoundDrive DAC ports, 128K/+3 paging and timings, tape blocks,
 the µPD765 and the DSK parser, the expansion bus with its modules and plugin
-loader, the DivMMC and its SPI SD card (single- and multi-block reads and
-writes, and that the module ships unplugged), the settings file, and end-to-end
+loader, the SD card (single- and multi-block reads and writes) and the Next's
+SPI ports `0xE7`/`0xEB` driven through the machine, the settings file, and end-to-end
 runs of hand-assembled programs through the machine. Golden-frame tests hash
 the finished picture for the classic screen, flash, Timex hi-res, ULA+, Layer 2,
 sprites, the tilemap, LoRes and Radastan, so an unintended change to the

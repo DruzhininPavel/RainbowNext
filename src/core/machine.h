@@ -16,6 +16,7 @@
 #include "core/keyboard.h"
 #include "core/nextreg.h"
 #include "core/palette.h"
+#include "core/sdcard.h"
 #include "core/sprites.h"
 #include "core/turbosound.h"
 #include "core/tape.h"
@@ -224,6 +225,11 @@ public:
   // fetched, which is earlier than any peripheral gets a look at it.
   EsxDos& esxDos() { return esxDos_; }
   const EsxDos& esxDos() const { return esxDos_; }
+  // The Next's own SD card sits on the SPI bus at ports 0xE7 (chip select) and
+  // 0xEB (data). It belongs to the machine rather than to a peripheral because
+  // the boot ROM drives it directly, before any module could be mapped in.
+  SdCard& sdCard() { return sdCard_; }
+  const SdCard& sdCard() const { return sdCard_; }
   const NextRegFile& nextRegs() const { return next_; }
   const NextPalette& palette() const { return palette_; }
   const Sprites& sprites() const { return sprites_; }
@@ -253,8 +259,6 @@ private:
   u8 memReadBase(u16 addr, u32 t);
   void memWriteBase(u16 addr, u8 value, u32 t);
   void installPeripherals();
-  // Push NextRegs 0x0A and 0xB8-0xBB into the divMMC module.
-  void syncDivMmcAutomap();
   void refreshCartridge();
 
   void renderFrame();
@@ -367,6 +371,10 @@ private:
 
   Z80 cpu_;
   EsxDos esxDos_;
+  SdCard sdCard_;
+  // Port 0xE7 latch. Every device on the bus is selected by clearing its bit,
+  // so the reset value leaves all of them idle.
+  u8 spiSelect_ = 0xFF;
   Ula ula_;
   Keyboard keyboard_;
   Beeper beeper_;

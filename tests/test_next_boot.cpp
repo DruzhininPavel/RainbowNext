@@ -1,9 +1,8 @@
 // The Next boot ROM is the hardest thing the core has to run: before it will
-// print anything it checks 2 MB of RAM, works out how much is there, and then
-// hands control to a divMMC ROM that is not part of the image. These tests pin
-// the two invariants that took the longest to establish, so a regression in the
-// MMU, in Z80N or in the divMMC shows up as a failure here instead of as a
-// machine that quietly reboots forever.
+// print anything it checks 2 MB of RAM and works out how much is there. These
+// tests pin the invariants that took the longest to establish, so a regression
+// in the MMU or in Z80N shows up as a failure here instead of as a machine that
+// quietly reboots forever.
 
 #include <cstdio>
 #include <string>
@@ -12,9 +11,7 @@
 #include "test_framework.h"
 
 #include "core/machine.h"
-#include "peripherals/divmmc.h"
 
-using rainbow::DivMmc;
 using rainbow::Machine;
 using rainbow::MachineType;
 using rainbow::u16;
@@ -72,26 +69,4 @@ TEST(boot_real_next_rom_completes_its_ram_probe) {
   Machine machine(MachineType::Next);
   if (!loadNextRom(machine)) return;
   CHECK_EQ(countVisits(machine, 0x018E, 7, 2500000), 7);
-}
-
-// With the divMMC ROM present the board ROM's RST 0x38 stub writes 0x80 to
-// port 0xE3, which maps the module in over the low 8 KiB, and then falls
-// through the board ROM's own 0x0048 into the esxDOS code that lives at that
-// offset in the divMMC image. 0x1EA0 is the divMMC ROM's "unmap and return"
-// entry, so arriving there proves the hand-off happened; without the image the
-// same address is zeroed RAM and the machine restarts instead. The budget has
-// to cover the board ROM's 2 MB RAM probe, which is what fills most of it, and
-// it is measured in instructions rather than T-states because contention
-// shifts the second without touching the first.
-TEST(boot_real_next_rom_hands_control_to_the_divmmc_rom) {
-  Machine machine(MachineType::Next);
-  if (!loadNextRom(machine)) return;
-  auto* div = static_cast<DivMmc*>(machine.expansion().find("divmmc"));
-  if (div == nullptr) return;
-  std::string error;
-  if (!div->loadRomFile(romPath("nxtmmc.rom"), error)) return;
-  machine.expansion().setEnabled("divmmc", true);
-  machine.reset();
-
-  CHECK_EQ(countVisits(machine, 0x1EA0, 1, 1000000), 1);
 }
