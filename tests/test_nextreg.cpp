@@ -58,15 +58,33 @@ TEST(nextreg_mmu_defaults_match_the_soft_reset_state) {
 TEST(nextreg_read_only_registers_keep_their_values) {
   Machine m(MachineType::Next);
 
-  CHECK_EQ(m.readNextReg(0x00), 0x08); // an emulator
-  CHECK_EQ(m.readNextReg(0x01), 0x30); // core 3.0
+  CHECK_EQ(m.readNextReg(0x00), 0x0A); // a ZX Spectrum Next
+  CHECK_EQ(m.readNextReg(0x01), 0x31); // core 3.01
 
   m.writeNextReg(0x00, 0xAA);
   m.writeNextReg(0x01, 0xBB);
   m.writeNextReg(0x1E, 0xCC);
-  CHECK_EQ(m.readNextReg(0x00), 0x08);
-  CHECK_EQ(m.readNextReg(0x01), 0x30);
+  CHECK_EQ(m.readNextReg(0x00), 0x0A);
+  CHECK_EQ(m.readNextReg(0x01), 0x31);
   CHECK_EQ(m.readNextReg(0x1E), 0x00);
+}
+
+TEST(nextreg_02_raises_an_nmi_without_resetting) {
+  Machine m(MachineType::Next);
+  m.cpu().regs().pc = 0x1234;
+  m.cpu().regs().sp = 0x8000;
+
+  // Bit 2 is the divMMC NMI and bit 3 the multiface one; neither is a reset.
+  m.writeNextReg(0x02, 0x04);
+  CHECK_EQ(m.cpu().regs().pc, 0x0066);
+  CHECK(!m.cpu().regs().iff1);
+  CHECK_EQ(m.cpu().regs().sp, u16(0x7FFE));
+  CHECK_EQ(m.memRead(u16(0x7FFE), 0), u8(0x34));
+  CHECK_EQ(m.memRead(u16(0x7FFF), 0), u8(0x12));
+
+  m.cpu().regs().pc = 0x4321;
+  m.writeNextReg(0x02, 0x08);
+  CHECK_EQ(m.cpu().regs().pc, 0x0066);
 }
 
 TEST(nextreg_ports_select_and_expose_a_register) {
@@ -207,19 +225,25 @@ TEST(nextreg_classic_machines_have_no_next_registers) {
 TEST(nextreg_alternate_rom_swaps_the_low_rom_bank) {
   Machine m(MachineType::Next);
   loadPatternRom(m); // bank 0
-  u8 bank1[0x4000];
-  for (size_t i = 0; i < sizeof bank1; ++i) bank1[i] = u8(i * 11 + 5);
-  m.loadRomData(bank1, sizeof bank1, 1);
 
   CHECK_EQ(m.memRead(0x0000, 0), 0x03);
   CHECK_EQ(m.memRead(0x0001, 0), 0x0A);
 
+  // Bit 6 makes the window writable, which is how the boot ROM fills the alt
+  // banks before switching to them with bit 7.
+  m.writeNextReg(0x8C, 0xC0);
+  m.memWrite(0x0000, 0x55, 0);
+  m.memWrite(0x0001, 0xAA, 0);
+  m.memWrite(0x2000, 0x11, 0); // the upper half of the same 16K alt bank
+
   m.writeNextReg(0x8C, 0x80);
-  CHECK_EQ(m.memRead(0x0000, 0), 0x05);
-  CHECK_EQ(m.memRead(0x0001, 0), 0x10);
+  CHECK_EQ(m.memRead(0x0000, 0), 0x55);
+  CHECK_EQ(m.memRead(0x0001, 0), 0xAA);
+  CHECK_EQ(m.memRead(0x2000, 0), 0x11);
 
   m.writeNextReg(0x8C, 0x00);
   CHECK_EQ(m.memRead(0x0000, 0), 0x03);
+  CHECK_EQ(m.memRead(0x0001, 0), 0x0A);
 }
 
 // Register 0x8E exposes the whole 128K memory map at once, which is what the
@@ -274,6 +298,8 @@ TEST(next_ula_screen_bank_follows_port_7ffd) {
   CHECK_EQ(m.ramBank(), 3);
 }
 
+// Register 0x8E exposes the whole 128K memory map at once, which is what the
+// Next firmware uses instead of poking 0x7FFD and 0x1FFD one bit at a time.
 TEST(nextreg_machine_type_needs_the_unlock_bit) {
   Machine m(MachineType::Next);
 
@@ -333,4 +359,18 @@ TEST(next_boots_the_128k_rom_through_the_mmu) {
     if (m.memRead(u16(addr), 0) != 0) ++lit;
   }
   CHECK(lit > 100); // the menu has been drawn
+}
+
+// NR 0x08 is the machine-type register. It is readable, so a loader can read
+// it back, edit one bit and write it again, which is exactly what nexload does
+// before it hands control to a .nex program.
+TEST(nextreg_08_reads_back_the_value_that_was_written) {
+  Machine m(MachineType::Next);
+  m.writeNextReg(0x08, 0xCE);
+  CHECK_EQ(m.readNextReg(0x08), u8(0xCE));
+
+  // A read-modify-write that only touches one bit must keep the others.
+  const u8 value = u8((m.readNextReg(0x08) & 0x10u) | 0xCEu);
+  m.writeNextReg(0x08, value);
+  CHECK_EQ(m.readNextReg(0x08), u8(0xCE));
 }

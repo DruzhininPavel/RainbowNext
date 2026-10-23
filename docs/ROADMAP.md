@@ -103,6 +103,10 @@ a multicolour demo renders correctly; `z80test` passes.
       over the ULA per pixel while the ULA still owns the border.
 * [x] Layer 2 clip window (`0x18`, four writes: X1, X2, Y1, Y2, applied to the
       layer coordinates before compositing).
+* [x] ULA clip window (`0x1A`, four writes: X1, X2, Y1, Y2 with inclusive
+      edges, rewound by bit 2 of `0x1C`, applied to the ULA inside the
+      compositor). The boot ROM wipes its boot screen with this register, so it
+      is what turns the grey boot picture black at frame 8288.
 * [x] Sprites — 128 sprites of 16×16 with four or five attribute bytes
       (`0x34`-`0x39`, `0x75`-`0x79`, ports `0x303B`/`0x57`/`0x5B`), a separate
       16K pattern RAM, 8-bit and 4-bit patterns, palette offsets, mirror,
@@ -172,21 +176,32 @@ a multicolour demo renders correctly; `z80test` passes.
       (`plugins/fuller`)
 * [x] `.nex` program format: V1.0-V1.3, banks read in the loader's order,
       palette, Layer 2 and ULA loading screens, entry bank, and the register
-      state `nexload` leaves behind. Loading one switches the machine to the Next
+      state `nexload` leaves behind. Loading one switches the machine to the Next.
+      The reset block follows `nexload.asm` literally: NR `0x06` and `0x08` are
+      read-modify-written so a setting made before loading survives, the ULA
+      palette is filled in the loader's two 128-entry passes, the loading screen
+      lands in bank 5 where `0x4000` sees it, and the palette control byte
+      selects the LoRes palette for a LoRes screen. NR `0x08` is readable so
+      that read-modify-write is possible. Programs that need the NextZXOS API
+      still cannot run -- see gap 22.
 * [x] Memory in the `Peripheral` contract: `interceptsMemory()`, `memRead` with
       an M1 flag, `memWrite`, and `Bus::memFetch` so a module can map itself in
       on an opcode fetch and shadow `0x0000`/`0x2000`
-* [x] DivMMC: an 8K or 32K esxDOS ROM, sixteen 8K RAM banks, `mapram`, the
-      automap on `0x0000`/`0x0008`/`0x0038`/`0x0066`/`0x04C6`/`0x0562`, and an
-      SPI SD card on an in-memory sector image (`CMD0`-`CMD59`, SDHC, block
-      addressing). Loaded from the `Peripherals` menu. Ships **unplugged** --
-      classic 128K + esxDOS is the configuration it is being finished on, and
-      its Next support currently derails the Next boot ROM (see item 17)
-* [x] SD card image access for NextZXOS: the card is `src/core/sdcard.*`, shared
-      by the DivMMC and the Next firmware instead of hidden inside the module,
-      with `CMD18`/`CMD25`/`CMD12`/`CMD23` for the multi-block reads and writes
-      NextZXOS issues. The frontend owns the image, so it survives a machine
-      switch, and `--sd FILE` or a dropped `.img` inserts it
+* [x] The Next's built-in SD card interface on ports `0xE7` (chip select,
+      active low per device) and `0xEB` (data), which is what the board ROM's
+      own driver uses. The card itself is `src/core/sdcard.*`: an in-memory
+      sector image with the SPI state machine in front of it (`CMD0`-`CMD59`,
+      SDHC, block addressing, `CMD18`/`CMD25`/`CMD12`/`CMD23` for the
+      multi-block transfers NextZXOS issues). `Machine` owns the card, so it
+      survives a machine switch, and `--sd FILE` or a dropped `.img` inserts it
+* [x] divMMC built into the Next, as `src/core/divmmc.*`: the `0xE3` control
+      latch, the 8K esxDOS ROM (32K image, one 8K page at a time), 16 x 8K RAM
+      banks, `CONMEM`/`MAPRAM` mapping, the automap switch on NextReg `0x0A`
+      bit 4, the eight entry points from NextReg `0xB8`-`0xBB`, the ROM3 gate
+      and the exit-stub unmap after the instruction. This is not a plugin: the
+      Next's boot ROM maps it in at `0x0000` and will not continue unless the
+      card ROM answers with its `"DV"` signature, so nothing boots without it.
+      The card is still the machine's own `SdCard`; divMMC never owns one
 * [x] Video pipeline: the ULA → tilemap → Layer 2 → sprite compositor and the
       palette path are in place, plus:
   * Timex SCLD modes on port `0xBF3F`/`0xFF`: standard, `ALTDFILE` (the second
@@ -263,11 +278,11 @@ a multicolour demo renders correctly; `z80test` passes.
 * [x] Persistent ROM settings. `Machine > ROM images...` lists every machine
       with the image it boots from, `Choose...` stores a path and `Forget` drops
       it, both written to `rainbow.cfg` as `rom.<id>` so a fresh start needs no
-      `--rom`. Machines that need a second image get a sub-row: the Next has a
-      divMMC slot (`divmmc.<id>`), which is where the esxDOS ROM belongs, so it
-      is loaded together with the board ROM instead of surfacing later as a
-      warning. The machine itself is stored too (`machine`), and picking a ROM
-      by hand writes the same setting, so the window and the manual path cannot
+      `--rom`. Machines that need a second image get a sub-row: the Next has an
+      SD card slot (`sd.<id>`), so the card it boots from is loaded together
+      with the board ROM instead of being inserted by hand every start. The
+      machine itself is stored too (`machine`), and picking a ROM or a card by
+      hand writes the same setting, so the window and the manual path cannot
       disagree
 
 ## Known gaps
@@ -317,9 +332,9 @@ These are deliberate simplifications, tracked here so they are not forgotten:
 14. A module can claim memory as well as ports, but only inside
     `0x0000-0xFFFF` with no notion of contention, and the bus offers every
     access to the modules in plug-in order, so a module in the chain costs a
-    virtual call per memory access. The DivMMC is plugged in last because its
-    status port shares `0x1F` with the Kempston joystick, and the joystick wins
-    that address.
+    virtual call per memory access. A mass-storage module would also have to be
+    plugged in last, because its status port shares `0x1F` with the Kempston
+    joystick, and the joystick wins that address.
 15. Plugging or unplugging a module resets the machine instead of hot-plugging
     it, and the plugin ABI is version 1, so a module built against a future
     header is refused rather than adapted. Memory hooks were appended to the
@@ -329,24 +344,178 @@ These are deliberate simplifications, tracked here so they are not forgotten:
     the emulator exits. The SPI clock is not modelled: a command is answered on
     the next byte instead of after the few hundred cycles a real card needs, so
     a driver that polls for readiness simply sees it at once.
-17. DivMMC on the Next is unfinished and the module therefore ships unplugged.
-    The hook, the automap entry points and the SD card now all work: the boot
-    ROM reaches the divMMC ROM's `RST 0x08` handler, the card answers with a
-    valid R1 and the handler returns. The remaining break is inside the boot
-    ROM itself. Its glue at ROM page 2 `0x3F18`-`0x3F3D` ends with
-    `PUSH 0x4804 / JP 0x3CFC`, and ROM page 2 `0x3CFC` holds
-    `NEXTREG 0x8E,3` -- `ED 91 8E 03` and then zero fill. The write selects
-    ROM page 3, so the next fetch is `0x3D00`, which in the `+3DOS` ROM is
-    zero fill too (verified byte-identical to `plus3.rom` from `0x3D00` on), and
-    the CPU NOP-slides out of page 3 into the `+3DOS` soft reset instead of
-    returning to `0x4804`. ROM page 3 `0x3CFC` is `C9`, exactly the `RET` the
-    glue needs, so the trampoline only works if ROM 3 is already selected when
-    `JP 0x3CFC` runs. Working out why a real Next is in that state -- the ROM
-    bytes are the same, so it is not an image difference -- is what is left.
-    The plan is still to finish this as a separate out-of-tree plugin over the
-    expansion bus rather than keep it on the Next's boot path. Its status port
-    at `0x1F` is also an approximation (card detect and busy only); the exact
-    bit layout of a real board was not available.
+17. NextZXOS does not boot yet. The divMMC ROM is now in place and the boot
+    ROM gets past its card check, so this is no longer the "does the machine
+    have the hardware" question it used to be; what is left is the card
+    protocol.
+
+    *The gate that was blocking everything.* The boot ROM at `0x1EDB` does
+    `OUT (0xE3),A` to map the card ROM over `0x0000` and then checks `0x0004`
+    for the `"DV"` signature. `nxtmmc.rom` begins `F3 C3 6A 00 44 56 09 02`,
+    which is `"DV"` at offset 4. When the check fails the ROM spins at
+    `JR 0x1ED9` forever, and with no divMMC in the core that is exactly what
+    happened. Two earlier diagnoses are therefore retired: the reset loop was
+    never a crash, and the "third ROM image" was `nxtmmc.rom` being served by
+    the overlay.
+
+    *Where it stops now.* With `nxtmmc.rom` loaded the ROM reaches its own
+    `0x3BE8` soft reset after about 823k instructions, and the card read it
+    issues never completes. The driver it uses is the esxDOS one in the card
+    ROM (`0x1F0F`-`0x1F5C`): `0x1F5C` puts `0x51` (`CMD17`) in `A` and calls
+    `0x1F15`, which sends `H`, `L`, `D`, `E` as the 32-bit argument and then
+    polls `IN A,(0xEB)`. There is no `CMD0`/`CMD8`/`CMD55`/`ACMD41` in that
+    path at all, so it is an already-open read, not an initialisation.
+
+    The argument observed is `0x47D5F9AF`, which is out of range and comes back
+    as `R1ParameterError` (`0x40`). The registers explain why: at the call
+    `HL=0x47D5`, `DE=0xF9AF`, `BC=0x3DD7`, `IX=0x2340`, and the sixteen bytes
+    at `IX` are all zero -- the file descriptor the boot ROM is reading through
+    was never filled in. So the card is being blamed for a bad address, and the
+    fault is upstream in whatever was supposed to open that file. `SdCard`
+    itself is correct: driven directly it answers `CMD0` with `0x01`, `CMD8`
+    with `01 00 00 01 AA`, `CMD58` with `01 40 80 80 00` and `CMD17@0` with
+    `00 FF FE 00 01 02 03 04`.
+
+    The next step is therefore not in `src/core/sdcard.*` but in following how
+    the boot ROM populates a descriptor before it maps the card ROM in. Two
+    things point at the same place:
+
+    * The call chain is `0x06F2` -> `0x0832` (read a block) -> `0x07C4`
+      (position the file) -> `0x07CA`-`0x0806` (search the seven-byte open-file
+      table at `0x232B`) -> nothing found -> `0x0808` -> `0x08B9` -> `0x0904`
+      (compute `IY = 0x232B + 7 * (n + 1)` from the free-slot count at
+      `0x2330`) -> `0x0810` (insert the entry). So the ROM is *creating* a file
+      handle, not reusing one, and the table it searches is empty.
+    * The buffer it registers is `IX = 0x0DC9`, which is inside `0x0000`-
+      `0x1FFF` -- the ROM half of the mapped divMMC, which cannot be written.
+      Either that buffer address is nonsense (consistent with the garbage
+      `HL=0x2BBA`, `BC=0x3DD7` it is paired with) or the mapping is expected to
+      be different at that moment.
+
+    So the fault is above the driver: the boot ROM reaches the card API without
+    the state it expects. The `EsxDos` host stub in `src/core/esxdos.*` is not
+    involved (it is disabled unless a directory is mounted) and is not a
+    substitute for this, because the boot ROM calls the card ROM's internal
+    routines directly rather than going through `RST 8`.
+
+    *Where it stops now, checked against an independent emulator.* The screen
+    renders as of `11e326b`: the boot ROM saves and restores the palette through
+    NR `0x41`/`0x44`, and those were returning the register file instead of the
+    palette entry, so the whole ULA came out white. With that fixed the machine
+    settles at `0x0C90` with a grey screen carrying a pseudo-random block field.
+
+    That screen is **not** a bug. The same card, booted in xpeccy-plus' headless
+    Next bench (see `docs/REFERENCES.md`), settles at `0x0C8F`, paints the same
+    static picture, and its ULA bank is **byte-identical to ours** (6912 of 6912
+    bytes match). The pattern is what the boot ROM draws in this configuration.
+
+    The reason it is garbage rather than text is the font copy at `0x2396`
+    (`LD HL,0x3D00 / LD DE,0xBC00 / LD BC,0x0300 / RST 0x28`): `0x3D00` resolves
+    to ROM bank 0, which holds the boot ROM's own code and strings, not the 8x8
+    font. The font lives at ROM offset `0xFD08` (bank 3), and the boot ROM asks
+    for the legacy remap with `NEXTREG 0x8E,0x02` at `0x3E13` just before the
+    copy. Our NR `0x8E` write sets the paging bits but does not recompute MMU
+    slots 2-5 the way xpeccy's `nx_remap()` does, so the remap is incomplete --
+    but xpeccy, which does implement it, produces the same picture, so this is
+    not what is keeping NextZXOS from starting. Implementing the full remap is
+    still worth doing for correctness; it is no longer on the critical path.
+
+    *The clip window closes the boot screen.* The grey picture holds from frame
+    300 to frame 8280 and then the whole display goes black, which looked like a
+    divergence from xpeccy-plus until the register writes at that frame were
+    traced. At frame 8288 the boot ROM writes `0xBF` four times to NR `0x1A`
+    (the ULA clip window), which collapses it to a single pixel, and then walks
+    the window back open one step per frame: `(0x23,0x3B)`, `(0x37,0x4F)`,
+    `(0x26,0x3E)`, `(0x38,0x50)` and so on, with NR `0x18`, `0x19` and `0x1B`
+    following the same pattern. That is the boot screen being wiped by an
+    animated clip window, not a crash.
+
+    NR `0x1A` was not implemented here at all, so the animation was invisible
+    and the black screen looked like a fault. It is implemented now: a four
+    write cycling register (X1, X2, Y1, Y2) with inclusive edges, rewound by bit
+    2 of NR `0x1C`, applied to the ULA inside `renderFrame()`. xpeccy-plus does
+    not implement it, which is why its screen keeps a small coloured block field
+    past frame 20000 that our clipped screen removes. That is the one picture
+    difference left at the end of the boot, and it is the reference that is
+    wrong, not us.
+
+    *The screen after the wipe is a live console, not a hang.* What the reopened
+    window shows is NextZXOS' empty text page: ULA character RAM all `0x00` with
+    attribute `0x38` (ink 0 on paper 7), which the NextZXOS palette renders as a
+    uniform grey, plus a blinking cursor. It is not frozen. SPACE is consumed,
+    and the OS installs its own IM1 handler at `0x2009` in RAM which calls a
+    key-scan routine at `0x2400` every frame -- that routine walks the row
+    select `L` down, builds `BC = L<<8 | 0xFE`, reads the row with `IN A,(C)`,
+    complements it and stores it through `(DE)`. The result is visible in the
+    documented handshake bytes: `0x5C3B` FLAGS bit 5 is set on a keypress,
+    `0x5C08` holds the key code (`0x0D` for ENTER), and typing `A` echoes a
+    glyph into cell (1,0) next to the cursor. The machine is running a
+    responsive NextZXOS text console.
+
+    Our end state matches the oracle exactly at the level that matters: both stop
+    at the same address (`0x0C8F` is the `HALT`, `0x0C90` the return after it)
+    and both finish with the same eight MMU slots, `FF FF 0A 0B 04 05 0E 0F`.
+    So the paging and the firmware path are not in question.
+
+    *The ULA is reading the right bank, and this was worth proving.* It is easy
+    to misread `screenBank_ * BankSize` as an 8K page index and conclude that
+    the ULA shows RAM page 5 while the OS keeps its console in page `0x0A`.
+    It does not: `BankSize` is `0x4000`, so bank 5 is the pair of 8K pages 10
+    and 11, and MMU page `0x0A` *is* 8K page 10. NextZXOS simply maps the
+    classic screen bank at `0x4000` the way a 128K Spectrum does, and the
+    renderer and the MMU therefore address the same bytes. A cell-by-cell
+    comparison of the framebuffer against every one of the 256 8K pages
+    confirms it: page `0x0A` matches the drawn attributes, page 5 does not,
+    because 8K page 5 is the bottom half of a different 16K bank. Dumping "RAM
+    page 5" through the MMU and finding stale boot-UI text there is expected,
+    not a symptom.
+
+    *Idle parity is exact, and the frame clock is exact.* Running the same card
+    against the bench for 1200 frames without touching the keyboard gives a
+    framebuffer that differs from ours by **zero pixels**, with matching colour
+    histograms, and a 2 MiB RAM image in which only **14 bytes** differ: three
+    in page `0x01` (first at `0x1F0C`, `0x3E` against `0x8B`) and nine in page
+    `0x0F` (first at `0x047C`, `0x00` against `0x02`). Both are consistent with
+    floating-bus read-back and are not load-bearing. Frame length matches
+    exactly too: the bench advances 567 263 of its own ticks per frame, and its
+    counter runs at eight times the Z80 rate, so it is 70 908 T-states per frame
+    -- the same number in `timingsFor()`. There is no line-timing discrepancy
+    between the two implementations; the 228-T-state line above is the real
+    hardware figure and the bench agrees with it.
+
+    Pages `0x0A`, `0x0B` and `0x0E` cannot be compared through the bench's
+    `dump.bin`, because it substitutes its own BRAM shadow for them and that
+    shadow is all zeros in this configuration. Their apparent "divergence" is a
+    dump artefact, not a difference: the bench's video fetch reads the ordinary
+    RAM pages through `nxv_bram()` and only its CPU-side path redirects to the
+    shadow, so the bytes we hold are the ones actually being displayed.
+
+    *A keypress is the one input that diverges.* Holding SPACE at frame 500
+    wakes the guest out of `PAUSE 0` in both implementations, and the decode
+    itself is provably correct: our instruction trace through the interrupt and
+    the ROM's `KEY_SCAN` loop is structurally identical to the bench's, with the
+    same `19F7` entry, the same `RST 0x38` chain through `0x0045`-`0x0056`, the
+    same `0x2009`-`0x2422` scan routine, the same `BC = FEFE, FDFE, FBFE, F7FE,
+    EFFE` row walk and the same `SP`. The difference is what the guest does
+    afterwards. Ours reacts one frame early (its screen changes at frame 502,
+    the bench's at 503) and then stops, while the bench spends frames 503-528
+    redrawing -- the pixel difference climbs from 2 947 to 20 055 and then
+    freezes, which is the bench finishing a new page while we have already
+    stopped. It is not a blank screen: our page `0x0A` does hold a drawn dialog,
+    including the title bar, and our framebuffer carries four colours with the
+    same paper as the bench. What differs is the layout and one palette entry --
+    we paint 1 179 pixels bright red where the bench paints 1 050 cyan and 128
+    red -- so the remaining fault is in which page of the dialog we end up
+    showing, not in whether we draw one.
+
+    What is still open is why the OS stops at an empty text page instead of
+    starting the desktop. The card goes untouched after frame 44: 197 `CMD17`
+    reads load `AUTOEXEC.1ST`, `RTC.SYS`, `RTCSIG.SYS` and `BIOSEXT.BIN`, and
+    `ENSYSTEM.SYS` (cluster 23066, LBA 187868) is never read. The next step is
+    to find what `AUTOEXEC.1ST` tests after its SPACE branch -- a `METADATA/`
+    entry, a machine-config file, or a `0x5C41`/`0x5C81` state byte -- that
+    gates the handover to the desktop.
+
 18. A `.nex` loading screen is loaded into memory but never shown: the
     `loadingBar`, `loadingDelay` and `startDelay` fields are parsed and ignored,
     so the program starts at once instead of after an animated bar. The
@@ -360,6 +529,46 @@ These are deliberate simplifications, tracked here so they are not forgotten:
 21. In blending modes 110 and 111 the half of the ULA layer that is not blended
     is always drawn above the sprites, which is what the modes intend for the
     ULA but not necessarily for the tilemap sharing that layer.
+22. A `.nex` program that calls the NextZXOS API cannot work yet, and this is
+    the one gap that keeps most of the format's own test programs dark. Of the
+    24 `.nex` files in the reference card image, the ones that never touch the
+    OS run: `show512` paints its colour ramp, `daybreak`, `scrollnu`,
+    `santaspr`, `hott`, `tm` and `bbcbasic` all reach their own code. The rest
+    stop on the first `RST 8` and paint nothing.
+
+    The chain is now fully traced. `nexload.asm` does not jump to the header
+    PC: it ends with `LD HL,(PCReg) / LD SP,(SPReg) / RST 0x20`, so a real
+    Next enters the program through the OS, not around it. On ROM page 3 --
+    which is where NextZXOS runs -- `0x0020` holds `C3 5B 15`, the `RST 0x20`
+    entry, and `0x0008` holds `2A 5D 5C`, so the `RST 8` vector has to come
+    from the divMMC ROM mapped over `0x0000`-`0x1FFF`. On ROM page 2, `0x0008`
+    is `C3 18 3F`, and `0x3F18` is the NextZXOS `RST 8` dispatcher: it takes an
+    inline three-byte parameter block (`RST 8`, function byte, 16-bit argument),
+    saves `AF`/`HL`, executes `OUT (0xE3),0` to map the divMMC in, pushes
+    `0x4804` as a return address and then `JP 0x3CFC`, which is
+    `NEXTREG 0x8E,3` -- select ROM 3 -- and falls through into `0x3D00`.
+
+    `0x3D00` is the esxDOS `RST 8` hook page, and the reason nothing works is
+    that it lives in **divMMC RAM** at `0x1D00`, which NextZXOS fills in during
+    its own boot. In the bare ROM image `0x3D00` is font and sprite data
+    (`00 00 00 00 00 00 00 00 00 10 10 10 ...`), so the CPU runs into it as
+    code and derails. The same is true of `RST 8` on ROM page 0: `0x103B` is a
+    `NEXTREG 0x8E` helper that expects `0x5B52`/`0x5B6A` to hold the
+    NextZXOS-saved `HL`/`SP`, and on a machine that never booted the OS both are
+    zero, so `LD SP,HL` loads `0` and the stack pointer is lost.
+
+    So the fix is not in the loader. It is either a booted NextZXOS, or an
+    API shim of our own: install a handler at divMMC RAM `0x1D00` that traps
+    the NextZXOS function codes and services them in C++, the way `EsxDos`
+    already does for `pc == 0x0008`. `EsxDos::trap()` exists but is dead code --
+    `enabled_` defaults to `false` and `Machine` never sets it -- so that is the
+    seam to build on.
+23. Programs that reach their own code still paint nothing because they never
+    enable the layer they draw to. `warhawk`, `lom`, `nextoid` and `revivals`
+    all run a real loop for hundreds of frames but leave NR `0x69` at `0`, so
+    Layer 2 is off and the ULA they show is the blank one the loader left
+    behind. They are not stuck: they are executing something we cannot yet see
+    the point of. Reproducing the OS is the precondition for judging them.
 
 ## Open decisions
 

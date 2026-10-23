@@ -36,11 +36,13 @@ port semantics, memory layouts) was reimplemented.
 | [NEX file format](https://wiki.specnext.dev/NEX_file_format) | — | Header layout, loading-screen bits, bank order, the palette block |
 | [tbblue nexload.asm](https://gitlab.com/thesmog358/tbblue/-/blob/master/src/asm/nexload/nexload.asm) | — | Exact loader behaviour: register state left behind, bank order, entry bank, expansion-bus disable |
 | [MiSTer ZXNext](https://github.com/MiSTer-devel/ZXNext_MISTer) | GPL-3.0 | FPGA core as an accuracy oracle for video pipeline ordering |
+| [xpeccy-plus](https://github.com/dotkoval/xpeccy-plus) — `src/libxpeccy/hardware/zxnext.c` | GPL-3.0 | Next register semantics read as specification: the `0x41`/`0x44` palette read-back, the composed `0x69` read, the `0x8E`/`0x8F` legacy remap (`nx_remap`), `nx_rom()` bank selection and the port `0xFF` gate on `0x82` bit 0. Also used as a **black-box oracle**: its headless bench runs the same firmware and card, and the results are compared against ours (see below). No code copied |
 | [Timex / Video Modes](https://wiki.specnext.dev/Video_Modes) | — | SCLD mode numbers 0-7, the `0xBF3F`/`0xFF` port, the hi-res colour bits 5:3 |
 | [Sprite and Layers System Register](https://wiki.specnext.dev/Sprite_and_Layers_System_Register) | — | `0x15` bits 4:2 priority order and the blending modes 110/111 |
 | [ULANext Attribute Byte Format Register](https://wiki.specnext.dev/ULANext_Attribute_Byte_Format_Register) | — | The `0x42` ink mask and the `0x4A` fallback colour for full-ink mode |
 | [ULAplus](https://sinclair.wiki.zxnet.co.uk/wiki/ULAplus) | — | The `0xBF3B`/`0xFF3B` register pair, the `GGGRRRBB` byte, the `ink = (FLASH*2+BRIGHT)*16 + INK` and `paper = … + 8` layout, border from entry 8 |
-| [DivMMC](https://wiki.specnext.dev/DIVMMC) | — | Port map (`0xE3` control, `0xDF` SPI, `0xE7`/`0xEB` map/unmap), the automap hook addresses, `conmem`/`mapram` |
+| [Next I/O port map](https://wiki.specnext.dev/Next_ZX_Spectrum_Hardware) | — | Ports `0xE7` (SPI chip select, active low per device) and `0xEB` (SPI data); the same document set is mirrored in `research/sn-complete-24.11/docs/extra-hw/io-port-system/ports.txt` |
+| [DivMMC](https://wiki.specnext.dev/DIVMMC) | — | Port map (`0xE3` control, `0xDF` SPI), the automap hook addresses, `conmem`/`mapram`. Kept as the reference for the plugin; no divMMC ships in the core |
 | [SD Specifications, Part 1: Physical Layer](https://www.sdcard.org/downloads/pls/) | — | SPI command set, R1/R7 responses, the `CSD`/`CID` layouts, `ACMD41` and the HCS bit |
 
 ## Conformance suites
@@ -74,7 +76,104 @@ port semantics, memory layouts) was reimplemented.
   synthetic, so the test needs neither a demo file nor a ROM, and the hash is
   computed over the framebuffer rather than over an encoded image.
 
-## Legal notes
+## Verifying against an independent emulator
+
+For the Next, "does our core behave like the hardware?" is hard to answer from
+the firmware sources alone, because the boot ROM is a closed 64 KB blob. The
+cheapest honest oracle is another emulator that runs the same blob.
+
+xpeccy-plus ships a headless bench for exactly this, and it needs no GUI and no
+Qt:
+
+```sh
+git clone https://github.com/dotkoval/xpeccy-plus /tmp/xp
+cd /tmp/xp
+cmake -S tests -B build/out/tests -DCMAKE_BUILD_TYPE=Release
+cmake --build build/out/tests -j8
+```
+
+`zxnext-bench` powers the machine on with a firmware handover and writes what
+it sees:
+
+```sh
+NXSD=/path/to/system-next.img \
+  ./build/out/tests/zxnext-bench \
+    fw:/path/ennextzx.rom,/path/ennxtmmc.rom \
+    600 0x000000 2097152 /tmp/ref
+```
+
+`600` is the frame limit; the next two numbers are a memory dump address and
+length; the last argument is the output directory. It writes:
+
+| File | Contents |
+|---|---|
+| `frame_N.txt` | every finished picture, one line per row, one hex RGB333 value per half-pixel |
+| `nextreg.txt` | every NextREG write as `frame hc vc cycles reg data` |
+| `probe.txt` | every I/O write with the same timing columns |
+| `dump.bin` | the requested slice of the 2 MB SRAM |
+
+Comparing it with RainbowNext is then mechanical:
+
+* the last line of the bench's own output prints the CPU's `PC` at the frame
+  limit -- ours must match;
+* `frame_N.txt` can be turned into an image and compared by eye or by colour
+  histogram against `Machine::framebuffer()`;
+* `dump.bin` contains the ULA bank, so the 6912 bytes of screen memory can be
+  diffed byte for byte against ours;
+* `NXSTOPPC=0C8F NXSTOPF=2890` stops on a chosen address and writes `state.txt`
+  with the registers, the eight MMU slots and all 256 NextRegs, which is the
+  cheapest way to prove the paging matches; `NXDUMPNOW=1` dumps the same file at
+  the frame limit instead.
+
+The result recorded in `docs/ROADMAP.md` gap 17 is that a stock System/Next card
+gives a byte-identical ULA bank in both emulators, which is what closed the
+"the boot screen is garbage" question: the picture is the firmware's, not ours.
+The agreement is exact at the level that matters most -- both machines finish at
+the same address with the same eight MMU slots (`FF FF 0A 0B 04 05 0E 0F`) -- and
+it is only the last picture that differs, for the clip-window reason below.
+
+Two practical warnings. Without `NXNOFRAMES=1` the bench writes one
+`frame_N.txt` per frame, which is several gigabytes for a long run -- always set
+it unless the pictures are genuinely needed, and use `NXFRAMEFROM=n` plus no
+`NXNOFRAMES` when only a window of frames matters. And the bench only takes the
+`fw:` handover path when the two ROM images are passed with `fw:` and a comma;
+passing the card image is what selects the SD-card boot, via `NXSD`. Keys can be
+injected with `NXKEYS="<frame>:<keys>"`, and `TRACE=n` with `TRACEAT=f` turns on
+an instruction trace around one frame.
+
+Getting one picture out of a long boot therefore looks like this -- the `env -u`
+is needed because a stale `NXNOFRAMES` in the shell silently suppresses every
+`frame_N.txt`:
+
+```sh
+mkdir -p /tmp/ref
+cd /tmp/xp && env -u NXNOFRAMES NXFRAMEFROM=2890 \
+  NXSD=/tmp/nextcard4.img NXKEYS="1000:_" KEYHOLD=20 \
+  ./build/out/tests/zxnext-bench \
+    fw:/tmp/romx/ennextzx.rom,/tmp/romx/ennxtmmc.rom \
+    2900 0x000000 2097152 /tmp/ref
+```
+
+`_` is the space key; the letters, `E` for enter, `C` for caps shift and `S` for
+symbol shift are the rest of the alphabet of `NXKEYS`. One entry holds every
+character it names *simultaneously* for `KEYHOLD` frames, so it can press
+`SPACE` or a shifted pair but cannot type a word -- sequential text has to be
+driven from RainbowNext's own probes instead.
+
+The picture comes back 720x303: the unblanked raster including the border, two
+pixels per dot. It is not the 320x256 visible area `Machine::framebuffer()`
+returns, so compare colour histograms or crop, never whole-image bytes.
+
+Two caveats: the bench's `fw:` mode is a test harness, not a full boot, so it
+does not prove that NextZXOS *starts*; and xpeccy-plus is GPL-3.0, so it is
+only ever run as a separate program -- nothing from it is linked or copied. It
+is also not a complete Next: it does not implement the ULA clip window
+(NR `0x1A`), so its boot screen stays visible past frame 20000 where a real Next
+has already wiped it with the clip-window animation described in
+`docs/ROADMAP.md` gap 17. Divergence from it is therefore only a defect when the
+register in question is one it actually implements.
+
+
 
 * ROM images are **not** distributed; see `roms/README.md`.
 * Snapshot and tape format descriptions are reimplemented from public
@@ -85,3 +184,29 @@ port semantics, memory layouts) was reimplemented.
   snapshot is one we understand, which in practice means they cannot.
 * If a future contribution needs to lift code from a GPL project, the whole
   project must move to a GPL-compatible license first.
+
+## What the official distribution does and does not contain
+
+The System/Next image (`research/sn-complete-24.11/`) ships the firmware C
+sources, and it is worth knowing up front that they cannot answer a NextZXOS
+boot question. `src/firmware/firmware/src/main.c` is a block packer: it
+concatenates `boot.bin`, `updater.bin`, `editor.bin`, `cores.bin`,
+`videotest.bin`, `reset.bin` and `screens.bin` into the `TBBLUE.FW` block
+stream. The application half (`src/firmware/app/src/`) is the hardware
+config/menu/loader UI -- cores, layers, video test, the config editor. Grepping
+the whole tree for `ensystem`, `autoexec`, `nextzxos` or `.sys` turns up only
+`editor.c`, and only because the editor honours a couple of config settings that
+NextZXOS also reads. **The firmware never boots the OS and never touches the
+card beyond its own files.** `src/vhdl/` holds nothing but `read.me`, so the
+FPGA core sources are not in this distribution despite what `readme.txt` claims.
+
+The OS itself is a binary on the card (`NEXTZXOS/ENSYSTEM.SYS`, 27698 bytes,
+plus `ENMF1-6.SYS`), and the boot ROM is a closed 64 KB blob, so there is no
+readable specification of the handover anywhere in the tree. That is exactly
+why the black-box oracle above exists.
+
+`NEXTZXOS/AUTOEXEC.1ST` is not a boot script either. Decoded, it is a NextBASIC
+program with `setup()`, `banner()`, `showpage(p)` and `disable()`: the "Welcome
+to NextZXOS" page carousel, whose page 13 reads *"Have fun with NextZXOS! Press
+SPACE to exit, or D to disable this program."* SPACE leaves the welcome
+program; it does not start the OS, which must already be running around it.

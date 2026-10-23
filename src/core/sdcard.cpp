@@ -231,8 +231,14 @@ void SdCard::execute() {
       queue({R1Idle});  // the MMC-era form; SD cards keep asking for ACMD41
       break;
     case CmdReadOcr:
-      queue({u8(idle_ ? R1Idle : R1Ready), 0x40, u8(sdhc_ ? 0xFF : 0x80), 0x80,
-             0x00});
+      // The first OCR byte carries two bits a driver looks at: bit 7 is the
+      // power-up status (set once the card is out of idle) and bit 6 is CCS,
+      // which is how a card announces block addressing. esxDOS reads exactly
+      // these two and takes the SDHC capacity path only when both are set, so
+      // an SDHC card that reports 0x40 instead of 0xC0 is measured as if it
+      // were a 256-sector SDSC card.
+      queue({u8(idle_ ? R1Idle : R1Ready),
+             u8((idle_ ? 0x00 : 0x80) | (sdhc_ ? 0x40 : 0x00)), 0xFF, 0x80, 0x00});
       break;
     case CmdSendCsd:
       queueCsd();

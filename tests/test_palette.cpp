@@ -55,6 +55,15 @@ void writePalette8(Machine& m, u8 index, u8 value) {
   m.writeNextReg(0x41, value);
 }
 
+// Every cell draws paper with no ink, so the whole ULA screen is one colour.
+void fillUlaWithPaper(Machine& m, u8 attribute) {
+  mapScreenBank(m);
+  for (u16 i = 0; i < 0x1800; ++i) m.memWrite(u16(ScreenBase + i), 0x00, 0);
+  for (u16 i = 0; i < 0x300; ++i) {
+    m.memWrite(u16(ScreenBase + 0x1800 + i), attribute, 0);
+  }
+}
+
 } // namespace
 
 TEST(palette_defaults_match_the_classic_spectrum_colours) {
@@ -81,8 +90,40 @@ TEST(palette_write8_stores_an_rrrgggbb_colour) {
   writePalette8(m, 0x21, 0x1C); // red 0, green 7, blue 0
   CHECK_EQ(m.palette().colour(NextPalette::Ula0, 0x21), 0xFF00FF00u);
 
-  // 0x41 reads back the last byte written.
+  // 0x41 reads back the colour the index register points at, not the last byte
+  // written: the boot ROM snapshots the palette with it.
+  m.writeNextReg(0x40, 0x20);
+  CHECK_EQ(m.readNextReg(0x41), 0xE3);
+  m.writeNextReg(0x40, 0x21);
   CHECK_EQ(m.readNextReg(0x41), 0x1C);
+}
+
+TEST(palette_reads_back_the_nine_bit_colour) {
+  Machine m(MachineType::Next);
+
+  // 0x41 in 8-bit mode, written through the auto-incrementing index.
+  m.writeNextReg(0x43, 0x00);
+  m.writeNextReg(0x40, 0x10);
+  m.writeNextReg(0x41, 0xE3); // red 7, green 0, blue 3
+
+  // 0x44 reports bits 9:8 in 7:6 and bit 0 of the blue field in bit 0. The
+  // eighth blue bit of an 8-bit write is duplicated into the ninth.
+  m.writeNextReg(0x40, 0x10);
+  CHECK_EQ(m.readNextReg(0x44), 0x01);
+
+  // A 9-bit write takes the colour first and the ninth bit second, and keeps
+  // the index parked on the entry.
+  m.writeNextReg(0x43, 0x80); // bit 7 stops the auto-increment
+  m.writeNextReg(0x40, 0x20);
+  m.writeNextReg(0x44, 0xE0); // red 7, green 0, blue 0
+  m.writeNextReg(0x44, 0x00);
+  CHECK_EQ(m.readNextReg(0x41), 0xE0);
+  CHECK_EQ(m.readNextReg(0x44), 0x00);
+
+  m.writeNextReg(0x44, 0xE0);
+  m.writeNextReg(0x44, 0x01); // blue LSB set
+  CHECK_EQ(m.readNextReg(0x41), 0xE0);
+  CHECK_EQ(m.readNextReg(0x44), 0x01);
 }
 
 TEST(palette_write8_auto_increments_the_index) {
@@ -268,4 +309,51 @@ TEST(layer2_clip_window_resets_to_the_full_screen) {
 
   renderOneFrame(m);
   CHECK_EQ(pixelAt(m, 0, 0), 0xFF00FF00u);
+}
+
+TEST(ula_clip_window_hides_pixels_outside_it) {
+  Machine m(MachineType::Next);
+  fillUlaWithPaper(m, 0x10); // paper 2, which is red
+
+  // Four writes: X1, X2, Y1, Y2. Only columns 2 to 4 stay visible.
+  m.writeNextReg(0x1A, 2);
+  m.writeNextReg(0x1A, 4);
+  m.writeNextReg(0x1A, 0);
+  m.writeNextReg(0x1A, 191);
+
+  renderOneFrame(m);
+  CHECK_EQ(pixelAt(m, 1, 0), 0xFF000000u);
+  CHECK_EQ(pixelAt(m, 2, 0), 0xFFDA0000u);
+  CHECK_EQ(pixelAt(m, 4, 0), 0xFFDA0000u);
+  CHECK_EQ(pixelAt(m, 5, 0), 0xFF000000u);
+  // Rows outside the window go the same way.
+  CHECK_EQ(pixelAt(m, 3, 0), 0xFFDA0000u);
+}
+
+TEST(ula_clip_window_resets_to_the_full_screen) {
+  Machine m(MachineType::Next);
+  fillUlaWithPaper(m, 0x10);
+  m.writeNextReg(0x1A, 0xBF);
+  m.reset();
+
+  fillUlaWithPaper(m, 0x10);
+  renderOneFrame(m);
+  CHECK_EQ(pixelAt(m, 0, 0), 0xFFDA0000u);
+  CHECK_EQ(pixelAt(m, 255, 191), 0xFFDA0000u);
+}
+
+TEST(ula_clip_index_resets_through_register_1c) {
+  Machine m(MachineType::Next);
+  fillUlaWithPaper(m, 0x10);
+  m.writeNextReg(0x1A, 0); // only the first of the four writes
+
+  // Bit 2 rewinds the ULA window so the next four writes start at X1 again.
+  m.writeNextReg(0x1C, 0x04);
+  for (const u8 value : {u8(2), u8(4), u8(0), u8(191)}) {
+    m.writeNextReg(0x1A, value);
+  }
+
+  renderOneFrame(m);
+  CHECK_EQ(pixelAt(m, 1, 0), 0xFF000000u);
+  CHECK_EQ(pixelAt(m, 3, 0), 0xFFDA0000u);
 }

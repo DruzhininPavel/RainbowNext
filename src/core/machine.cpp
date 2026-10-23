@@ -10,7 +10,6 @@
 #include <utility>
 
 #include "peripherals/cartridge.h"
-#include "peripherals/divmmc.h"
 #include "peripherals/kempston.h"
 #include "peripherals/kempston_mouse.h"
 #include "peripherals/printer.h"
@@ -115,6 +114,7 @@ Machine::Machine(MachineType type)
   tstatesPerLine_ = tstatesPerLine(timings_);
   tstatesPerFrame_ = tstatesPerFrame(timings_);
   rom_.assign(RomPages * PageSize, 0);
+  altRom_.assign(AltRomPages * PageSize, 0);
   ram_.assign(RamPages * PageSize, 0);
   framebuffer_.assign(FrameWidth * FrameHeight, Palette[0]);
   borderLines_.fill(0);
@@ -135,6 +135,42 @@ Machine::Machine(MachineType type)
       });
 }
 
+void Machine::nextFirmwareBoot() {
+  if (type_ != MachineType::Next) return;
+
+  // The writes TBBLUE.FW 1.44 makes before it hands over, in the order it
+  // makes them. Register 0x02 is left out on purpose: the firmware's only use
+  // of it here is holding the ESP in reset, and there is no ESP to hold. The
+  // keyjoy remapping is left out too, because the emulator reads the keyboard
+  // directly instead of going through the PS/2 matrix the mapping describes.
+  static constexpr u8 Writes[][2] = {
+      {0x07, 0x03}, // 28 MHz
+      {0x06, 0xA0}, // PS/2 keyboard takes priority over the matrix
+      {0x03, 0x00}, // the boot ROM is done, leave configuration mode
+      {0x05, 0xFB}, // joysticks come from the keyboard
+      {0x11, 0x80}, // video mode 0, 50 Hz, scandoubler on
+      {0x05, 0xFB},
+      {0x09, 0x00}, // ROM bank select
+      {0x04, 0x03},
+      {0x05, 0x71}, // joy 1 and 2 enabled, no mouse buttons
+      {0x06, 0x9D}, // PS/2 and matrix keyboard, both enabled
+      {0x08, 0x1E}, // line interrupt off, 48K ULA
+      {0x09, 0x00},
+      {0x0A, 0x11}, // divMMC automap on, mouse DPI 1
+      {0x82, 0xDA}, // Layer 2 RAM page and offset
+      {0x83, 0x3F},
+      {0x84, 0xFF},
+      {0x85, 0x01},
+      {0x03, 0xB3}, // machine type +3 with +3 timing, config mode off
+  };
+  for (const auto& write : Writes) writeNextReg(write[0], write[1]);
+
+  // The firmware's last act is a soft reset, which is what turns the
+  // configuration above into a running NextZXOS: the reset keeps the
+  // registers, drops into the boot mapping and starts the CPU at 0x0000.
+  reset(true);
+}
+
 void Machine::reset(bool preserveRam) {
   cpu_.reset();
   cpu_.setExtendedInstructions(type_ == MachineType::Next);
@@ -143,7 +179,12 @@ void Machine::reset(bool preserveRam) {
   beeper_.reset();
   tape_.rewind();
 
-  if (!preserveRam) ram_.assign(RamPages * PageSize, 0);
+  if (!preserveRam) {
+    ram_.assign(RamPages * PageSize, 0);
+    // The alt ROM is loaded by the boot ROM on every boot, so a cold start
+    // leaves it blank rather than serving the previous session's image.
+    altRom_.assign(AltRomPages * PageSize, 0);
+  }
   framebuffer_.assign(FrameWidth * FrameHeight, Palette[0]);
   borderLines_.fill(0);
 
@@ -158,6 +199,8 @@ void Machine::reset(bool preserveRam) {
   layer2ClipIndex_ = 0;
   tilemapClip_ = {0, 159, 0, 255};
   tilemapClipIndex_ = 0;
+  ulaClip_ = {0, 255, 0, 191};
+  ulaClipIndex_ = 0;
   occluders_.assign(FrameWidth * FrameHeight, 0);
   // Bits 6:4 are the display timing and bits 2:0 the machine type; a Next in
   // Next mode presents itself as a +2A/+3.
@@ -182,10 +225,16 @@ void Machine::reset(bool preserveRam) {
   } else {
     expansion_.reset();
   }
-  // The Next drives the automap option from NextReg 0x0A bit 4, which a hard
-  // reset clears so the boot ROM keeps the RST 0/8 vectors. A classic machine
-  // has no such register and the module is only useful with automap on.
-  syncDivMmcAutomap();
+  // The card keeps its image across a reset; only the SPI handshake restarts.
+  sdCard_.reset();
+  spiSelect_ = 0xFF;
+  // The divMMC latch always drops; only a power-on reset also clears its RAM,
+  // because esxDOS leaves warm-boot markers there.
+  if (preserveRam) {
+    divmmc_.softReset();
+  } else {
+    divmmc_.hardReset();
+  }
 
   tstates_ = 0;
   cpuTstates_ = 0;
@@ -264,6 +313,13 @@ bool Machine::applyTapeFastLoad(u16 entry) {
   regs.l = 0;
   regs.a = 0;
   regs.pc = 0x05DF;
+  return true;
+}
+
+bool Machine::loadDivMmcRom(const std::string& path, std::string& error) {
+  if (!divmmc_.loadRomFile(path, error)) return false;
+  // The ROM arriving late still has to answer a latch that is already set.
+  updatePaging();
   return true;
 }
 
@@ -375,8 +431,13 @@ void Machine::applyNex(const formats::NexFile& nex) {
     // Timex on, and every clip window covering the whole screen.
     writeNextReg(0x62, 0x00);
     writeNextReg(0x61, 0x00);
-    writeNextReg(0x06, 0xA8);
-    writeNextReg(0x08, 0xEE);
+    // nexload reads these two back and edits them in place rather than writing
+    // a constant, so a setting the caller made before loading survives. NR 0x06
+    // gets DivMMC automap switched off and the multiface switched on; NR 0x08
+    // gets locked paging and contention off, stereo back to ABC, SpecDrum,
+    // Timex and TurboSound on, and leaves the internal-speaker bit alone.
+    writeNextReg(0x06, u8((readNextReg(0x06) & ~0x10u) | 0x08u));
+    writeNextReg(0x08, u8((readNextReg(0x08) & 0x10u) | 0xCEu));
     writeNextReg(0x07, 0x03);   // the loader leaves the machine at 28 MHz
     writeNextReg(0x12, 0x09);   // Layer 2 main and shadow banks
     writeNextReg(0x13, 0x0C);
@@ -397,13 +458,17 @@ void Machine::applyNex(const formats::NexFile& nex) {
 
     // The loader blanks the Layer 2 and sprite palettes and fills the ULA one
     // with its sixteen default colours repeated, so a program that only sets
-    // the entries it uses does not inherit a leftover ramp.
+    // the entries it uses does not inherit a leftover ramp. It fills the ULA
+    // palette in two passes, one starting at index 0 and one at 128.
     static constexpr u8 DefaultUla[16] = {
         0x00, 0x02, 0xA0, 0xA2, 0x14, 0x16, 0xB4, 0xB6,
         0x00, 0x03, 0xE0, 0xE7, 0x1C, 0x1F, 0xFC, 0xFF};
     writeNextReg(0x43, 0x00);
-    writeNextReg(0x40, 0x00);
-    for (int entry = 0; entry < 256; ++entry) writeNextReg(0x41, DefaultUla[entry & 15]);
+    writeNextReg(0x42, 0x0F);   // ink mask off, flashing on
+    for (const u8 start : {u8(0), u8(128)}) {
+      writeNextReg(0x40, start);
+      for (int entry = 0; entry < 128; ++entry) writeNextReg(0x41, DefaultUla[entry & 15]);
+    }
     for (const u8 control : {u8(0x10), u8(0x20)}) {
       writeNextReg(0x43, control);
       writeNextReg(0x40, 0x00);
@@ -411,10 +476,11 @@ void Machine::applyNex(const formats::NexFile& nex) {
     }
   }
 
-  // The palette block is written to the Layer 2 first palette, which is what
-  // the loader's LoRes and Layer 2 screens both read.
+  // The palette block belongs to the loading screen. A LoRes screen takes its
+  // colours from the LoRes Layer 2 palette and everything else from the first
+  // Layer 2 palette, which is the distinction NR 0x43 bit 0 makes.
   if (nex.hasPalette) {
-    writeNextReg(0x43, 0x10);
+    writeNextReg(0x43, (nex.screenFlags & 0x04) != 0 ? 0x01 : 0x10);
     writeNextReg(0x40, 0x00);
     for (int entry = 0; entry < 256; ++entry) {
       palette_.setColour9(NextPalette::Layer2First, u8(entry), nex.palette[size_t(entry)]);
@@ -430,6 +496,12 @@ void Machine::applyNex(const formats::NexFile& nex) {
   // 6912 bytes of bank 5, which is where 0x4000 lands on a Next.
   place(9, nex.layer2Screen);
   place(5, nex.ulaScreen);
+  // A LoRes, Timex HiRes or HiCol loading screen covers 0x4000-0x6FFF. The
+  // loader fills that in two reads, 0x4000-0x57FF and 0x6000-0x77FF, but the
+  // two are contiguous in bank 5, so the 12K block lands as one run.
+  place(5, nex.loresScreen);
+  place(5, nex.hiresScreen);
+  place(5, nex.hicolScreen);
   for (const formats::NexBank& bank : nex.banks) place(size_t(bank.number), bank.data);
 
   next_.setMmuSlot(6, u8(nex.entryBank * 2));
@@ -465,6 +537,9 @@ void Machine::stepInstruction() {
   }
   ++instructions_;
   cpu_.step();
+  // The divMMC's exit stubs at 0x1FF8 unmap the block once the instruction
+  // that fetched them has finished.
+  if (isNext()) divmmc_.afterInstruction();
 }
 
 std::optional<u16> Machine::runFrame() {
@@ -566,6 +641,8 @@ template <class Ar> void Machine::serialize(Ar& ar) {
   ar(layer2ClipIndex_);
   ar(tilemapClip_);
   ar(tilemapClipIndex_);
+  ar(ulaClip_);
+  ar(ulaClipIndex_);
 
   ar(tstates_);
   ar(cpuTstates_);
@@ -699,6 +776,10 @@ u8 Machine::memRead(u16 addr, u32 t) {
     u8 value = 0xFF;
     if (expansion_.memRead(addr, t, false, value)) return value;
   }
+  if (isNext()) {
+    u8 value = 0xFF;
+    if (divmmc_.read(addr, false, cpu_.regs().a, value)) return value;
+  }
   return memReadBase(addr, t);
 }
 
@@ -709,11 +790,16 @@ u8 Machine::memFetch(u16 addr, u32 t) {
     u8 value = 0xFF;
     if (expansion_.memRead(addr, t, true, value)) return value;
   }
+  if (isNext()) {
+    u8 value = 0xFF;
+    if (divmmc_.read(addr, true, cpu_.regs().a, value)) return value;
+  }
   return memReadBase(addr, t);
 }
 
 void Machine::memWrite(u16 addr, u8 value, u32 t) {
   if (expansion_.memoryHooked() && expansion_.memWrite(addr, value, t)) return;
+  if (isNext() && divmmc_.write(addr, value)) return;
   memWriteBase(addr, value, t);
 }
 
@@ -724,13 +810,23 @@ u8 Machine::memReadBase(u16 addr, u32) {
     return (*cartRom_)[addr & (cartRom_->size() - 1)];
   }
   const Page& page = page_[addr >> 13];
+  u8 alt = 0;
+  if (!page.ram && nextAltRomPage(addr, false, alt)) {
+    return altRom_[size_t(alt) * PageSize + (addr & (PageSize - 1))];
+  }
   const size_t offset = size_t(page.page) * PageSize + (addr & (PageSize - 1));
   return page.ram ? ram_[offset] : rom_[offset];
 }
 
 void Machine::memWriteBase(u16 addr, u8 value, u32) {
   const Page& page = page_[addr >> 13];
-  if (!page.ram) return;
+  if (!page.ram) {
+    u8 alt = 0;
+    if (nextAltRomPage(addr, true, alt)) {
+      altRom_[size_t(alt) * PageSize + (addr & (PageSize - 1))] = value;
+    }
+    return;
+  }
   ram_[size_t(page.page) * PageSize + (addr & (PageSize - 1))] = value;
 }
 
@@ -774,6 +870,20 @@ u8 Machine::ioReadBase(u16 port, u32) {
       if ((reg & 0xC0) == 0x00) return palette_.read8(ulaPalette(), u8(reg & 0x3F));
       return u8(ula_.ulaPlusMode() & 0x01);
     }
+    // The divMMC control latch. The boot ROM writes it at 0x1EDB and then
+    // checks that 0x0004 reads back "DV", so this must answer before the ROM is
+    // even considered.
+    {
+      u8 value = 0xFF;
+      if (divmmc_.ioRead(port, value)) return value;
+    }
+    // Reading the SPI data port clocks one byte out of the selected device, so
+    // this is a read with a side effect rather than a plain register.
+    if ((port & 0x00FF) == 0xEB) {
+      u8 v = sdCard_.transfer(0xFF);
+      return v;
+    }
+    if ((port & 0x00FF) == 0xE7) return spiSelect_;
   }
 
   if ((port & 0x0001) == 0) {
@@ -835,6 +945,23 @@ void Machine::ioWriteBase(u16 port, u8 value, u32) {
       ula_.writeUlaPlusRegister(value);
       return;
     }
+    if ((port & 0x00FF) == DivMmc::PortControl) { // divMMC control latch
+      divmmc_.ioWrite(port, value);
+      return;
+    }
+    if ((port & 0x00FF) == 0xE7) { // SPI chip select, active low per device
+      spiSelect_ = value;
+      // One device is selected by pulling exactly one of bits 3:0 low, so
+      // 0xFE reaches card 0 and 0xFD card 1. Anything else -- no bit low, two
+      // bits low, or one of the Pi's own SPI sockets -- releases the card.
+      const u8 selected = u8(~value & 0x0F);
+      sdCard_.select(selected == 0x01 || selected == 0x02);
+      return;
+    }
+    if ((port & 0x00FF) == 0xEB) { // SPI data: clock one byte into the card
+      sdCard_.transfer(value);
+      return;
+    }
     if ((port & 0xC0FF) == 0xC03B) { // ULA+ data
       const u8 reg = ula_.ulaPlusRegister();
       if ((reg & 0xC0) == 0x00) {
@@ -881,9 +1008,12 @@ void Machine::ioWriteBase(u16 port, u8 value, u32) {
   }
 
   // Timex SCLD register. The port is decoded on the low byte alone, so 0xBFFF
-  // and 0xFFFF reach it too, but the AY has already claimed 0xFFFF above.
+  // and 0xFFFF reach it too, but the AY has already claimed 0xFFFF above. On
+  // the Next the address only carries the Timex register while Timex mode is
+  // enabled in NR 0x82 bit 0; otherwise the firmware's palette traffic on the
+  // same port must not be read as a display-mode change, so it is dropped.
   if (isNext() && (port & 0x00FF) == 0xFF) {
-    ula_.writeTimex(value);
+    if ((next_.read(0x82) & 0x01) != 0) ula_.writeTimex(value);
     return;
   }
 
@@ -938,17 +1068,6 @@ void Machine::installPeripherals() {
   expansion_.add(std::make_unique<KempstonMouse>(), false);
   expansion_.add(std::make_unique<ZxPrinter>(), false);
   expansion_.add(std::make_unique<Cartridge>(), false);
-  // Last, because its status port shares 0x1F with the Kempston joystick and
-  // the joystick is the one most software expects to find there. The Next has
-  // the module built in, but the emulation is still a work in progress and it
-  // derails the Next boot ROM, so it starts unplugged everywhere and has to be
-  // switched on deliberately.
-  auto divmmc = std::make_unique<DivMmc>();
-  divmmc->setRom3PresentProvider([this] { return romBank() == 3; });
-  // The Next moved the SPI byte to 0xEB and its chip select to 0xE7, leaving
-  // 0xDF to the Kempston joystick and DAC D; the older boards decode 0xDF.
-  divmmc->setLegacySpiPort(!isNext());
-  expansion_.add(std::move(divmmc), false);
   refreshCartridge();
   syncDivMmcAutomap();
 }
@@ -958,11 +1077,9 @@ void Machine::installPeripherals() {
 // A classic machine has no such registers, so there the module is only useful
 // with automap on.
 void Machine::syncDivMmcAutomap() {
-  auto* div = static_cast<DivMmc*>(expansion_.find("divmmc"));
-  if (div == nullptr) return;
-  div->setAutomap(!isNext() || (next_.read(0x0A) & 0x10) != 0);
-  div->setEntryPoints(next_.read(0xB8), next_.read(0xB9), next_.read(0xBA),
-                      next_.read(0xBB));
+  divmmc_.setAutomap(!isNext() || (next_.read(0x0A) & 0x10) != 0);
+  divmmc_.setEntryPoints(next_.read(0xB8), next_.read(0xB9), next_.read(0xBA),
+                         next_.read(0xBB));
 }
 
 void Machine::refreshCartridge() {
@@ -993,21 +1110,81 @@ void Machine::writePort1ffd(u8 value) {
   updatePaging();
 }
 
-void Machine::updatePaging() {
-  u8 rom = u8((port7ffd_ & 0x10) ? 1 : 0);
-  if (isPlus3() || isNext()) rom = u8(rom | ((port1ffd_ & 0x04) ? 2 : 0));
-  romBank_ = u8(rom & 0x03);
+// The Next selects one of four 16K ROM banks from three sources: the machine
+// type in register 0x03, the 0x7FFD/0x1FFD bits the classic machines use, and
+// the lock in register 0x8C bits 4-5, which overrides both. This mirrors the
+// ROM multiplexer in zxnext.vhd, and it matters far beyond cosmetics: the
+// divMMC only automaps while the bank it shadows is the one paged in, and
+// NextZXOS switches banks constantly.
+u8 Machine::nextRomBank() const {
+  const u8 type = u8(next_.read(0x03) & 0x07);
+  const u8 lock = u8((next_.read(0x8C) >> 4) & 0x03);
+  const u8 from7ffd = u8((port7ffd_ >> 4) & 0x01);
+  // Types 0 and 1 are 48K modes: the low ROM is always selected.
+  if (type == 0x00 || type == 0x01) return 0;
+  // Types 2 and 4 are 128K modes: only one ROM bit, so the lock contributes a
+  // single bit as well.
+  if (type == 0x02 || type == 0x04) return lock ? u8((lock >> 1) & 0x01) : from7ffd;
+  // Everything else is the +3 layout, with a second bit from 0x1FFD bit 2.
+  return lock ? lock : u8((((port1ffd_ >> 2) & 0x01) << 1) | from7ffd);
+}
 
+// Which of the two 16K alt ROM banks register 0x8C selects. The lock bits 4-5
+// name it directly when they are set; otherwise it follows the same ROM bit the
+// main ROM does, so the alt ROM tracks the machine's ROM switch.
+u8 Machine::nextAltRomBank() const {
+  const u8 type = u8(next_.read(0x03) & 0x07);
+  const u8 lock = u8((next_.read(0x8C) >> 4) & 0x03);
+  // A 48K machine has no 0x7FFD ROM bit to follow, so only lock value 1 picks
+  // the low bank and everything else the high one.
+  if (type == 0x00 || type == 0x01) return (lock == 0x01) ? 0 : 1;
+  return lock ? u8(lock >> 1) : u8((port7ffd_ >> 4) & 0x01);
+}
+
+// Register 0x8C puts the alt ROM behind the main ROM: bit 7 enables it and bit
+// 6 says which side is writable. With bit 6 clear reads come from the alt ROM
+// and writes fall through to the (read-only) main ROM; with it set the boot ROM
+// can fill the alt banks by writing to the ROM window.
+bool Machine::nextAltRomPage(u16 addr, bool write, u8& page) const {
+  if (!isNext()) return false;
+  const u8 reg = next_.read(0x8C);
+  if ((reg & 0x80) == 0) return false;
+  if (((reg & 0x40) != 0) != write) return false;
+  page = u8(nextAltRomBank() * 2 + ((addr >> 13) & 0x01));
+  return true;
+}
+
+// divMMC entry points are only live while the ROM the divMMC shadows is paged
+// in, so that an ordinary RST 8 in a running program is not intercepted. On a
+// +3 machine that is ROM 3, on a 128K machine ROM 1, and in 48K mode always.
+bool Machine::nextDivMmcRom3() const {
+  const u8 type = u8(next_.read(0x03) & 0x07);
+  if (type == 0x00 || type == 0x01) return true;
+  if (type == 0x02 || type == 0x04) return romBank_ == 1;
+  return romBank_ == 3;
+}
+
+void Machine::updatePaging() {
   if (isNext()) {
     // The Next keeps its map in the MMU registers, and the classic paging
     // ports only write into those same registers. The ULA still takes its
     // screen bank from 0x7FFD bit 3, which is how a game swaps between the
     // shadow screen and the one Layer 2 uses.
+    romBank_ = nextRomBank();
+    divmmc_.setRom3Present(nextDivMmcRom3());
     updateNextMmu();
     ramBank_ = u8(port7ffd_ & 0x07);
     screenBank_ = (port7ffd_ & 0x08) ? 7 : 5;
     return;
   }
+
+  u8 rom = u8((port7ffd_ & 0x10) ? 1 : 0);
+  if (isPlus3()) rom = u8(rom | ((port1ffd_ & 0x04) ? 2 : 0));
+  romBank_ = u8(rom & 0x03);
+  // The divMMC's ROM3 condition: on the +2A/+3 it is the DOS ROM. Automapping
+  // RST 8 and the esxDOS traps only happens while that one is paged in, which
+  // is what keeps a cold boot's RST 0 free of it.
+  divmmc_.setRom3Present(romBank_ == 3);
 
   specialPaging_ = isPlus3() && (port1ffd_ & 0x01) != 0;
   // Bit 3 of 0x1FFD is the disk motor; nothing in the emulator needs it, but
@@ -1054,17 +1231,12 @@ void Machine::mapBank(int slot, int bank, bool ram) {
 // The Next's MMU is eight byte-wide registers, one per 8K slot. A value of 255
 // shows the ROM instead of RAM, and the ROM half follows the slot's parity.
 void Machine::updateNextMmu() {
-  // Register 0x8C swaps the two low ROM banks, which is how NextZXOS brings
-  // in the 48K ROM; bit 6 keeps the swap to the write half of the bus.
-  u8 rom = romBank_;
-  if ((next_.read(0x8C) & 0x80) != 0) rom = u8(rom ^ 0x01);
-
   for (int slot = 0; slot < 8; ++slot) {
     const u8 value = next_.mmuSlot(slot);
     Page& page = page_[size_t(slot)];
     if (value == NextRegFile::RomPage) {
       page.ram = false;
-      page.page = u16(rom * 2 + (slot & 1));
+      page.page = u16(romBank_ * 2 + (slot & 1));
     } else {
       page.ram = true;
       page.page = value;
@@ -1081,6 +1253,15 @@ u8 Machine::readNextReg(u8 reg) const {
   // The raster counters are the only registers whose value lives in the
   // machine rather than in the file itself.
   if (reg == 0x40) return palette_.index();
+  // 0x41 and 0x44 read back the colour of the entry the index register points
+  // at, not the last byte written. The Next boot ROM snapshots the palette with
+  // them before it starts a program and restores it afterwards, so a stale
+  // answer here wipes the palette.
+  if (reg == 0x41) return palette_.read8(palette_.selected(), palette_.index());
+  if (reg == 0x44) {
+    const u16 colour = palette_.colour9(palette_.selected(), palette_.index());
+    return u8((((colour >> 9) & 0x03) << 6) | (colour & 0x01));
+  }
   if (reg == 0x61) return copper_.addressLsb();
   if (reg == 0x62) return copper_.control();
   if (reg == 0x2C) return dacs_.dac(1);
@@ -1089,6 +1270,13 @@ u8 Machine::readNextReg(u8 reg) const {
   if (reg == 0x1E || reg == 0x1F) {
     const u32 line = u32(tstates_ % tstatesPerFrame_) / tstatesPerLine_;
     return reg == 0x1E ? u8(line) : u8(line >> 8);
+  }
+  if (reg == 0x69) {
+    // Composed from the classic ports, exactly like NR 0x8E: bit 6 is the Layer
+    // 2 enable of port 0x123B, bit 3 the screen bank of port 0x7FFD and bits
+    // 5:0 the Timex SCLD register. Bit 7 is the file's own Layer 2 enable.
+    return u8((next_.read(0x69) & 0x80) | ((port123b_ & 0x02) << 6) |
+              ((port7ffd_ & 0x08) << 3) | (ula_.timex() & 0x3F));
   }
   if (reg == 0x8E) {
     // Composed from the classic ports, so a guest that reads the register back
@@ -1103,22 +1291,32 @@ u8 Machine::readNextReg(u8 reg) const {
 
 void Machine::writeNextReg(u8 reg, u8 value) {
   switch (reg) {
-    case 0x02: // bit 1 asks for a hard reset, bit 0 for a soft one
+    case 0x02: // bit 3 raises the multiface NMI, bit 2 the divMMC one, bit 1
+               // asks for a hard reset and bit 0 for a soft one
+      if ((value & 0x0C) != 0) cpu_.nmi();
       if ((value & 0x03) != 0) reset((value & 0x02) == 0);
       return;
-    case 0x0A:   // peripheral 5: the divMMC automap master switch is bit 4
-    case 0xB8:   // divMMC entry points 0
+    case 0x0A: { // peripheral 5: bit 4 is the divMMC automap master switch
+      next_.write(reg, value);
+      divmmc_.setAutomap((value & 0x10) != 0);
+      return;
+    }
+    case 0xB8:   // the entry points the divMMC watches
     case 0xB9:   // ...which of them need the +3 DOS ROM paged in
     case 0xBA:   // ...and whether the map happens before or after the fetch
-    case 0xBB:   // divMMC entry points 1
+    case 0xBB: { // ...and the second entry-point group
       next_.write(reg, value);
-      syncDivMmcAutomap();
+      divmmc_.setEntryPoints(next_.read(0xB8), next_.read(0xB9), next_.read(0xBA),
+                             next_.read(0xBB));
       return;
+    }
     case 0x03: {
       // The display timing bits are locked unless bit 7 unlocks them.
       u8 type = next_.read(0x03);
       if ((value & 0x80) != 0) type = u8((type & 0x8F) | (value & 0x70));
       next_.write(0x03, type);
+      // The machine type decides which ROM the classic paging ports select.
+      updatePaging();
       return;
     }
     case 0x50: case 0x51: case 0x52: case 0x53:
@@ -1207,6 +1405,7 @@ void Machine::writeNextReg(u8 reg, u8 value) {
     case 0x1C: // reset the clip window write positions
       next_.write(reg, value);
       if (value & 0x08) tilemapClipIndex_ = 0;
+      if (value & 0x04) ulaClipIndex_ = 0;
       if (value & 0x02) sprites_.resetClipIndex();
       if (value & 0x01) layer2ClipIndex_ = 0;
       return;
@@ -1232,6 +1431,24 @@ void Machine::writeNextReg(u8 reg, u8 value) {
       next_.write(reg, value);
       tilemapClip_[tilemapClipIndex_ & 0x03] = value;
       ++tilemapClipIndex_;
+      return;
+    case 0x1A: // ULA clip window, four writes: X1, X2, Y1, Y2
+      next_.write(reg, value);
+      ulaClip_[ulaClipIndex_ & 0x03] = value;
+      ++ulaClipIndex_;
+      return;
+    case 0x69: // Layer 2 control is mostly a mirror of the classic ports, so
+               // the write is copied into them as well: bit 6 is the Layer 2
+               // enable of port 0x123B, bit 3 the screen bank of port 0x7FFD
+               // and bits 5:0 the Timex SCLD register. Bit 7 keeps its own
+               // storage in the file, which is what enables Layer 2 here.
+      next_.write(reg, value);
+      port123b_ = u8((port123b_ & ~0x02) | ((value >> 6) & 0x02));
+      if (u8(value & 0x08) != (port7ffd_ & 0x08)) {
+        port7ffd_ = u8((port7ffd_ & ~0x08) | (value & 0x08));
+        updatePaging();
+      }
+      ula_.writeTimex(u8(value & 0x3F));
       return;
     default:
       next_.write(reg, value);
@@ -1533,7 +1750,8 @@ void Machine::renderFrame() {
           screenRow && x >= BorderWidth && x < BorderWidth + ScreenWidth;
       const int ux = x - BorderWidth;
 
-      const u32 ulaRgb = (ulaOn && inWindow) ? ulaRow[size_t(ux)] : Transparent;
+      const u32 ulaRgb =
+          (ulaOn && inWindow && !ulaClipped(ux, y)) ? ulaRow[size_t(ux)] : Transparent;
       bool ulaOver = false;
       const u32 tileRgb = tilemapPixel(tilemap, x, r, ulaOver);
 
@@ -1681,6 +1899,11 @@ u32 Machine::layer2Pixel(const Layer2View& view, int x, int y,
                                  : pixel;
   priority = (entry & 0x80) != 0;
   return palette_.colour(view.palette, u8(entry & 0xFF));
+}
+
+bool Machine::ulaClipped(int x, int y) const {
+  return x < ulaClip_[0] || x > ulaClip_[1] || y < ulaClip_[2] ||
+         y > ulaClip_[3];
 }
 
 u32 Machine::tilemapPixel(const TilemapView& view, int x, int y,

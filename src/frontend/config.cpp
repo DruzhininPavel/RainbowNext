@@ -30,7 +30,7 @@ std::optional<float> parseFloat(const std::string& text) {
 
 float clamp01(float value) { return value < 0.0f ? 0.0f : (value > 1.0f ? 1.0f : value); }
 
-// `rom.next` and `divmmc.next` carry a machine id after the dot, so the key is
+// `rom.next` and `sd.next` carry a machine id after the dot, so the key is
 // split once and the rest is the id.
 std::optional<std::string> suffixAfter(const std::string& key, const std::string& prefix) {
   if (key.size() <= prefix.size() + 1) return std::nullopt;
@@ -60,6 +60,7 @@ bool Config::load(const std::string& path) {
 
   enabledPeripherals.clear();
   roms.clear();
+  sdCards.clear();
   machine.clear();
   std::string line;
   while (std::getline(in, line)) {
@@ -74,9 +75,9 @@ bool Config::load(const std::string& path) {
     } else if (key == "machine") {
       machine = value;
     } else if (const auto id = suffixAfter(key, "rom")) {
-      if (!id->empty()) roms[*id].main = value;
-    } else if (const auto id = suffixAfter(key, "divmmc")) {
-      if (!id->empty()) roms[*id].divMmc = value;
+      if (!id->empty()) roms[*id] = value;
+    } else if (const auto id = suffixAfter(key, "sd")) {
+      if (!id->empty()) sdCards[*id] = value;
     } else if (key == "peripheral") {
       appendIds(value, enabledPeripherals);
     } else if (key == "peripherals") {
@@ -101,9 +102,11 @@ bool Config::save(const std::string& path) const {
   if (!out) return false;
   out << "# RainbowNext settings\n";
   if (!machine.empty()) out << "machine = " << machine << '\n';
-  for (const auto& [id, choice] : roms) {
-    if (!choice.main.empty()) out << "rom." << id << " = " << choice.main << '\n';
-    if (!choice.divMmc.empty()) out << "divmmc." << id << " = " << choice.divMmc << '\n';
+  for (const auto& [id, path] : roms) {
+    if (!path.empty()) out << "rom." << id << " = " << path << '\n';
+  }
+  for (const auto& [id, path] : sdCards) {
+    if (!path.empty()) out << "sd." << id << " = " << path << '\n';
   }
   out << "plugin_dir = " << pluginDir << '\n';
   for (const std::string& id : enabledPeripherals) out << "peripheral = " << id << '\n';

@@ -20,8 +20,8 @@ namespace rainbow {
 // once.
 //
 // The card is deliberately not a peripheral: it has no ports and no bus
-// presence, so the DivMMC module, the Next's built-in interface and the tests
-// can all share one implementation.
+// presence of its own, so the Next's built-in interface, a future module that
+// brings its own ports, and the tests can all share one implementation.
 class SdCard {
 public:
   // 512-byte sectors. Anything that is not a multiple of the sector size is

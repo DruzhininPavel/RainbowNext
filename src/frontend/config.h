@@ -6,15 +6,6 @@
 
 namespace rainbow::frontend {
 
-// The images one machine boots from. `main` is the CPU ROM set; `divMmc` is the
-// second image the board hands control to while booting. Only the Next needs a
-// companion today -- its RST 38 stub maps the divMMC in and jumps into esxDOS --
-// but the slot is per machine so a machine that grows one needs no new key.
-struct RomChoice {
-  std::string main;
-  std::string divMmc;
-};
-
 // What survives between runs: the machine to start in, the ROM images chosen
 // for each machine, which peripherals are plugged in and where the plugin
 // folder lives. Deliberately a flat `key = value` file so it can be read and
@@ -22,8 +13,8 @@ struct RomChoice {
 //
 //   machine = next
 //   rom.next = /Users/me/roms/enNextZX.rom
-//   divmmc.next = /Users/me/roms/enNxtmmc.rom
 //   rom.48 = /Users/me/roms/48.rom
+//   sd.next = /Users/me/roms/nextzxos.img
 //   plugin_dir = /Users/me/Library/Application Support/RainbowNext/peripherals
 //   peripheral = kempston
 //   peripheral = printer
@@ -40,8 +31,11 @@ struct Config {
 
   // Short machine id ("48", "128", "plus3", "next", ...) to start in.
   std::string machine;
-  // ROM images keyed by the same machine id.
-  std::map<std::string, RomChoice> roms;
+  // ROM set keyed by the same machine id.
+  std::map<std::string, std::string> roms;
+  // The card a machine boots from, keyed the same way. Only the Next has a
+  // built-in interface, but nothing here is Next-specific.
+  std::map<std::string, std::string> sdCards;
 
   // CRT filter: off, or a scanline/aperture-grille pass with these strengths.
   bool crtEnabled = true;

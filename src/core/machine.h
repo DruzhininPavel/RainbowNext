@@ -10,12 +10,14 @@
 #include "core/bus.h"
 #include "core/copper.h"
 #include "core/dac.h"
+#include "core/divmmc.h"
 #include "core/dma.h"
 #include "core/esxdos.h"
 #include "core/expansion.h"
 #include "core/keyboard.h"
 #include "core/nextreg.h"
 #include "core/palette.h"
+#include "core/sdcard.h"
 #include "core/sprites.h"
 #include "core/turbosound.h"
 #include "core/tape.h"
@@ -94,12 +96,20 @@ public:
   static constexpr int PageSize = 0x2000;
   static constexpr int RamPages = 256; // 2 MB
   static constexpr int RomPages = 8;   // 64 KB
+  static constexpr int AltRomPages = 4;  // 32 KB, the two 0x8C alt banks
 
   explicit Machine(MachineType type = MachineType::Spectrum48);
 
   // A power-on reset also clears the RAM. A soft or hard reset triggered from
   // NextReg 0x02 leaves the SRAM contents intact, as on real hardware.
   void reset(bool preserveRam = false);
+
+  // Brings a Next up the way its own firmware does. TBBLUE.FW does not load a
+  // program: it configures the FPGA through the Next registers and then soft
+  // resets, leaving NextZXOS to run from the card. Reproducing those writes is
+  // the whole of the firmware, so the real boot ROM never has to run. Call it
+  // once the ROM set is loaded; a hard reset does not repeat it.
+  void nextFirmwareBoot();
 
   bool loadRom(const std::string& path);
   // Loads a multi-bank ROM image (128K, +2, +2A, +3). A 16K file fills one
@@ -224,6 +234,18 @@ public:
   // fetched, which is earlier than any peripheral gets a look at it.
   EsxDos& esxDos() { return esxDos_; }
   const EsxDos& esxDos() const { return esxDos_; }
+  // The Next's own SD card sits on the SPI bus at ports 0xE7 (chip select) and
+  // 0xEB (data). It belongs to the machine rather than to a peripheral because
+  // the boot ROM drives it directly, before any module could be mapped in.
+  SdCard& sdCard() { return sdCard_; }
+  const SdCard& sdCard() const { return sdCard_; }
+  // The divMMC block. On the Next it is part of the FPGA, not a cartridge: the
+  // boot ROM writes port 0xE3 and refuses to continue unless the divMMC ROM
+  // answers with its "DV" signature, so the machine always owns one.
+  DivMmc& divMmc() { return divmmc_; }
+  const DivMmc& divMmc() const { return divmmc_; }
+  // Loads the 8K esxDOS-style ROM the boot ROM expects at 0x0000.
+  bool loadDivMmcRom(const std::string& path, std::string& error);
   const NextRegFile& nextRegs() const { return next_; }
   const NextPalette& palette() const { return palette_; }
   const Sprites& sprites() const { return sprites_; }
@@ -265,6 +287,10 @@ private:
   void writePort1ffd(u8 value);
   void updatePaging();
   void updateNextMmu();
+  u8 nextRomBank() const;
+  u8 nextAltRomBank() const;
+  bool nextAltRomPage(u16 addr, bool write, u8& page) const;
+  bool nextDivMmcRom3() const;
   u32 turboMultiplier() const;
   // Layer 2 state, resolved once per scanline because the fetch runs per pixel.
   struct Layer2View {
@@ -314,6 +340,8 @@ private:
   // One tilemap pixel, or Transparent. ulaOver reports the tile's own
   // "ULA on top" attribute, which the ULA needs to combine with the tilemap.
   u32 tilemapPixel(const TilemapView& view, int x, int y, bool& ulaOver) const;
+  // The ULA clip window is inclusive on all four edges.
+  bool ulaClipped(int x, int y) const;
   void renderUlaRow(int y, std::array<u32, ScreenWidth>& row) const;
   // Timex hi-res: 512 pixels per line, eight bits from the screen file and eight
   // from the file 8K above it. The framebuffer is 256 wide, so each output pixel
@@ -367,6 +395,11 @@ private:
 
   Z80 cpu_;
   EsxDos esxDos_;
+  SdCard sdCard_;
+  DivMmc divmmc_;
+  // Port 0xE7 latch. Every device on the bus is selected by clearing its bit,
+  // so the reset value leaves all of them idle.
+  u8 spiSelect_ = 0xFF;
   Ula ula_;
   Keyboard keyboard_;
   Beeper beeper_;
@@ -390,12 +423,18 @@ private:
   // Register 0x1B does the same for the tilemap.
   std::array<u8, 4> tilemapClip_ = {0, 159, 0, 255};
   u8 tilemapClipIndex_ = 0;
+  // And register 0x1A for the ULA (and LoRes, which shares its layer).
+  std::array<u8, 4> ulaClip_ = {0, 255, 0, 191};
+  u8 ulaClipIndex_ = 0;
   // Bit per pixel: the layers that hide a sprite at that position.
   std::vector<u8> occluders_;
   // One scanline of the collision map: a sprite has already drawn there.
   std::array<bool, FrameWidth> spriteDrawn_{};
 
   std::vector<u8> rom_;
+  // The two 16K alt ROM banks behind the main ROM (register 0x8C). NextZXOS
+  // copies enAltZX.rom in here at boot and switches to it for +3 mode.
+  std::vector<u8> altRom_;
   std::vector<u8> ram_;
   std::vector<u32> framebuffer_;
   std::array<u8, 400> borderLines_{};
@@ -405,6 +444,9 @@ private:
   u8 romBank_ = 0;
   u8 port7ffd_ = 0;
   u8 port1ffd_ = 0;
+  // Port 0x123B bit 1, the legacy Layer 2 enable. Only bit 1 is modelled,
+  // because the CPU mapping the rest of the port selects is not wired up.
+  u8 port123b_ = 0;
   bool pagingLocked_ = false;
   bool specialPaging_ = false;
   bool romLoaded_ = false;

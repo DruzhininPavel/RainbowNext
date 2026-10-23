@@ -160,10 +160,12 @@ TEST(z80n_mul_d_e) {
   auto cpu = makeCpu(bus);
   cpu.setDe(0x0020); // D = 0, E = 0x20
   cpu.regs().d = 0x10;
+  cpu.setHl(0x1234);
   cpu.regs().f = 0xFF;
 
   CHECK_EQ(cpu.step(), 8);
-  CHECK_EQ(cpu.hl(), 0x0200);
+  CHECK_EQ(cpu.de(), 0x0200); // the product lands in DE, not HL
+  CHECK_EQ(cpu.hl(), 0x1234);
   CHECK_EQ(cpu.regs().f, 0xFF); // MUL leaves the flags alone
 }
 

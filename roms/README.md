@@ -29,21 +29,25 @@ roms/next.rom      (65 536 bytes)
 roms/next-0.rom … next-3.rom
 ```
 
-The Next needs a **second** image: the 8 KiB divMMC / esxDOS ROM that ships
-beside the board ROM in the official distribution (`enNxtmmc.rom`):
+The board ROM is `machines/next/ennextzx.rom` inside the official System/Next
+card image; a `roms/next.rom` extracted from there (md5
+`8c34d957fb2cbbd0be423cea3b370fd5`) is the genuine article. It starts `F3 C3 EF
+00`, which is `DI` / `JP 0x00EF`, and its bank 3 carries the 8x8 Spectrum font at
+offset `0xFD08`.
+
+The Next also needs the divMMC card ROM, which the boot ROM maps in at `0x0000`
+and refuses to continue without:
 
 ```
-roms/nxtmmc.rom    (8 192 bytes)
+roms/nxtmmc.rom    (8 192 bytes, or a 32 KiB image of four pages)
 ```
 
-The board ROM does not contain the divMMC code. While booting it loads `0x1F01`
-into `BC` and jumps through `RST 0x38`, expecting the module to be mapped in at
-that address; without the image the CPU walks off into empty RAM and the machine
-restarts forever. The frontend therefore loads the divMMC ROM automatically for
-the Next (and only for the Next), looking for `nxtmmc`, `nextmmc`, `divmmc` and
-`esxdos` with a `.rom` or `.bin` extension in `roms/`, next to the executable,
-and in the working directory. On the other machines the divMMC stays the user's
-choice and is not touched.
+It is found automatically next to the main ROM (`nxtmmc.rom`, then
+`divmmc.rom`); the ROM window reports it and warns when it is missing. That ROM
+carries the esxDOS driver that reads NextZXOS off the card through the Next's
+built-in SPI interface on ports `0xE7` (chip select) and `0xEB` (data), so a card
+image is the third thing a Next needs. NextZXOS is read off that card, not out
+of another ROM file.
 
 ## Picking the images once
 
@@ -54,16 +58,15 @@ back to searching `roms/`. Each machine keeps its own images, so switching
 between a 128K and a Next never picks up the wrong-sized ROM, and the machine
 itself is remembered too, so the next start comes up where the last one ended.
 
-The Next's row has a divMMC sub-row, which is where the companion image above
-belongs — the emulator then loads it together with the board ROM instead of
-telling you later that it is missing. The toolbar shows `NO DIVMMC` while a
-machine that needs one does not have it; the chip disappears once the image is
-loaded.
+The Next's row has an **SD card** sub-row. Pick an `.img` or `.mmc` there and
+it is mounted on the built-in interface, and remembered in `rainbow.cfg`
+alongside the ROM, so the next start comes up with the card already in. The same
+card can be inserted or ejected at any time from **Tools**. The toolbar shows
+`NO SD CARD` while a Next is running without one.
 
 If no `next` set is found the Next falls back to the `128` set, so a Next without
-its own ROM still boots the 128K machine. The ROMs only cover the board and
-divMMC; NextZXOS lives on the SD card image and is loaded separately with `--sd`
-(see below).
+its own ROM still boots the 128K machine. The ROM files only cover the board;
+NextZXOS lives on the SD card image (see below).
 
 ### How banked ROM sets are loaded
 

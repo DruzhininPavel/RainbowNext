@@ -27,7 +27,7 @@ void printUsage() {
       "  --tape FILE       TAP or TZX image to insert into the tape deck\n"
       "  --snapshot FILE   SNA, Z80 snapshot or NEX program to load at startup\n"
       "  --disk FILE       DSK or EDSK image to insert into the +3 disk drive\n"
-      "  --sd FILE         SD card image for the DivMMC; NextZXOS boots from it\n"
+      "  --sd FILE         SD card image; NextZXOS boots from it\n"
       "  --esxdos DIR      host directory that answers the program's esxDOS calls\n"
       "  --state FILE      save state to restore at startup\n"
       "  --rzx FILE        RZX replay to play back at startup\n"

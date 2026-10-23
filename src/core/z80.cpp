@@ -721,8 +721,8 @@ bool Z80::executeZ80n(u8 op) {
       return true;
     }
 
-    case 0x30: // MUL D,E — HL = D * E, no flags
-      setHl(u16(u16(regs_.d) * u16(regs_.e)));
+    case 0x30: // MUL D,E — DE = D * E, no flags
+      setDe(u16(u16(regs_.d) * u16(regs_.e)));
       return true;
 
     case 0x31: setHl(u16(hl() + regs_.a)); return true; // ADD HL,A
