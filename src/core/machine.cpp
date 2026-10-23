@@ -1334,6 +1334,16 @@ u8 Machine::readNextReg(u8 reg) const {
     // is reset with it clear while the machine can still be in the mode.
     return u8((next_.read(0x06) & 0xFB) | (configMode_ ? 0x04 : 0x00));
   }
+  if (reg == 0x08) {
+    // Bit 7 reports whether port 0x7FFD is still unlocked, which is machine
+    // state rather than something the register file holds: a write of the bit
+    // is a command to unlock, and the answer always comes from the lock.
+    return u8((pagingLocked_ ? 0x00 : 0x80) | (next_.read(0x08) & 0x7F));
+  }
+  if (reg == 0x0A) {
+    // Bit 2 is reserved on the Next and reads back as zero.
+    return u8(next_.read(0x0A) & 0xFB);
+  }
   if (reg == 0x69) {
     // Composed from the classic ports, exactly like NR 0x8E: bit 6 is the Layer
     // 2 enable of port 0x123B, bit 3 the screen bank of port 0x7FFD and bits
@@ -1365,7 +1375,7 @@ void Machine::writeNextReg(u8 reg, u8 value) {
       // Bits 7:5 are the machine configuration and only reachable while the
       // ROM is in configuration mode; the rest is always writable.
       const u8 previous = next_.read(reg);
-      next_.write(reg, u8((value & 0x1F) | (configMode_ ? (value & 0xE0) : (previous & 0xE0))));
+      next_.write(reg, u8((value & 0x1B) | (configMode_ ? (value & 0xE0) : (previous & 0xE0))));
       divmmc_.setAutomap((value & 0x10) != 0);
       return;
     }
@@ -1467,7 +1477,13 @@ void Machine::writeNextReg(u8 reg, u8 value) {
       copper_.writeData16(value);
       return;
     case 0x08: // peripheral 3: TurboSound, stereo arrangement, DACs
-      next_.write(reg, value);
+      // Bit 7 is a command rather than data: writing it releases the 0x7FFD
+      // lock, and reading the register answers the bit from the lock instead.
+      if ((value & 0x80) != 0) {
+        port7ffd_ &= u8(~0x20u);
+        pagingLocked_ = false;
+      }
+      next_.write(reg, u8(value & 0x7F));
       sound_.setEnabled((value & 0x02) != 0);
       sound_.setStereoMode((value & 0x20) ? Ay38912::Stereo::ACB : Ay38912::Stereo::ABC);
       return;

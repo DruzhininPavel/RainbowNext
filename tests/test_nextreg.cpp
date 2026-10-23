@@ -443,3 +443,26 @@ TEST(nextreg_08_reads_back_the_value_that_was_written) {
   m.writeNextReg(0x08, value);
   CHECK_EQ(m.readNextReg(0x08), u8(0xCE));
 }
+
+// Bit 7 of NR 0x08 is not data: it reports whether port 0x7FFD is still
+// unlocked, and writing it is a command to unlock. The boot ROM reads the bit,
+// keeps it while it programs the rest of the byte, and expects the lock to be
+// gone afterwards -- so a register file that just stores the byte reports the
+// lock the wrong way round and the ROM takes a different path.
+TEST(nextreg_08_bit_7_reports_the_7ffd_lock) {
+  Machine m(MachineType::Next);
+  CHECK_EQ(m.readNextReg(0x08) & 0x80, u8(0x80)); // a reset machine is open
+
+  m.ioWrite(0x7FFD, 0x20, 0); // bit 5 locks paging
+  CHECK(m.pagingLocked());
+  CHECK_EQ(m.readNextReg(0x08) & 0x80, u8(0x00)); // the bit now reports it
+
+  // A write that sets bit 7 is the unlock command, not data.
+  m.writeNextReg(0x08, 0xDE);
+  CHECK(!m.pagingLocked());
+  CHECK_EQ(m.readNextReg(0x08), u8(0xDE));
+
+  // The lock really is gone, not just reported as gone.
+  m.ioWrite(0x7FFD, 0x07, 0);
+  CHECK_EQ(m.port7ffd() & 0x07, u8(0x07));
+}
