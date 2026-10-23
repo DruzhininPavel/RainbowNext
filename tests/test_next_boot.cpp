@@ -36,6 +36,10 @@ std::string romPath(const char* name) {
   return std::string(RAINBOW_SOURCE_DIR) + "/roms/" + name;
 }
 
+// The ROM images are not shipped with the source, so a test that needs one has
+// to skip itself rather than fail on a machine that has never had a Next.
+bool haveRom(const char* name) { return !readFile(romPath(name)).empty(); }
+
 // The board ROM is a 64 KiB image holding four 16 KiB banks.
 bool loadNextRom(Machine& machine) {
   const std::vector<u8> rom = readFile(romPath("next.rom"));
@@ -125,6 +129,7 @@ TEST(boot_configuration_mode_gates_register_0a) {
 TEST(boot_next_firmware_programs_the_register_file) {
   Machine machine(MachineType::Next);
   if (!loadNextRom(machine)) return;
+  if (!haveRom("nxtmmc.rom")) return;
   std::string error;
   CHECK(machine.loadDivMmcRom(romPath("nxtmmc.rom"), error));
 
@@ -144,6 +149,7 @@ TEST(boot_next_firmware_programs_the_register_file) {
 // Only the Next runs a firmware; every other machine just gets a divMMC ROM.
 TEST(boot_spectrum_is_not_touched_by_a_divmmc_rom) {
   Machine machine(MachineType::Spectrum128);
+  if (!haveRom("nxtmmc.rom")) return;
   std::string error;
   CHECK(machine.loadDivMmcRom(romPath("nxtmmc.rom"), error));
   // Only the firmware programs these, so a plain 128K still shows the power-on
