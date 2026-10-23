@@ -344,9 +344,21 @@ These are deliberate simplifications, tracked here so they are not forgotten:
     init, `0x1904` the multi-block read) and none of it is ever called. The only
     card traffic is a stream of malformed `CMD17` frames with garbage arguments
     (`51 47 D5 F9 AF`), which means something is shifting memory through `0xEB`
-    rather than driving the driver. Finding that caller is what is left. An
-    earlier diagnosis blamed a `JP 0x3CFC` trampoline in ROM page 2; that
-    address is never reached and the diagnosis was wrong. The plan is still to
+    rather than driving the driver. Finding that caller is what is left.
+
+    Two earlier diagnoses were wrong. One blamed a `JP 0x3CFC` trampoline in
+    ROM page 2; that address is never reached. The other claimed a third,
+    unidentified ROM image was executing, because `memRead(0x0E44)` returned
+    `C5` while `memRead(0x0000)` returned the boot ROM's `F3` under an identical
+    MMU. Those bytes are `nxtmmc.rom` content served by the divMMC overlay,
+    which answers every read below `0x4000` while mapped in -- nothing exotic.
+    The divMMC ROM does genuinely run during the failed boot (its `0x0038` entry
+    point is `JP 0x00E5`, so an IM 1 interrupt maps the module in and the
+    handler pokes the port `0xE3` latch), about 112 times per five million
+    instructions, but suppressing that hook does not make NextZXOS appear, so
+    it is a symptom and not the cause. A hot `pc=0x0168` looked like a loop but
+    is the boot ROM's own `LDDR` memory clear at bank 0 `0x0168` -- expected to
+    dominate, since each pass moves `BC=0x3FFE` bytes. The plan is still to
     finish divMMC as a separate out-of-tree plugin over the expansion bus rather
     than keep it on the Next's boot path. Its status port at `0x1F` is also an
     approximation (card detect and busy only); the exact bit layout of a real
