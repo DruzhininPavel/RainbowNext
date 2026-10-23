@@ -458,6 +458,28 @@ These are deliberate simplifications, tracked here so they are not forgotten:
     and both finish with the same eight MMU slots, `FF FF 0A 0B 04 05 0E 0F`.
     So the paging and the firmware path are not in question.
 
+    *The instruction stream is identical, and the clock nearly so.* Both sides
+    were traced from reset for 300 000 instructions and the PC columns diffed
+    byte for byte: they agree for the first 244 992, including the whole
+    `nxtmmc.rom` prologue, and each takes exactly one interrupt in that window
+    (the oracle at `0E5C` -> `0038`, we 138 instructions later). An earlier
+    reading that our `JP 0x006A` came from the wrong ROM was an artefact of a
+    probe that read memory after `stepInstruction()` had already run the
+    instruction, so the divMMC automap was never at fault and needs no gate on
+    NR `0x83` bit 0.
+
+    What did differ was the clock, by 660 000 T over that trace. Two rules in
+    xpeccy's `nx_mrd_in()` account for all of it. At 28 MHz every read costs one
+    wait state (`zxnext.c:520`), except a BRAM read from bank 7, which is the
+    one page that does not wait (`zxnext.c:510`) -- bank 5 waits like SRAM.
+    Writes never wait. A halted CPU keeps running M1 cycles and so keeps paying
+    it. `Bus::readWait()` carries the rule and `Z80` adds it to `fetch()`,
+    `read8()` and the halt cycle. With both in place the same 300 000
+    instructions end 1 262 T apart, 0.023 % of the trace, and the residual is
+    the interrupt phase: we raise the frame interrupt at the frame boundary
+    while the hardware raises it at a pixel (`inth + 1`, line 0) with a 32 clock
+    pulse.
+
     *The console is live, and that is measurable.* The same System/Next card,
     booted for 1600 frames with SPACE pressed at 300, 700, 1000 and 1300, ends
     in the keyboard-scan loop on both sides: the bench reports `pc 0C8F` and we
