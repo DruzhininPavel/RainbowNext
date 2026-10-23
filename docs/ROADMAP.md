@@ -480,6 +480,20 @@ These are deliberate simplifications, tracked here so they are not forgotten:
     while the hardware raises it at a pixel (`inth + 1`, line 0) with a 32 clock
     pulse.
 
+    *The interrupt phase is a raster-origin question, not an interrupt one.*
+    Moving the assertion was tried and reverted. Raising it at the core's own
+    position -- raw line 1, 3063 dots before the boundary -- puts us 26
+    instructions ahead of the reference and the pulse then falls outside the
+    ROM's `EI` window often enough that no interrupt is taken at all in 300 000
+    instructions. The offset that best matches the reference is 414 T before the
+    boundary, which is line 309 of 311, i.e. inside the vertical retrace and 61
+    lines away from the line 248 the hardware uses; that aligns the instruction
+    stream for 9 000 instructions longer but only by cancelling our accumulated
+    drift against a raster origin that is 61 lines out. So the thing to move is
+    the origin `tstates_` counts from, together with `borderLines_` and
+    `renderFrame()`, not `frameStart()`. Until that is done the boundary is the
+    least-wrong place to raise it.
+
     *The console is live, and that is measurable.* The same System/Next card,
     booted for 1600 frames with SPACE pressed at 300, 700, 1000 and 1300, ends
     in the keyboard-scan loop on both sides: the bench reports `pc 0C8F` and we
