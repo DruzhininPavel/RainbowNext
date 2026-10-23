@@ -567,6 +567,29 @@ These are deliberate simplifications, tracked here so they are not forgotten:
     reach them: the Pentagon `0xEFF7` option that puts RAM 0/1 at `0x0000`, and
     the `0xDFFD` bank extension.
 
+    *The firmware hook was dead code, and that was the largest remaining gap.*
+    `nextFirmwareBoot()` reproduced the reference's `nx_firmware()` write table
+    faithfully and nothing ever called it, so a cold Next ran the raw ROM from
+    its reset vector and NextZXOS was handed a machine whose configuration
+    registers still held their power-on values. It is now invoked when the
+    divMMC ROM lands, which is the last piece of a Next ROM set. The mode has
+    to be entered *before* the table runs rather than after it, because the
+    firmware programs the FPGA while it is itself in configuration mode; the
+    table's final `0x03` write carries machine type 3 and leaves the mode
+    again, which is what the real firmware does before it jumps to NextZXOS.
+
+    With the hook running, the register file a program finds at its first
+    instruction matches the reference on everything the firmware sets:
+    `0x03 = 0x33`, `0x04 = 0x03`, `0x05 = 0x5B`, `0x0A = 0x11`,
+    `0x10 = 0x04`, `0x11 = 0x00`, `0x89 = 0x8F`. Three register rules the
+    comparison turned up ride along: `0x10` and `0x11` only accept writes in
+    configuration mode (`0x10` keeping its bits 6:5, `0x11` only its bits 2:0),
+    `0x85` and `0x89` store bits 7 and 3:0 and read the rest back as zero, and
+    `0x41` is a write-only data path into the palette rather than a stored
+    byte. A hard reset also seeds the two palette indices the FPGA powers up
+    with, so a boot ROM reading them back before programming colours sees
+    `0x8F` and not `0x0F`.
+
     What is still open is why the OS stops at an empty text page instead of
     starting the desktop. The card goes untouched after frame 44: 197 `CMD17`
     reads load `AUTOEXEC.1ST`, `RTC.SYS`, `RTCSIG.SYS` and `BIOSEXT.BIN`, and
