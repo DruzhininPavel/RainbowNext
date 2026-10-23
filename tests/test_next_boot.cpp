@@ -111,3 +111,33 @@ TEST(boot_configuration_mode_gates_register_0a) {
   machine.writeNextReg(0x0A, 0x10);
   CHECK_EQ(machine.readNextReg(0x0A), 0xB0);
 }
+
+// The firmware is what hands a cold machine over to NextZXOS: it programs the
+// FPGA through the register file and finishes with a soft reset. It runs as
+// the last piece of a Next ROM set is loaded, so these values are what a
+// program finds at its first instruction rather than what a reset leaves.
+TEST(boot_next_firmware_programs_the_register_file) {
+  Machine machine(MachineType::Next);
+  if (!loadNextRom(machine)) return;
+  std::string error;
+  CHECK(machine.loadDivMmcRom(romPath("nxtmmc.rom"), error));
+
+  CHECK_EQ(machine.nextRegs().read(0x03), 0x33); // machine type: Next, 3.5 MHz
+  CHECK_EQ(machine.nextRegs().read(0x04), 0x03); // ROM trap: NextZXOS
+  CHECK_EQ(machine.nextRegs().read(0x0A), 0x11); // Next, divMMC automap off
+  CHECK_EQ(machine.nextRegs().read(0x10), 0x04); // Layer 2 at 256x192
+  CHECK_EQ(machine.nextRegs().read(0x11), 0x00); // ...and its scroll MSB
+  CHECK_EQ(machine.nextRegs().read(0x89), 0x8F); // the power-on palette index
+  CHECK_EQ(machine.nextRegs().read(0x8B), 0x00);
+  // The firmware ends with a soft reset, which leaves configuration mode.
+  CHECK_EQ(machine.readNextReg(0x06) & 0x04, 0x00);
+}
+
+// Only the Next runs a firmware; every other machine just gets a divMMC ROM.
+TEST(boot_spectrum_is_not_touched_by_a_divmmc_rom) {
+  Machine machine(MachineType::Spectrum128);
+  std::string error;
+  CHECK(machine.loadDivMmcRom(romPath("nxtmmc.rom"), error));
+  CHECK_EQ(machine.nextRegs().read(0x03), 0x00);
+  CHECK_EQ(machine.nextRegs().read(0x0A), 0x00);
+}

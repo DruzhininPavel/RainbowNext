@@ -163,12 +163,12 @@ void Machine::nextFirmwareBoot() {
       {0x85, 0x01},
       {0x03, 0xB3}, // machine type +3 with +3 timing
   };
-  for (const auto& write : Writes) writeNextReg(write[0], write[1]);
-
-  // The ROM is handed the machine in configuration mode -- that is the state
-  // xpeccy's firmware hook leaves behind -- and it is the ROM itself that
-  // leaves the mode once it has finished programming the machine.
+  // The firmware programs the FPGA while it is itself in configuration mode,
+  // so the gated registers above take the bits it means to set. The last
+  // 0x03 write above carries machine type 3, which leaves the mode again --
+  // exactly what the real firmware does before it jumps to NextZXOS.
   configMode_ = true;
+  for (const auto& write : Writes) writeNextReg(write[0], write[1]);
 
   // The firmware's last act is a soft reset, which is what turns the
   // configuration above into a running NextZXOS: the reset keeps the
@@ -328,6 +328,10 @@ bool Machine::loadDivMmcRom(const std::string& path, std::string& error) {
   if (!divmmc_.loadRomFile(path, error)) return false;
   // The ROM arriving late still has to answer a latch that is already set.
   updatePaging();
+  // This is the last piece of a Next ROM set, so the firmware has everything
+  // it needs to hand the machine over to NextZXOS. Every other machine just
+  // got a divMMC ROM and boots from its own reset vector.
+  if (type_ == MachineType::Next) nextFirmwareBoot();
   return true;
 }
 
@@ -1422,12 +1426,25 @@ void Machine::writeNextReg(u8 reg, u8 value) {
       updatePaging();
       return;
     }
+    case 0x10: // Layer 2 resolution: only reachable in configuration mode, and
+               // bits 6:5 belong to the file rather than to this write
+      if (configMode_) {
+        next_.write(reg, u8((next_.read(reg) & 0x60) | (value & 0x1F)));
+      }
+      return;
+    case 0x11: // Layer 2 scroll MSB, likewise configuration mode only
+      if (configMode_) next_.write(reg, u8(value & 0x07));
+      return;
+    case 0x85: // internal port enable: bit 7 selects the write mode, bits 3:0
+    case 0x89: // the enables themselves; the upper bits read back as written
+      next_.write(reg, u8(value & 0x8F));
+      return;
     case 0x40: // palette index
       next_.write(reg, value);
       palette_.setIndex(value);
       return;
-    case 0x41: // 8-bit palette colour
-      next_.write(reg, value);
+    case 0x41: // 8-bit palette colour; the port is a write-only data path, so
+               // nothing is stored and a read back answers from the palette
       palette_.write8(value);
       return;
     case 0x43: // palette control

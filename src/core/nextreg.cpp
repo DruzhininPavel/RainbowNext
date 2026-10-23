@@ -15,6 +15,11 @@ void NextRegFile::reset(bool hard) {
   if (hard) {
     values_.fill(0);
     selected_ = 0;
+    // The FPGA powers up with both palettes parked on white in "write through
+    // the old index" mode, and the boot ROM reads those back before it starts
+    // programming colours.
+    values_[0x85] = values_[0x89] = 0x8F;
+    values_[0x86] = values_[0x87] = values_[0x88] = 0xFF;
   }
 
   values_[0x02] &= 0x80;                  // the ESP reset bit latches
@@ -24,6 +29,7 @@ void NextRegFile::reset(bool hard) {
   values_[0x08] &= 0x3F;
   values_[0x09] &= 0xEF;
   values_[0x0B] = 0x01;
+  values_[0x10] = 0x04;                   // Layer 2: 256x192
   values_[0x12] = 0x08;                   // Layer 2 active bank
   values_[0x13] = 0x0B;                   // Layer 2 shadow bank
   values_[0x14] = 0xE3;                   // global transparency index
