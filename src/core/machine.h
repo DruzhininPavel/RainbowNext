@@ -287,6 +287,7 @@ private:
   void writePort1ffd(u8 value);
   void updatePaging();
   void updateNextMmu();
+  void legacyRemap(bool ramChange, bool leavingSpecial);
   u8 nextRomBank() const;
   u8 nextAltRomBank() const;
   bool nextAltRomPage(u16 addr, bool write, u8& page) const;

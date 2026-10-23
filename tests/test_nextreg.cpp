@@ -168,12 +168,66 @@ TEST(nextreg_port_7ffd_repages_the_high_slots) {
   m.writeNextReg(0x57, 0x06);  // page 6 at 0xE000 instead
   CHECK_EQ(m.memRead(0xE000, 0), 0x5A);
 
-  // Locking 0x7FFD must freeze the classic port as well.
+  // A write that sets the lock still pages its bank in first and only then
+  // freezes the port, so 0x20 alone leaves bank 0 at 0xC000.
   m.ioWrite(0x7FFD, 0x20, 0);
   CHECK(m.pagingLocked());
-  m.ioWrite(0x7FFD, 0x01, 0);
+  CHECK_EQ(m.nextRegs().mmuSlot(6), 0x00);
+  CHECK_EQ(m.nextRegs().mmuSlot(7), 0x01);
+
+  // Everything after that is ignored, including the bank and the ROM bit.
+  m.ioWrite(0x7FFD, 0x11, 0);
+  CHECK_EQ(m.nextRegs().mmuSlot(6), 0x00);
+  CHECK_EQ(m.nextRegs().mmuSlot(7), 0x01);
+  CHECK_EQ(m.nextRegs().mmuSlot(0), NextRegFile::RomPage);
+}
+
+// The classic ports only own the slots they control, so a program can park its
+// own page in the middle of the address space and keep it across a bank switch.
+TEST(nextreg_port_7ffd_leaves_the_middle_slots_alone) {
+  Machine m(MachineType::Next);
+
+  m.writeNextReg(0x52, 0x20); // page 32 at 0x4000
+  m.writeNextReg(0x53, 0x21);
+  m.writeNextReg(0x54, 0x22);
+  m.writeNextReg(0x55, 0x23);
+  m.ioWrite(0x7FFD, 0x04, 0); // bank 4 at 0xC000
+  CHECK_EQ(m.nextRegs().mmuSlot(2), 0x20);
+  CHECK_EQ(m.nextRegs().mmuSlot(3), 0x21);
+  CHECK_EQ(m.nextRegs().mmuSlot(4), 0x22);
+  CHECK_EQ(m.nextRegs().mmuSlot(5), 0x23);
+  CHECK_EQ(m.nextRegs().mmuSlot(6), 0x08);
+  CHECK_EQ(m.nextRegs().mmuSlot(7), 0x09);
+  // 0x0000 and 0x2000 are the ROM again even after a custom page was paged in.
+  CHECK_EQ(m.nextRegs().mmuSlot(0), NextRegFile::RomPage);
+  CHECK_EQ(m.nextRegs().mmuSlot(1), NextRegFile::RomPage);
+}
+
+// +3 CP/M mode owns all eight slots at once, and leaving it has to hand the
+// standard map back rather than leave the CP/M one in place.
+TEST(nextreg_1ffd_special_paging_takes_the_whole_map) {
+  Machine m(MachineType::Next);
+
+  m.ioWrite(0x1FFD, 0x01, 0); // special paging, table 0
+  for (int slot = 0; slot < 8; ++slot) CHECK_EQ(m.nextRegs().mmuSlot(slot), u8(slot));
+
+  m.ioWrite(0x1FFD, 0x07, 0); // table 3
+  static constexpr u8 Table3[8] = {0x08, 0x09, 0x0E, 0x0F, 0x0C, 0x0D, 0x06, 0x07};
+  for (int slot = 0; slot < 8; ++slot) CHECK_EQ(m.nextRegs().mmuSlot(slot), Table3[slot]);
+
+  m.ioWrite(0x7FFD, 0x02, 0); // CP/M mode ignores the RAM bank bits entirely
+  CHECK_EQ(m.nextRegs().mmuSlot(0), 0x08);
   CHECK_EQ(m.nextRegs().mmuSlot(6), 0x06);
-  CHECK_EQ(m.nextRegs().mmuSlot(7), 0x06);
+
+  m.ioWrite(0x1FFD, 0x00, 0); // and back out
+  CHECK_EQ(m.nextRegs().mmuSlot(0), NextRegFile::RomPage);
+  CHECK_EQ(m.nextRegs().mmuSlot(1), NextRegFile::RomPage);
+  CHECK_EQ(m.nextRegs().mmuSlot(2), 0x0A);
+  CHECK_EQ(m.nextRegs().mmuSlot(3), 0x0B);
+  CHECK_EQ(m.nextRegs().mmuSlot(4), 0x04);
+  CHECK_EQ(m.nextRegs().mmuSlot(5), 0x05);
+  CHECK_EQ(m.nextRegs().mmuSlot(6), 0x04);
+  CHECK_EQ(m.nextRegs().mmuSlot(7), 0x05);
 }
 
 TEST(nextreg_soft_reset_keeps_ram_and_hard_reset_clears_it) {
@@ -277,6 +331,21 @@ TEST(nextreg_0x8e_maps_the_128k_memory_in_one_write) {
   m.writeNextReg(0x8E, 0x3C);
   CHECK_EQ(m.port1ffd() & 0x01, 0x01);
   CHECK_EQ(m.readNextReg(0x8E) & 0x04, 0x04);
+}
+
+// The 0x7FFD lock freezes the port, not the register interface: NextZXOS'
+// `RST 8` dispatcher selects ROM 3 with `NEXTREG 0x8E` after a 48K program may
+// well have locked 0x7FFD.
+TEST(nextreg_0x8e_is_not_blocked_by_the_7ffd_lock) {
+  Machine m(MachineType::Next);
+
+  m.ioWrite(0x7FFD, 0x20, 0);
+  CHECK(m.pagingLocked());
+
+  m.writeNextReg(0x8E, 0x03); // ROM 3, RAM map untouched
+  CHECK_EQ(m.port7ffd() & 0x10, 0x10);
+  CHECK_EQ(m.port1ffd() & 0x04, 0x04);
+  CHECK_EQ(m.readNextReg(0x8E) & 0x07, 0x03);
 }
 
 TEST(next_ula_screen_bank_follows_port_7ffd) {

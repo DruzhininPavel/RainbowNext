@@ -1089,13 +1089,11 @@ void Machine::refreshCartridge() {
 void Machine::writePort7ffd(u8 value) {
   if (pagingLocked_) return;
   port7ffd_ = value;
+  // On the Next the classic ports are a shorthand for MMU writes. The map is
+  // rebuilt before the lock is taken, because a write that sets bit 5 still
+  // pages its bank in first and only then freezes the ports.
+  if (isNext()) legacyRemap(true, false);
   pagingLocked_ = (value & 0x20) != 0;
-  // On the Next the classic ports are a shorthand for MMU writes.
-  if (isNext() && !pagingLocked_) {
-    const u8 bank = u8(value & 0x07);
-    next_.setMmuSlot(6, u8(bank * 2));
-    next_.setMmuSlot(7, u8(bank * 2 + 1));
-  }
   updatePaging();
 }
 
@@ -1106,7 +1104,11 @@ void Machine::writePort7ffd(u8 value) {
 // exclusively by bit 5 of 0x7FFD, which freezes this port too.
 void Machine::writePort1ffd(u8 value) {
   if (pagingLocked_) return;
+  // Leaving CP/M mode has to restore the middle of the address space, so the
+  // transition is recorded before the shadow is overwritten.
+  const bool leaving = (port1ffd_ & 0x01) != 0 && (value & 0x01) == 0;
   port1ffd_ = value;
+  if (isNext()) legacyRemap(true, leaving);
   updatePaging();
 }
 
@@ -1244,6 +1246,49 @@ void Machine::updateNextMmu() {
   }
 }
 
+// On the Next the three classic memory ports are a shorthand for MMU writes:
+// 0x7FFD, 0x1FFD and register 0x8E rebuild the map from the 7FFD and 1FFD
+// shadows instead of naming pages directly. Only the slots the classic hardware
+// controls are rewritten, which is what lets a program park its own page in
+// slots 2-5 and still switch the RAM bank with 0x7FFD. The exception is +3
+// special paging, which owns all eight slots at once and has to hand the
+// standard map back when it is left.
+void Machine::legacyRemap(bool ramChange, bool leavingSpecial) {
+  // 0x1FFD bit 0 is the +3 CP/M mode. Its map is fixed: one of four tables
+  // picked by 0x1FFD bits 2:1, and every slot shows RAM, because the mode
+  // exists so that CP/M can own the whole 64K.
+  if ((port1ffd_ & 0x01) != 0) {
+    static constexpr u8 Maps[4][8] = {
+        {0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07},
+        {0x08, 0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F},
+        {0x08, 0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x06, 0x07},
+        {0x08, 0x09, 0x0E, 0x0F, 0x0C, 0x0D, 0x06, 0x07},
+    };
+    const u8* map = Maps[(port1ffd_ >> 1) & 0x03];
+    for (int slot = 0; slot < 8; ++slot) next_.setMmuSlot(slot, map[slot]);
+    return;
+  }
+  // Outside special paging 0x0000 and 0x2000 always show the selected ROM.
+  next_.setMmuSlot(0, NextRegFile::RomPage);
+  next_.setMmuSlot(1, NextRegFile::RomPage);
+  // Leaving CP/M mode leaves the CP/M map behind in the middle of the address
+  // space, so slots 2-5 go back to the standard 10/11/4/5.
+  if (leavingSpecial) {
+    next_.setMmuSlot(2, 0x0A);
+    next_.setMmuSlot(3, 0x0B);
+    next_.setMmuSlot(4, 0x04);
+    next_.setMmuSlot(5, 0x05);
+  }
+  // The 0xC000 half only follows the RAM bank when this write actually changed
+  // it, so a 0x1FFD write that only touches a ROM bit cannot steal the bank a
+  // program paged in through the MMU slots.
+  if (ramChange || leavingSpecial) {
+    const u8 bank = u8(port7ffd_ & 0x07);
+    next_.setMmuSlot(6, u8(bank * 2));
+    next_.setMmuSlot(7, u8(bank * 2 + 1));
+  }
+}
+
 
 // ===========================================================================
 // Next register file
@@ -1280,11 +1325,13 @@ u8 Machine::readNextReg(u8 reg) const {
   }
   if (reg == 0x8E) {
     // Composed from the classic ports, so a guest that reads the register back
-    // sees whatever it last wrote through either interface.
+    // sees whatever it last wrote through either interface. In CP/M mode the
+    // low ROM bit lives in 0x1FFD bit 1 instead of 0x7FFD bit 4.
     const u8 bank = isNext() ? u8(next_.mmuSlot(6) >> 1) : u8(port7ffd_ & 0x07);
+    const bool special = (port1ffd_ & 0x01) != 0;
     const u8 rom = u8((isPlus3() || isNext()) ? ((port1ffd_ & 0x04) ? 2 : 0) : 0);
-    return u8((bank << 4) | 0x08 | (rom | ((port7ffd_ & 0x10) ? 1 : 0)) |
-              ((port1ffd_ & 0x01) ? 0x04 : 0x00));
+    const u8 lowRom = special ? u8((port1ffd_ & 0x02) ? 1 : 0) : u8((port7ffd_ & 0x10) ? 1 : 0);
+    return u8((bank << 4) | 0x08 | (rom | lowRom) | (special ? 0x04 : 0x00));
   }
   return next_.read(reg);
 }
@@ -1326,26 +1373,26 @@ void Machine::writeNextReg(u8 reg, u8 value) {
       next_.write(reg, value);
       updatePaging();
       return;
-    case 0x8E: // the 128K memory map as a single register
+    case 0x8E: { // the 128K memory map as a single register
       // Bits 0 and 1 are the two ROM select bits of ports 0x7FFD and 0x1FFD and
       // bit 2 the +2A/+3 paging mode, all of which are visible as the classic
       // ports. The RAM bank is only taken when bit 3 asks for it, which is how
       // a caller can change the ROM without disturbing the RAM mapping. The
-      // 0x7FFD lock freezes this register just as it freezes that port.
-      if (pagingLocked_) return;
-      if ((value & 0x08) != 0) {
-        const u8 bank = u8((value >> 4) & 0x07);
-        port7ffd_ = u8((port7ffd_ & 0xF0) | bank);
-        if (isNext()) {
-          next_.setMmuSlot(6, u8(bank * 2));
-          next_.setMmuSlot(7, u8(bank * 2 + 1));
-        }
-      }
-      port7ffd_ = u8((port7ffd_ & ~0x10) | ((value & 0x01) ? 0x10 : 0x00));
-      port1ffd_ = u8((port1ffd_ & ~0x05) | ((value & 0x02) ? 0x04 : 0x00) |
-                     ((value & 0x04) ? 0x01 : 0x00));
+      // 0x7FFD lock does not reach this register: it freezes the ports, not the
+      // register interface, and NextZXOS' `RST 8` dispatcher relies on that to
+      // select ROM 3 with a locked 0x7FFD.
+      if ((value & 0x08) != 0) port7ffd_ = u8((port7ffd_ & 0xF8) | ((value >> 4) & 0x07));
+      // The low ROM bit only drives 0x7FFD outside CP/M mode; inside it, that
+      // bit moves to 0x1FFD bit 1, which is where this register reads it back.
+      const bool special = (value & 0x04) != 0;
+      if (!special) port7ffd_ = u8((port7ffd_ & ~0x10) | ((value & 0x01) ? 0x10 : 0x00));
+      const bool leaving = (port1ffd_ & 0x01) != 0 && !special;
+      port1ffd_ = u8((port1ffd_ & ~0x07) | (special ? 0x01 : 0x00) |
+                     ((value & 0x02) ? 0x04 : 0x00) | ((value & 0x01) ? 0x02 : 0x00));
+      if (isNext()) legacyRemap((value & 0x08) != 0, leaving);
       updatePaging();
       return;
+    }
     case 0x40: // palette index
       next_.write(reg, value);
       palette_.setIndex(value);
