@@ -458,6 +458,18 @@ These are deliberate simplifications, tracked here so they are not forgotten:
     and both finish with the same eight MMU slots, `FF FF 0A 0B 04 05 0E 0F`.
     So the paging and the firmware path are not in question.
 
+    *The console is live, and that is measurable.* The same System/Next card,
+    booted for 1600 frames with SPACE pressed at 300, 700, 1000 and 1300, ends
+    in the keyboard-scan loop on both sides: the bench reports `pc 0C8F` and we
+    report `0C90`. The block field this gap describes holds until somewhere
+    between frames 700 and 1100, and after it is wiped the reopened clip window
+    shows the empty page carrying exactly one 8x8 cursor cell. A SPACE press
+    then advances that cell by one column -- column 5 at frame 1100, column 6 at
+    frame 1600 -- so the guest is consuming the key and echoing it, which is the
+    same conclusion the handshake bytes above reach from the other direction.
+    What it never does is load `ENSYSTEM.SYS`, so the desktop never starts, and
+    that is the open question the last paragraph of this gap states.
+
     *The ULA is reading the right bank, and this was worth proving.* It is easy
     to misread `screenBank_ * BankSize` as an 8K page index and conclude that
     the ULA shows RAM page 5 while the OS keeps its console in page `0x0A`.
