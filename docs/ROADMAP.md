@@ -366,9 +366,26 @@ These are deliberate simplifications, tracked here so they are not forgotten:
     `00 FF FE 00 01 02 03 04`.
 
     The next step is therefore not in `src/core/sdcard.*` but in following how
-    the boot ROM populates a descriptor before it maps the card ROM in, starting
-    from the `CALL 0x1EAF` at `0x0846` and the `0x07C4` "position the file"
-    helper it runs first.
+    the boot ROM populates a descriptor before it maps the card ROM in. Two
+    things point at the same place:
+
+    * The call chain is `0x06F2` -> `0x0832` (read a block) -> `0x07C4`
+      (position the file) -> `0x07CA`-`0x0806` (search the seven-byte open-file
+      table at `0x232B`) -> nothing found -> `0x0808` -> `0x08B9` -> `0x0904`
+      (compute `IY = 0x232B + 7 * (n + 1)` from the free-slot count at
+      `0x2330`) -> `0x0810` (insert the entry). So the ROM is *creating* a file
+      handle, not reusing one, and the table it searches is empty.
+    * The buffer it registers is `IX = 0x0DC9`, which is inside `0x0000`-
+      `0x1FFF` -- the ROM half of the mapped divMMC, which cannot be written.
+      Either that buffer address is nonsense (consistent with the garbage
+      `HL=0x2BBA`, `BC=0x3DD7` it is paired with) or the mapping is expected to
+      be different at that moment.
+
+    So the fault is above the driver: the boot ROM reaches the card API without
+    the state it expects. The `EsxDos` host stub in `src/core/esxdos.*` is not
+    involved (it is disabled unless a directory is mounted) and is not a
+    substitute for this, because the boot ROM calls the card ROM's internal
+    routines directly rather than going through `RST 8`.
 
 18. A `.nex` loading screen is loaded into memory but never shown: the
     `loadingBar`, `loadingDelay` and `startDelay` fields are parsed and ignored,
