@@ -387,6 +387,28 @@ These are deliberate simplifications, tracked here so they are not forgotten:
     substitute for this, because the boot ROM calls the card ROM's internal
     routines directly rather than going through `RST 8`.
 
+    *Where it stops now, checked against an independent emulator.* The screen
+    renders as of `11e326b`: the boot ROM saves and restores the palette through
+    NR `0x41`/`0x44`, and those were returning the register file instead of the
+    palette entry, so the whole ULA came out white. With that fixed the machine
+    settles at `0x0C90` with a grey screen carrying a pseudo-random block field.
+
+    That screen is **not** a bug. The same card, booted in xpeccy-plus' headless
+    Next bench (see `docs/REFERENCES.md`), settles at `0x0C8F`, paints the same
+    static picture, and its ULA bank is **byte-identical to ours** (6912 of 6912
+    bytes match). The pattern is what the boot ROM draws in this configuration.
+
+    The reason it is garbage rather than text is the font copy at `0x2396`
+    (`LD HL,0x3D00 / LD DE,0xBC00 / LD BC,0x0300 / RST 0x28`): `0x3D00` resolves
+    to ROM bank 0, which holds the boot ROM's own code and strings, not the 8x8
+    font. The font lives at ROM offset `0xFD08` (bank 3), and the boot ROM asks
+    for the legacy remap with `NEXTREG 0x8E,0x02` at `0x3E13` just before the
+    copy. Our NR `0x8E` write sets the paging bits but does not recompute MMU
+    slots 2-5 the way xpeccy's `nx_remap()` does, so the remap is incomplete --
+    but xpeccy, which does implement it, produces the same picture, so this is
+    not what is keeping NextZXOS from starting. Implementing the full remap is
+    still worth doing for correctness; it is no longer on the critical path.
+
 18. A `.nex` loading screen is loaded into memory but never shown: the
     `loadingBar`, `loadingDelay` and `startDelay` fields are parsed and ignored,
     so the program starts at once instead of after an animated bar. The

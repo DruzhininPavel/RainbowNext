@@ -36,6 +36,7 @@ port semantics, memory layouts) was reimplemented.
 | [NEX file format](https://wiki.specnext.dev/NEX_file_format) | — | Header layout, loading-screen bits, bank order, the palette block |
 | [tbblue nexload.asm](https://gitlab.com/thesmog358/tbblue/-/blob/master/src/asm/nexload/nexload.asm) | — | Exact loader behaviour: register state left behind, bank order, entry bank, expansion-bus disable |
 | [MiSTer ZXNext](https://github.com/MiSTer-devel/ZXNext_MISTer) | GPL-3.0 | FPGA core as an accuracy oracle for video pipeline ordering |
+| [xpeccy-plus](https://github.com/dotkoval/xpeccy-plus) — `src/libxpeccy/hardware/zxnext.c` | GPL-3.0 | Next register semantics read as specification: the `0x41`/`0x44` palette read-back, the composed `0x69` read, the `0x8E`/`0x8F` legacy remap (`nx_remap`), `nx_rom()` bank selection and the port `0xFF` gate on `0x82` bit 0. Also used as a **black-box oracle**: its headless bench runs the same firmware and card, and the results are compared against ours (see below). No code copied |
 | [Timex / Video Modes](https://wiki.specnext.dev/Video_Modes) | — | SCLD mode numbers 0-7, the `0xBF3F`/`0xFF` port, the hi-res colour bits 5:3 |
 | [Sprite and Layers System Register](https://wiki.specnext.dev/Sprite_and_Layers_System_Register) | — | `0x15` bits 4:2 priority order and the blending modes 110/111 |
 | [ULANext Attribute Byte Format Register](https://wiki.specnext.dev/ULANext_Attribute_Byte_Format_Register) | — | The `0x42` ink mask and the `0x4A` fallback colour for full-ink mode |
@@ -75,7 +76,60 @@ port semantics, memory layouts) was reimplemented.
   synthetic, so the test needs neither a demo file nor a ROM, and the hash is
   computed over the framebuffer rather than over an encoded image.
 
-## Legal notes
+## Verifying against an independent emulator
+
+For the Next, "does our core behave like the hardware?" is hard to answer from
+the firmware sources alone, because the boot ROM is a closed 64 KB blob. The
+cheapest honest oracle is another emulator that runs the same blob.
+
+xpeccy-plus ships a headless bench for exactly this, and it needs no GUI and no
+Qt:
+
+```sh
+git clone https://github.com/dotkoval/xpeccy-plus /tmp/xp
+cd /tmp/xp
+cmake -S tests -B build/out/tests -DCMAKE_BUILD_TYPE=Release
+cmake --build build/out/tests -j8
+```
+
+`zxnext-bench` powers the machine on with a firmware handover and writes what
+it sees:
+
+```sh
+NXSD=/path/to/system-next.img \
+  ./build/out/tests/zxnext-bench \
+    fw:/path/ennextzx.rom,/path/ennxtmmc.rom \
+    600 0x000000 2097152 /tmp/ref
+```
+
+`600` is the frame limit; the next two numbers are a memory dump address and
+length; the last argument is the output directory. It writes:
+
+| File | Contents |
+|---|---|
+| `frame_N.txt` | every finished picture, one line per row, one hex RGB333 value per half-pixel |
+| `nextreg.txt` | every NextREG write as `frame hc vc cycles reg data` |
+| `probe.txt` | every I/O write with the same timing columns |
+| `dump.bin` | the requested slice of the 2 MB SRAM |
+
+Comparing it with RainbowNext is then mechanical:
+
+* the last line of the bench's own output prints the CPU's `PC` at the frame
+  limit -- ours must match;
+* `frame_N.txt` can be turned into an image and compared by eye or by colour
+  histogram against `Machine::framebuffer()`;
+* `dump.bin` contains the ULA bank, so the 6912 bytes of screen memory can be
+  diffed byte for byte against ours.
+
+The result recorded in `docs/ROADMAP.md` gap 17 is that a stock System/Next card
+gives a byte-identical ULA bank in both emulators, which is what closed the
+"the boot screen is garbage" question: the picture is the firmware's, not ours.
+
+Two caveats: the bench's `fw:` mode is a test harness, not a full boot, so it
+does not prove that NextZXOS *starts*; and xpeccy-plus is GPL-3.0, so it is
+only ever run as a separate program -- nothing from it is linked or copied.
+
+
 
 * ROM images are **not** distributed; see `roms/README.md`.
 * Snapshot and tape format descriptions are reimplemented from public

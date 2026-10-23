@@ -29,6 +29,12 @@ roms/next.rom      (65 536 bytes)
 roms/next-0.rom … next-3.rom
 ```
 
+The board ROM is `machines/next/ennextzx.rom` inside the official System/Next
+card image; a `roms/next.rom` extracted from there (md5
+`8c34d957fb2cbbd0be423cea3b370fd5`) is the genuine article. It starts `F3 C3 EF
+00`, which is `DI` / `JP 0x00EF`, and its bank 3 carries the 8x8 Spectrum font at
+offset `0xFD08`.
+
 The Next also needs the divMMC card ROM, which the boot ROM maps in at `0x0000`
 and refuses to continue without:
 
