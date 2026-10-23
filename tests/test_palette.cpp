@@ -55,6 +55,15 @@ void writePalette8(Machine& m, u8 index, u8 value) {
   m.writeNextReg(0x41, value);
 }
 
+// Every cell draws paper with no ink, so the whole ULA screen is one colour.
+void fillUlaWithPaper(Machine& m, u8 attribute) {
+  mapScreenBank(m);
+  for (u16 i = 0; i < 0x1800; ++i) m.memWrite(u16(ScreenBase + i), 0x00, 0);
+  for (u16 i = 0; i < 0x300; ++i) {
+    m.memWrite(u16(ScreenBase + 0x1800 + i), attribute, 0);
+  }
+}
+
 } // namespace
 
 TEST(palette_defaults_match_the_classic_spectrum_colours) {
@@ -300,4 +309,51 @@ TEST(layer2_clip_window_resets_to_the_full_screen) {
 
   renderOneFrame(m);
   CHECK_EQ(pixelAt(m, 0, 0), 0xFF00FF00u);
+}
+
+TEST(ula_clip_window_hides_pixels_outside_it) {
+  Machine m(MachineType::Next);
+  fillUlaWithPaper(m, 0x10); // paper 2, which is red
+
+  // Four writes: X1, X2, Y1, Y2. Only columns 2 to 4 stay visible.
+  m.writeNextReg(0x1A, 2);
+  m.writeNextReg(0x1A, 4);
+  m.writeNextReg(0x1A, 0);
+  m.writeNextReg(0x1A, 191);
+
+  renderOneFrame(m);
+  CHECK_EQ(pixelAt(m, 1, 0), 0xFF000000u);
+  CHECK_EQ(pixelAt(m, 2, 0), 0xFFDA0000u);
+  CHECK_EQ(pixelAt(m, 4, 0), 0xFFDA0000u);
+  CHECK_EQ(pixelAt(m, 5, 0), 0xFF000000u);
+  // Rows outside the window go the same way.
+  CHECK_EQ(pixelAt(m, 3, 0), 0xFFDA0000u);
+}
+
+TEST(ula_clip_window_resets_to_the_full_screen) {
+  Machine m(MachineType::Next);
+  fillUlaWithPaper(m, 0x10);
+  m.writeNextReg(0x1A, 0xBF);
+  m.reset();
+
+  fillUlaWithPaper(m, 0x10);
+  renderOneFrame(m);
+  CHECK_EQ(pixelAt(m, 0, 0), 0xFFDA0000u);
+  CHECK_EQ(pixelAt(m, 255, 191), 0xFFDA0000u);
+}
+
+TEST(ula_clip_index_resets_through_register_1c) {
+  Machine m(MachineType::Next);
+  fillUlaWithPaper(m, 0x10);
+  m.writeNextReg(0x1A, 0); // only the first of the four writes
+
+  // Bit 2 rewinds the ULA window so the next four writes start at X1 again.
+  m.writeNextReg(0x1C, 0x04);
+  for (const u8 value : {u8(2), u8(4), u8(0), u8(191)}) {
+    m.writeNextReg(0x1A, value);
+  }
+
+  renderOneFrame(m);
+  CHECK_EQ(pixelAt(m, 1, 0), 0xFF000000u);
+  CHECK_EQ(pixelAt(m, 3, 0), 0xFFDA0000u);
 }

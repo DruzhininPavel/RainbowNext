@@ -199,6 +199,8 @@ void Machine::reset(bool preserveRam) {
   layer2ClipIndex_ = 0;
   tilemapClip_ = {0, 159, 0, 255};
   tilemapClipIndex_ = 0;
+  ulaClip_ = {0, 255, 0, 191};
+  ulaClipIndex_ = 0;
   occluders_.assign(FrameWidth * FrameHeight, 0);
   // Bits 6:4 are the display timing and bits 2:0 the machine type; a Next in
   // Next mode presents itself as a +2A/+3.
@@ -639,6 +641,8 @@ template <class Ar> void Machine::serialize(Ar& ar) {
   ar(layer2ClipIndex_);
   ar(tilemapClip_);
   ar(tilemapClipIndex_);
+  ar(ulaClip_);
+  ar(ulaClipIndex_);
 
   ar(tstates_);
   ar(cpuTstates_);
@@ -1390,6 +1394,7 @@ void Machine::writeNextReg(u8 reg, u8 value) {
     case 0x1C: // reset the clip window write positions
       next_.write(reg, value);
       if (value & 0x08) tilemapClipIndex_ = 0;
+      if (value & 0x04) ulaClipIndex_ = 0;
       if (value & 0x02) sprites_.resetClipIndex();
       if (value & 0x01) layer2ClipIndex_ = 0;
       return;
@@ -1415,6 +1420,11 @@ void Machine::writeNextReg(u8 reg, u8 value) {
       next_.write(reg, value);
       tilemapClip_[tilemapClipIndex_ & 0x03] = value;
       ++tilemapClipIndex_;
+      return;
+    case 0x1A: // ULA clip window, four writes: X1, X2, Y1, Y2
+      next_.write(reg, value);
+      ulaClip_[ulaClipIndex_ & 0x03] = value;
+      ++ulaClipIndex_;
       return;
     case 0x69: // Layer 2 control is mostly a mirror of the classic ports, so
                // the write is copied into them as well: bit 6 is the Layer 2
@@ -1729,7 +1739,8 @@ void Machine::renderFrame() {
           screenRow && x >= BorderWidth && x < BorderWidth + ScreenWidth;
       const int ux = x - BorderWidth;
 
-      const u32 ulaRgb = (ulaOn && inWindow) ? ulaRow[size_t(ux)] : Transparent;
+      const u32 ulaRgb =
+          (ulaOn && inWindow && !ulaClipped(ux, y)) ? ulaRow[size_t(ux)] : Transparent;
       bool ulaOver = false;
       const u32 tileRgb = tilemapPixel(tilemap, x, r, ulaOver);
 
@@ -1877,6 +1888,11 @@ u32 Machine::layer2Pixel(const Layer2View& view, int x, int y,
                                  : pixel;
   priority = (entry & 0x80) != 0;
   return palette_.colour(view.palette, u8(entry & 0xFF));
+}
+
+bool Machine::ulaClipped(int x, int y) const {
+  return x < ulaClip_[0] || x > ulaClip_[1] || y < ulaClip_[2] ||
+         y > ulaClip_[3];
 }
 
 u32 Machine::tilemapPixel(const TilemapView& view, int x, int y,

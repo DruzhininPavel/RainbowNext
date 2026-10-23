@@ -103,6 +103,10 @@ a multicolour demo renders correctly; `z80test` passes.
       over the ULA per pixel while the ULA still owns the border.
 * [x] Layer 2 clip window (`0x18`, four writes: X1, X2, Y1, Y2, applied to the
       layer coordinates before compositing).
+* [x] ULA clip window (`0x1A`, four writes: X1, X2, Y1, Y2 with inclusive
+      edges, rewound by bit 2 of `0x1C`, applied to the ULA inside the
+      compositor). The boot ROM wipes its boot screen with this register, so it
+      is what turns the grey boot picture black at frame 8288.
 * [x] Sprites — 128 sprites of 16×16 with four or five attribute bytes
       (`0x34`-`0x39`, `0x75`-`0x79`, ports `0x303B`/`0x57`/`0x5B`), a separate
       16K pattern RAM, 8-bit and 4-bit patterns, palette offsets, mirror,
@@ -415,6 +419,34 @@ These are deliberate simplifications, tracked here so they are not forgotten:
     but xpeccy, which does implement it, produces the same picture, so this is
     not what is keeping NextZXOS from starting. Implementing the full remap is
     still worth doing for correctness; it is no longer on the critical path.
+
+    *The clip window closes the boot screen.* The grey picture holds from frame
+    300 to frame 8280 and then the whole display goes black, which looked like a
+    divergence from xpeccy-plus until the register writes at that frame were
+    traced. At frame 8288 the boot ROM writes `0xBF` four times to NR `0x1A`
+    (the ULA clip window), which collapses it to a single pixel, and then walks
+    the window back open one step per frame: `(0x23,0x3B)`, `(0x37,0x4F)`,
+    `(0x26,0x3E)`, `(0x38,0x50)` and so on, with NR `0x18`, `0x19` and `0x1B`
+    following the same pattern. That is the boot screen being wiped by an
+    animated clip window, not a crash.
+
+    NR `0x1A` was not implemented here at all, so the animation was invisible
+    and the black screen looked like a fault. It is implemented now: a four
+    write cycling register (X1, X2, Y1, Y2) with inclusive edges, rewound by bit
+    2 of NR `0x1C`, applied to the ULA inside `renderFrame()`. xpeccy-plus does
+    not implement it, which is why its screen stays grey past frame 20000 -- on
+    this point we are ahead of the reference rather than behind it.
+
+    What the reopened window shows is black, because the firmware clears the
+    screen and goes straight back to the `0x0BC8` key wait without drawing
+    anything into the new window. So the stall is unchanged, only better
+    located: the boot reaches the wipe-and-wait stage and never gets to the
+    stage that fills it.
+
+    The `0x0BC8` loop is also not a timeout. A key press does set FLAGS bit 5 at
+    `0x5C3B`, the routine at `0x0C90` consumes it, and then compares the key
+    code at `0x5C08` against `0x0E` and `0x10` and ignores everything else, so
+    an ordinary character key changes the loop balance and nothing more.
 
 18. A `.nex` loading screen is loaded into memory but never shown: the
     `loadingBar`, `loadingDelay` and `startDelay` fields are parsed and ignored,

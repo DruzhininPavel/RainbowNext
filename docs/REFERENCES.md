@@ -125,9 +125,23 @@ The result recorded in `docs/ROADMAP.md` gap 17 is that a stock System/Next card
 gives a byte-identical ULA bank in both emulators, which is what closed the
 "the boot screen is garbage" question: the picture is the firmware's, not ours.
 
+Two practical warnings. Without `NXNOFRAMES=1` the bench writes one
+`frame_N.txt` per frame, which is several gigabytes for a long run -- always set
+it unless the pictures are genuinely needed, and use `NXFRAMEFROM=n` plus no
+`NXNOFRAMES` when only a window of frames matters. And the bench only takes the
+`fw:` handover path when the two ROM images are passed with `fw:` and a comma;
+passing the card image is what selects the SD-card boot, via `NXSD`. Keys can be
+injected with `NXKEYS="<frame>:<keys>"`, and `TRACE=n` with `TRACEAT=f` turns on
+an instruction trace around one frame.
+
 Two caveats: the bench's `fw:` mode is a test harness, not a full boot, so it
 does not prove that NextZXOS *starts*; and xpeccy-plus is GPL-3.0, so it is
-only ever run as a separate program -- nothing from it is linked or copied.
+only ever run as a separate program -- nothing from it is linked or copied. It
+is also not a complete Next: it does not implement the ULA clip window
+(NR `0x1A`), so its boot screen stays visible past frame 20000 where a real Next
+has already wiped it with the clip-window animation described in
+`docs/ROADMAP.md` gap 17. Divergence from it is therefore only a defect when the
+register in question is one it actually implements.
 
 
 

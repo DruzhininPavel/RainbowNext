@@ -338,6 +338,8 @@ private:
   // One tilemap pixel, or Transparent. ulaOver reports the tile's own
   // "ULA on top" attribute, which the ULA needs to combine with the tilemap.
   u32 tilemapPixel(const TilemapView& view, int x, int y, bool& ulaOver) const;
+  // The ULA clip window is inclusive on all four edges.
+  bool ulaClipped(int x, int y) const;
   void renderUlaRow(int y, std::array<u32, ScreenWidth>& row) const;
   // Timex hi-res: 512 pixels per line, eight bits from the screen file and eight
   // from the file 8K above it. The framebuffer is 256 wide, so each output pixel
@@ -419,6 +421,9 @@ private:
   // Register 0x1B does the same for the tilemap.
   std::array<u8, 4> tilemapClip_ = {0, 159, 0, 255};
   u8 tilemapClipIndex_ = 0;
+  // And register 0x1A for the ULA (and LoRes, which shares its layer).
+  std::array<u8, 4> ulaClip_ = {0, 255, 0, 191};
+  u8 ulaClipIndex_ = 0;
   // Bit per pixel: the layers that hide a sprite at that position.
   std::vector<u8> occluders_;
   // One scanline of the collision map: a sprite has already drawn there.
