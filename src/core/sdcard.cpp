@@ -6,11 +6,31 @@ namespace rainbow {
 
 namespace {
 
-// A template for the card's CSD, taken from the shape a real 4 GB SDHC reports:
-// CSD version 2.0, 512-byte blocks, SDHC addressing. Only C_SIZE is rewritten
-// to match the image, because that is the one field a driver sanity-checks.
+// A template for the CSD of a card that is large enough to be an SDHC, taken
+// from the shape a real 4 GB card reports: CSD version 2.0, 512-byte blocks,
+// sector addressing. Only C_SIZE is rewritten to match the image, because that
+// is the one field a driver sanity-checks.
 constexpr u8 kCsdTemplate[16] = {0x40, 0x0E, 0x00, 0x32, 0x5B, 0x59, 0x00, 0x00,
                                  0x1D, 0x3A, 0x7F, 0x80, 0x0A, 0x40, 0x00, 0x01};
+
+// The byte the CSD and CID carry last: a seven-bit CRC over the fifteen bytes
+// before it, shifted up one place with the end bit set. It is only checked
+// before a card switches to SPI mode, so a driver that talks SPI ignores it --
+// but a card that fills the field with a constant is not a card, and a bus
+// trace of one is a false witness.
+u8 crc7EndByte(const u8* data, int count) {
+  u8 crc = 0;
+  for (int i = 0; i < count; ++i) {
+    u8 byte = data[i];
+    for (int bit = 0; bit < 8; ++bit) {
+      crc = u8(crc << 1);
+      if ((u8(byte ^ crc) & 0x80) != 0) crc ^= 0x09;
+      byte = u8(byte << 1);
+    }
+    crc = u8(crc & 0x7F);
+  }
+  return u8((crc << 1) | 0x01);
+}
 
 // Card identification: manufacturer 0x03, OEM "SD", the five-character product
 // name "RNEXT", and a serial. Nothing reads it beyond printing it, but a driver
@@ -201,8 +221,10 @@ void SdCard::execute() {
     appCmd_ = false;
     if (cmd_ == CmdSendOpCondA && wasApp) {
       // ACMD41 is the initialisation handshake: the HCS bit asks for block
-      // addressing, which is what makes the card an SDHC.
-      sdhc_ = (arg_ & 0x40000000u) != 0;
+      // addressing. Only a card above the 2 GiB SDSC ceiling can grant it, so
+      // the answer follows the image as much as the request: a smaller image
+      // stays byte addressed, which is also what its version 1.0 CSD describes.
+      sdhc_ = (arg_ & 0x40000000u) != 0 && announcedSectors() > 0x400000u;
       idle_ = false;
       queue({R1Ready});
       return;
@@ -362,13 +384,41 @@ u8 SdCard::receiveWrite(u8 mosi) {
 }
 
 void SdCard::queueCsd() {
-  u8 csd[16];
-  std::copy(std::begin(kCsdTemplate), std::end(kCsdTemplate), csd);
-  // C_SIZE counts 512 KB units, so it is sectors / 1024 - 1.
-  const u32 csize = sectors() >= 1024 ? sectors() / 1024 - 1 : 0;
-  csd[7] = u8((csize >> 16) & 0x3F);
-  csd[8] = u8((csize >> 8) & 0xFF);
-  csd[9] = u8(csize & 0xFF);
+  u8 csd[16] = {};
+  if (sdhc_) {
+    std::copy(std::begin(kCsdTemplate), std::end(kCsdTemplate), csd);
+    // Version 2.0 counts 512 KB units in C_SIZE, so it is sectors / 1024 - 1.
+    const u32 csize = announcedSectors() >= 1024 ? announcedSectors() / 1024 - 1 : 0;
+    csd[7] = u8((csize >> 16) & 0x3F);
+    csd[8] = u8((csize >> 8) & 0xFF);
+    csd[9] = u8(csize & 0xFF);
+  } else {
+    // Version 1.0 has no block count, only a capacity:
+    //   (C_SIZE + 1) * 2^(C_SIZE_MULT + 2) * 2^READ_BL_LEN
+    // The multiplier grows until C_SIZE fits the twelve bits the format gives
+    // it, which lands on an announced capacity equal to the image.
+    const u32 sec = announcedSectors();
+    const int blockLen = sec > 0x200000 ? 10 : 9;
+    const u32 blocks = sec >> (blockLen - 9);
+    int mult = 0;
+    while (mult < 7 && (blocks >> (mult + 2)) > 4096) ++mult;
+    u32 csize = (blocks >> (mult + 2)) ? (blocks >> (mult + 2)) - 1 : 0;
+    if (csize > 4095) csize = 4095;
+    csd[0] = 0x00;  // CSD_STRUCTURE 0, the version 1.0 layout
+    csd[1] = 0x26;  // TAAC
+    csd[3] = 0x32;  // TRAN_SPEED, 25 MHz
+    csd[4] = 0x5F;  // CCC high nibbles
+    csd[5] = u8(0x50 | blockLen);
+    csd[6] = u8(0x80 | ((csize >> 10) & 0x03));  // READ_BL_PARTIAL, C_SIZE high
+    csd[7] = u8((csize >> 2) & 0xFF);
+    csd[8] = u8(((csize & 0x03) << 6) | 0x3F);  // C_SIZE low, VDD currents
+    csd[9] = u8(0xFC | ((mult >> 1) & 0x03));
+    csd[10] = u8(((mult & 0x01) << 7) | 0x7F);  // C_SIZE_MULT low, SECTOR_SIZE
+    csd[11] = 0x80;                             // WRITE_BL_PARTIAL
+    csd[12] = u8(0x08 | (blockLen >> 2));       // R2W_FACTOR 2, WRITE_BL_LEN
+    csd[13] = u8((blockLen & 0x03) << 6);
+  }
+  csd[15] = crc7EndByte(csd, 15);
 
   std::vector<u8> block;
   block.reserve(3 + 16 + 2);
@@ -387,7 +437,8 @@ void SdCard::queueCid() {
   block.push_back(R1Ready);
   block.push_back(0xFF);
   block.push_back(DataToken);
-  block.insert(block.end(), std::begin(kCid), std::end(kCid));
+  block.insert(block.end(), std::begin(kCid), std::begin(kCid) + 15);
+  block.push_back(crc7EndByte(kCid, 15));
   block.push_back(0xFF);
   block.push_back(0xFF);
   queue(block);

@@ -11,6 +11,7 @@ using rainbow::MachineType;
 using rainbow::SdCard;
 using rainbow::u16;
 using rainbow::u32;
+using rainbow::u64;
 using rainbow::u8;
 
 namespace {
@@ -124,9 +125,12 @@ struct SpiBus {
     return false;
   }
 
-  // Reads one block and returns its 512 bytes.
+  // Reads one block and returns its 512 bytes. A card large enough to be an
+  // SDHC takes a sector number here and a byte offset otherwise, exactly as a
+  // real driver has to know.
   std::vector<u8> readBlock(u32 lba) {
-    frame(17, lba);
+    const bool sdhc = machine.sdCard().announcedSectors() > 0x400000u;
+    frame(17, sdhc ? lba : lba * 512u);
     response();
     if (response() != 0xFE) return {};
     std::vector<u8> out;
@@ -212,10 +216,60 @@ TEST(sdcard_initialises_through_acmd41) {
 
   const Exchange ocr = command(card, 58, 0);
   CHECK_EQ(ocr.bytes[0], u8(0x00));
-  // Bit 7 is the power-up status and bit 6 is CCS: a ready SDHC card reports
-  // both, and a driver that needs them together sees an SDSC card otherwise.
-  CHECK_EQ(ocr.bytes[1], u8(0xC0));
+  // Bit 7 is the power-up status. Bit 6 is CCS, which the card may only set if
+  // it is too big to be byte addressed; a 32 KiB image is not, so asking for
+  // HCS gets a ready card that still addresses in bytes.
+  CHECK_EQ(ocr.bytes[1], u8(0x80));
   CHECK_EQ(ocr.bytes[2], u8(0xFF));
+}
+
+// A card above the 2 GiB SDSC ceiling is the only kind that may grant HCS, and
+// it is the only kind that reports a version 2.0 CSD.
+TEST(sdcard_announces_sdhc_above_two_gigabytes) {
+  SdCard card;
+  std::string error;
+  CHECK(card.load(makeCard(), error));
+  card.setAnnouncedSectors(0x400001);  // one sector over 2 GiB
+  card.select(true);
+  CHECK(ready(card));
+
+  const Exchange ocr = command(card, 58, 0);
+  CHECK_EQ(ocr.bytes[0], u8(0x00));
+  CHECK_EQ(ocr.bytes[1], u8(0xC0));
+
+  const Exchange csd = command(card, 9, 0, 16);
+  size_t token = 0;
+  while (token < csd.bytes.size() && csd.bytes[token] != 0xFE) ++token;
+  CHECK(token + 16 <= csd.bytes.size());
+  if (token + 16 <= csd.bytes.size()) CHECK_EQ(csd.bytes[token + 1] & 0xC0, u8(0x40));
+}
+
+// The version 1.0 CSD describes the image in blocks, not in 512 KB units, and a
+// driver that reads it back has to see the capacity it is talking to.
+TEST(sdcard_reports_a_version_1_csd_for_a_byte_addressed_card) {
+  SdCard card;
+  std::string error;
+  CHECK(card.load(makeCard(4096), error));  // 2 MB
+  card.select(true);
+  CHECK(ready(card));
+
+  const Exchange csd = command(card, 9, 0, 16);
+  size_t token = 0;
+  while (token < csd.bytes.size() && csd.bytes[token] != 0xFE) ++token;
+  CHECK(token + 16 <= csd.bytes.size());
+  if (token + 16 > csd.bytes.size()) return;
+
+  const u8* c = &csd.bytes[token + 1];
+  CHECK_EQ(c[0] & 0xC0, u8(0x00));  // CSD_STRUCTURE 0: version 1.0
+  const u32 csize = (u32(c[6] & 0x03) << 10) | (u32(c[7]) << 2) | (u32(c[8]) >> 6);
+  const u32 mult = (u32(c[9] & 0x03) << 1) | (u32(c[10]) >> 7);
+  const u32 blockLen = u32(c[5] & 0x0F);  // READ_BL_LEN, the log2 of the block
+  const u64 bytes = u64(csize + 1) << (mult + 2 + blockLen);
+  CHECK_EQ(u64(bytes), u64(4096) * 512);
+
+  // WRITE_BL_LEN must describe the same block size as READ_BL_LEN.
+  const u32 writeLen = (u32(c[12] & 0x03) << 2) | (u32(c[13]) >> 6);
+  CHECK_EQ(u32(writeLen), u32(blockLen));
 }
 
 TEST(sdcard_reads_a_single_block) {
@@ -225,8 +279,8 @@ TEST(sdcard_reads_a_single_block) {
   card.select(true);
   CHECK(ready(card));
 
-  // SDHC addresses in sectors, so sector 2 starts at byte 1024.
-  const Exchange read = command(card, 17, 2, 512);
+  // A card this small is byte addressed, so sector 2 starts at byte 1024.
+  const Exchange read = command(card, 17, 1024, 512);
   CHECK_EQ(read.bytes[0], u8(0x00));
   CHECK_EQ(read.bytes[1], u8(0xFF));
 
@@ -249,7 +303,8 @@ TEST(sdcard_rejects_a_read_past_the_end) {
   card.select(true);
   CHECK(ready(card));
 
-  const Exchange read = command(card, 17, 4);
+  // Four sectors are 2048 bytes, so byte 2048 is one past the end.
+  const Exchange read = command(card, 17, 2048);
   CHECK_EQ(read.bytes[0], u8(0x40));  // parameter error
 }
 
@@ -260,7 +315,7 @@ TEST(sdcard_writes_a_single_block) {
   card.select(true);
   CHECK(ready(card));
 
-  const Exchange start = command(card, 24, 1);
+  const Exchange start = command(card, 24, 512);
   CHECK_EQ(start.bytes[0], u8(0x00));
 
   // The card is now waiting for the data token, then 512 payload bytes and two
@@ -273,7 +328,7 @@ TEST(sdcard_writes_a_single_block) {
   CHECK_EQ(card.transfer(0xFF), u8(0x05));  // data accepted
 
 
-  const Exchange read = command(card, 17, 1, 512);
+  const Exchange read = command(card, 17, 512, 512);
   size_t token = 0;
   while (token < read.bytes.size() && read.bytes[token] != 0xFE) ++token;
   CHECK(token + 1 < read.bytes.size());
@@ -293,7 +348,7 @@ TEST(sdcard_reads_multiple_blocks_until_cmd12) {
 
   // CMD18 has no length: the response is followed by block after block, each
   // one a token, 512 bytes and two CRC bytes.
-  const Exchange read = command(card, 18, 2, 1024);
+  const Exchange read = command(card, 18, 2 * 512, 1024);
   CHECK_EQ(read.bytes[0], u8(0x00));
 
   constexpr size_t BlockBytes = 1 + 512 + 2;
@@ -310,7 +365,7 @@ TEST(sdcard_reads_multiple_blocks_until_cmd12) {
   const Exchange stop = command(card, 12, 0);
   CHECK_EQ(stop.bytes[0], u8(0x00));
 
-  const Exchange single = command(card, 17, 7, 512);
+  const Exchange single = command(card, 17, 7 * 512, 512);
   size_t token = 0;
   while (token < single.bytes.size() && single.bytes[token] != 0xFE) ++token;
   CHECK(token + 1 < single.bytes.size());
@@ -324,7 +379,7 @@ TEST(sdcard_writes_multiple_blocks_until_the_stop_token) {
   card.select(true);
   CHECK(ready(card));
 
-  const Exchange start = command(card, 25, 4);
+  const Exchange start = command(card, 25, 4 * 512);
   CHECK_EQ(start.bytes[0], u8(0x00));
 
   // Each block is the data token, 512 bytes and two CRC bytes. The card answers
@@ -342,13 +397,13 @@ TEST(sdcard_writes_multiple_blocks_until_the_stop_token) {
   for (int i = 0; i < 3; ++i) card.transfer(0xFF);
   CHECK_EQ(card.transfer(0xFD), u8(0x05));
 
-  const Exchange first = command(card, 17, 4, 512);
+  const Exchange first = command(card, 17, 4 * 512, 512);
   size_t token = 0;
   while (token < first.bytes.size() && first.bytes[token] != 0xFE) ++token;
   CHECK(token + 1 < first.bytes.size());
   if (token + 1 < first.bytes.size()) CHECK_EQ(first.bytes[token + 1], u8(0x11));
 
-  const Exchange second = command(card, 17, 5, 512);
+  const Exchange second = command(card, 17, 5 * 512, 512);
   token = 0;
   while (token < second.bytes.size() && second.bytes[token] != 0xFE) ++token;
   CHECK(token + 1 < second.bytes.size());
@@ -367,19 +422,20 @@ TEST(sdcard_reports_an_unknown_command) {
 TEST(sdcard_reports_its_size_in_the_csd) {
   SdCard card;
   std::string error;
-  CHECK(card.load(makeCard(4096), error));  // 2 MB, enough for a non-zero C_SIZE
+  CHECK(card.load(makeCard(), error));
+  card.setAnnouncedSectors(0x400001);
   card.select(true);
   CHECK(ready(card));
 
-  const Exchange csd = command(card, 9, 0);
+  const Exchange csd = command(card, 9, 0, 16);
   size_t token = 0;
   while (token < csd.bytes.size() && csd.bytes[token] != 0xFE) ++token;
   CHECK(token + 1 + 16 <= csd.bytes.size());
   if (token + 1 + 16 <= csd.bytes.size()) {
     const u32 csize = (u32(csd.bytes[token + 8] & 0x3F) << 16) |
                       (u32(csd.bytes[token + 9]) << 8) | csd.bytes[token + 10];
-    // 4096 sectors / 1024 - 1 = 3.
-    CHECK_EQ(csize, u32(3));
+    // 0x400001 sectors / 1024 - 1 = 4095.
+    CHECK_EQ(csize, u32(4095));
   }
 }
 
@@ -390,14 +446,14 @@ TEST(sdcard_deselect_abandons_a_write_in_flight) {
   card.select(true);
   CHECK(ready(card));
 
-  command(card, 24, 2);
+  command(card, 24, 2 * 512);
   card.transfer(0xFE);
   card.transfer(0x11);
   card.select(false);
   card.select(true);
 
   // The half-written payload must not have reached the image.
-  const Exchange read = command(card, 17, 2, 512);
+  const Exchange read = command(card, 17, 2 * 512, 512);
   size_t token = 0;
   while (token < read.bytes.size() && read.bytes[token] != 0xFE) ++token;
   if (token + 1 < read.bytes.size()) CHECK_EQ(read.bytes[token + 1], u8(0x00));
