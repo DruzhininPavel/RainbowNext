@@ -1329,11 +1329,11 @@ u8 Machine::readNextReg(u8 reg) const {
     const u32 line = u32(tstates_ % tstatesPerFrame_) / tstatesPerLine_;
     return reg == 0x1E ? u8(line) : u8(line >> 8);
   }
-  if (reg == 0x06) {
-    // Bit 2 is the live configuration-mode flag, not the stored byte: the file
-    // is reset with it clear while the machine can still be in the mode.
-    return u8((next_.read(0x06) & 0xFB) | (configMode_ ? 0x04 : 0x00));
-  }
+  // Register 0x06 is stored as written, bit 2 included. The firmware sets the
+  // bit while the mode is on and it stays set afterwards, which is what the
+  // boot ROM's read-modify-write of the register expects: composing the bit
+  // from the live mode instead makes the ROM read 0x00 where the hardware
+  // answers 0x04 and it writes a different value from the first one onwards.
   if (reg == 0x08) {
     // Bit 7 reports whether port 0x7FFD is still unlocked, which is machine
     // state rather than something the register file holds: a write of the bit
@@ -1343,6 +1343,19 @@ u8 Machine::readNextReg(u8 reg) const {
   if (reg == 0x0A) {
     // Bit 2 is reserved on the Next and reads back as zero.
     return u8(next_.read(0x0A) & 0xFB);
+  }
+  // The clip windows are four-entry rings and a read answers the entry the next
+  // write would land on, not the one just written. The boot ROM walks a window
+  // by writing a corner and reading the next one back, so returning the stored
+  // byte instead of the ring makes it read the corner it just wrote every time.
+  if (reg == 0x18) return layer2Clip_[layer2ClipIndex_ & 0x03];
+  if (reg == 0x19) return sprites_.clip()[sprites_.clipIndex() & 0x03];
+  if (reg == 0x1A) return ulaClip_[ulaClipIndex_ & 0x03];
+  if (reg == 0x1B) return tilemapClip_[tilemapClipIndex_ & 0x03];
+  if (reg == 0x1C) {
+    // The four write positions packed two bits each, tilemap in the high pair.
+    return u8((tilemapClipIndex_ << 6) | (ulaClipIndex_ << 4) |
+              (u8(sprites_.clipIndex() & 0x03) << 2) | (layer2ClipIndex_ & 0x03));
   }
   if (reg == 0x69) {
     // Composed from the classic ports, exactly like NR 0x8E: bit 6 is the Layer
@@ -1534,17 +1547,17 @@ void Machine::writeNextReg(u8 reg, u8 value) {
     case 0x18: // Layer 2 clip window, four writes: X1, X2, Y1, Y2
       next_.write(reg, value);
       layer2Clip_[layer2ClipIndex_ & 0x03] = value;
-      ++layer2ClipIndex_;
+      layer2ClipIndex_ = u8((layer2ClipIndex_ + 1) & 0x03);
       return;
     case 0x1B: // tilemap clip window, four writes: X1, X2, Y1, Y2
       next_.write(reg, value);
       tilemapClip_[tilemapClipIndex_ & 0x03] = value;
-      ++tilemapClipIndex_;
+      tilemapClipIndex_ = u8((tilemapClipIndex_ + 1) & 0x03);
       return;
     case 0x1A: // ULA clip window, four writes: X1, X2, Y1, Y2
       next_.write(reg, value);
       ulaClip_[ulaClipIndex_ & 0x03] = value;
-      ++ulaClipIndex_;
+      ulaClipIndex_ = u8((ulaClipIndex_ + 1) & 0x03);
       return;
     case 0x69: // Layer 2 control is mostly a mirror of the classic ports, so
                // the write is copied into them as well: bit 6 is the Layer 2

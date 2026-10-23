@@ -86,6 +86,7 @@ public:
   void writeClip(u8 value);
   void resetClipIndex() { clipIndex_ = 0; }
   const std::array<u8, 4>& clip() const { return clip_; }
+  u8 clipIndex() const { return clipIndex_; }
 
   // Port 0x303B read: bit 1 reports that the per-line sprite budget ran out,
   // bit 0 that two sprites drew over each other. Reading clears both.
