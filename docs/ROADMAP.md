@@ -329,24 +329,28 @@ These are deliberate simplifications, tracked here so they are not forgotten:
     the emulator exits. The SPI clock is not modelled: a command is answered on
     the next byte instead of after the few hundred cycles a real card needs, so
     a driver that polls for readiness simply sees it at once.
-17. DivMMC on the Next is unfinished and the module therefore ships unplugged.
-    The hook, the automap entry points and the SD card now all work: the boot
-    ROM reaches the divMMC ROM's `RST 0x08` handler, the card answers with a
-    valid R1 and the handler returns. The remaining break is inside the boot
-    ROM itself. Its glue at ROM page 2 `0x3F18`-`0x3F3D` ends with
-    `PUSH 0x4804 / JP 0x3CFC`, and ROM page 2 `0x3CFC` holds
-    `NEXTREG 0x8E,3` -- `ED 91 8E 03` and then zero fill. The write selects
-    ROM page 3, so the next fetch is `0x3D00`, which in the `+3DOS` ROM is
-    zero fill too (verified byte-identical to `plus3.rom` from `0x3D00` on), and
-    the CPU NOP-slides out of page 3 into the `+3DOS` soft reset instead of
-    returning to `0x4804`. ROM page 3 `0x3CFC` is `C9`, exactly the `RET` the
-    glue needs, so the trampoline only works if ROM 3 is already selected when
-    `JP 0x3CFC` runs. Working out why a real Next is in that state -- the ROM
-    bytes are the same, so it is not an image difference -- is what is left.
-    The plan is still to finish this as a separate out-of-tree plugin over the
-    expansion bus rather than keep it on the Next's boot path. Its status port
-    at `0x1F` is also an approximation (card detect and busy only); the exact
-    bit layout of a real board was not available.
+17. NextZXOS does not boot: the Next's boot ROM runs its full power-on
+    sequence and then soft-resets back to itself forever, so the machine ends up
+    in plain 48K BASIC with no `C:` drive. The boot ROM itself is correct -- it
+    is byte-identical to the official `enNextZX.rom`, and the NextReg `0x8E`
+    paging trampoline, the RAM probe and the `LDIR` copies all behave. The
+    observed cycle is `0x0000` -> `0x00EF` (init, RAM test over all 112 8K
+    pages) -> `0x018E` -> `0x3E17` paging -> `0x1F3D` (`KEY-INT` idle) -> back
+    through `0x3E17` -> `0x0000`, where the divMMC hook unmaps itself and the
+    bank 3 reset stub at `0x3BE8` writes `NEXTREG 0x02,0x81` (soft reset). That
+    reset is deliberate: the boot ROM only soft-resets once it has something to
+    boot, so the real fault is that it never finds NextZXOS. Its SD driver sits
+    at ROM page 2 `0x18D6`-`0x1AE8` (`0x19DD` is the CMD0/CMD8/CMD55/ACMD41
+    init, `0x1904` the multi-block read) and none of it is ever called. The only
+    card traffic is a stream of malformed `CMD17` frames with garbage arguments
+    (`51 47 D5 F9 AF`), which means something is shifting memory through `0xEB`
+    rather than driving the driver. Finding that caller is what is left. An
+    earlier diagnosis blamed a `JP 0x3CFC` trampoline in ROM page 2; that
+    address is never reached and the diagnosis was wrong. The plan is still to
+    finish divMMC as a separate out-of-tree plugin over the expansion bus rather
+    than keep it on the Next's boot path. Its status port at `0x1F` is also an
+    approximation (card detect and busy only); the exact bit layout of a real
+    board was not available.
 18. A `.nex` loading screen is loaded into memory but never shown: the
     `loadingBar`, `loadingDelay` and `startDelay` fields are parsed and ignored,
     so the program starts at once instead of after an animated bar. The

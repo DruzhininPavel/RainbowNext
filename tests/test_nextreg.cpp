@@ -58,15 +58,33 @@ TEST(nextreg_mmu_defaults_match_the_soft_reset_state) {
 TEST(nextreg_read_only_registers_keep_their_values) {
   Machine m(MachineType::Next);
 
-  CHECK_EQ(m.readNextReg(0x00), 0x08); // an emulator
-  CHECK_EQ(m.readNextReg(0x01), 0x30); // core 3.0
+  CHECK_EQ(m.readNextReg(0x00), 0x0A); // a ZX Spectrum Next
+  CHECK_EQ(m.readNextReg(0x01), 0x31); // core 3.01
 
   m.writeNextReg(0x00, 0xAA);
   m.writeNextReg(0x01, 0xBB);
   m.writeNextReg(0x1E, 0xCC);
-  CHECK_EQ(m.readNextReg(0x00), 0x08);
-  CHECK_EQ(m.readNextReg(0x01), 0x30);
+  CHECK_EQ(m.readNextReg(0x00), 0x0A);
+  CHECK_EQ(m.readNextReg(0x01), 0x31);
   CHECK_EQ(m.readNextReg(0x1E), 0x00);
+}
+
+TEST(nextreg_02_raises_an_nmi_without_resetting) {
+  Machine m(MachineType::Next);
+  m.cpu().regs().pc = 0x1234;
+  m.cpu().regs().sp = 0x8000;
+
+  // Bit 2 is the divMMC NMI and bit 3 the multiface one; neither is a reset.
+  m.writeNextReg(0x02, 0x04);
+  CHECK_EQ(m.cpu().regs().pc, 0x0066);
+  CHECK(!m.cpu().regs().iff1);
+  CHECK_EQ(m.cpu().regs().sp, u16(0x7FFE));
+  CHECK_EQ(m.memRead(u16(0x7FFE), 0), u8(0x34));
+  CHECK_EQ(m.memRead(u16(0x7FFF), 0), u8(0x12));
+
+  m.cpu().regs().pc = 0x4321;
+  m.writeNextReg(0x02, 0x08);
+  CHECK_EQ(m.cpu().regs().pc, 0x0066);
 }
 
 TEST(nextreg_ports_select_and_expose_a_register) {

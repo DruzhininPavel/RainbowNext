@@ -632,6 +632,13 @@ TEST(divmmc_next_selects_the_card_through_port_e7) {
   // All bits high is the released state the driver leaves behind.
   CHECK(div.ioWrite(DivMmc::PortUnmap, 0xFF, 0));
   CHECK(!div.card().selected());
+
+  // Only one device may be selected at a time: pulling two bits low is not a
+  // valid chip select and leaves the bus alone.
+  CHECK(div.ioWrite(DivMmc::PortUnmap, 0xFC, 0));
+  CHECK(!div.card().selected());
+  CHECK(div.ioWrite(DivMmc::PortUnmap, 0xFB, 0));  // the Pi SPI pair
+  CHECK(!div.card().selected());
 }
 
 TEST(divmmc_next_data_port_reads_clock_the_card) {

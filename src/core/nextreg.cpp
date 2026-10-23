@@ -50,13 +50,13 @@ bool NextRegFile::isReadOnly(u8 reg) {
 
 u8 NextRegFile::read(u8 reg) const {
   switch (reg) {
-    case 0x00: return 0x08; // an emulator, not a DE1A/DE2A board
-    case 0x01: return 0x30; // core 3.0
+    case 0x00: return 0x0A; // ZX Spectrum Next
+    case 0x01: return 0x31; // core 3.01
     // Exactly one of bits 1:0 says how the machine last came up; the boot ROM
     // reads it to tell a cold start from an F4.
     case 0x02: return lastResetHard_ ? 0x02 : 0x01;
     case 0x08: return 0x00;
-    case 0x0E: return 0x00;
+    case 0x0E: return 0x0A; // core 3.01.10
     case 0x0F: return 0x00;
     case 0x1C: case 0x1D: case 0x1E: case 0x1F: return 0x00;
     default: return values_[reg];

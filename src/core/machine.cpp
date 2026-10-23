@@ -1103,7 +1103,9 @@ u8 Machine::readNextReg(u8 reg) const {
 
 void Machine::writeNextReg(u8 reg, u8 value) {
   switch (reg) {
-    case 0x02: // bit 1 asks for a hard reset, bit 0 for a soft one
+    case 0x02: // bit 3 raises the multiface NMI, bit 2 the divMMC one, bit 1
+               // asks for a hard reset and bit 0 for a soft one
+      if ((value & 0x0C) != 0) cpu_.nmi();
       if ((value & 0x03) != 0) reset((value & 0x02) == 0);
       return;
     case 0x0A:   // peripheral 5: the divMMC automap master switch is bit 4

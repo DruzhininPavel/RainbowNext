@@ -168,10 +168,11 @@ bool DivMmc::ioWrite(u16 port, u8 value, u32) {
     // On the Next the chip select has a port of its own and 0xEB shifts a byte
     // through the card: bit 0 low selects the SD card, high releases it.
     if (low == PortUnmap) {
-      // Bit 0 is the SD card 0 select and bit 1 is card 1's; a board with one
-      // socket answers on either, which is what the Next does when it falls
-      // back to the second slot.
-      card_.select((value & 0x03) != 0x03);
+      // A device is selected by pulling exactly one of bits 3:0 low; 0xFF
+      // releases the bus. Socket 0 (bit 0) and socket 1 (bit 1) both reach the
+      // single card we emulate, so either one answers.
+      const u8 selected = u8(~value) & 0x0F;
+      card_.select(selected == 0x01 || selected == 0x02);
       return true;
     }
     if (low == PortData) {
