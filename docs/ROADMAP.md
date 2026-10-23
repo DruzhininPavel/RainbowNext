@@ -470,6 +470,44 @@ These are deliberate simplifications, tracked here so they are not forgotten:
     page 5" through the MMU and finding stale boot-UI text there is expected,
     not a symptom.
 
+    *Idle parity is exact, and the frame clock is exact.* Running the same card
+    against the bench for 1200 frames without touching the keyboard gives a
+    framebuffer that differs from ours by **zero pixels**, with matching colour
+    histograms, and a 2 MiB RAM image in which only **14 bytes** differ: three
+    in page `0x01` (first at `0x1F0C`, `0x3E` against `0x8B`) and nine in page
+    `0x0F` (first at `0x047C`, `0x00` against `0x02`). Both are consistent with
+    floating-bus read-back and are not load-bearing. Frame length matches
+    exactly too: the bench advances 567 263 of its own ticks per frame, and its
+    counter runs at eight times the Z80 rate, so it is 70 908 T-states per frame
+    -- the same number in `timingsFor()`. There is no line-timing discrepancy
+    between the two implementations; the 228-T-state line above is the real
+    hardware figure and the bench agrees with it.
+
+    Pages `0x0A`, `0x0B` and `0x0E` cannot be compared through the bench's
+    `dump.bin`, because it substitutes its own BRAM shadow for them and that
+    shadow is all zeros in this configuration. Their apparent "divergence" is a
+    dump artefact, not a difference: the bench's video fetch reads the ordinary
+    RAM pages through `nxv_bram()` and only its CPU-side path redirects to the
+    shadow, so the bytes we hold are the ones actually being displayed.
+
+    *A keypress is the one input that diverges.* Holding SPACE at frame 500
+    wakes the guest out of `PAUSE 0` in both implementations, and the decode
+    itself is provably correct: our instruction trace through the interrupt and
+    the ROM's `KEY_SCAN` loop is structurally identical to the bench's, with the
+    same `19F7` entry, the same `RST 0x38` chain through `0x0045`-`0x0056`, the
+    same `0x2009`-`0x2422` scan routine, the same `BC = FEFE, FDFE, FBFE, F7FE,
+    EFFE` row walk and the same `SP`. The difference is what the guest does
+    afterwards. Ours reacts one frame early (its screen changes at frame 502,
+    the bench's at 503) and then stops, while the bench spends frames 503-528
+    redrawing -- the pixel difference climbs from 2 947 to 20 055 and then
+    freezes, which is the bench finishing a new page while we have already
+    stopped. It is not a blank screen: our page `0x0A` does hold a drawn dialog,
+    including the title bar, and our framebuffer carries four colours with the
+    same paper as the bench. What differs is the layout and one palette entry --
+    we paint 1 179 pixels bright red where the bench paints 1 050 cyan and 128
+    red -- so the remaining fault is in which page of the dialog we end up
+    showing, not in whether we draw one.
+
     What is still open is why the OS stops at an empty text page instead of
     starting the desktop. The card goes untouched after frame 44: 197 `CMD17`
     reads load `AUTOEXEC.1ST`, `RTC.SYS`, `RTCSIG.SYS` and `BIOSEXT.BIN`, and
