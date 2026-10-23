@@ -298,6 +298,8 @@ TEST(next_ula_screen_bank_follows_port_7ffd) {
   CHECK_EQ(m.ramBank(), 3);
 }
 
+// Register 0x8E exposes the whole 128K memory map at once, which is what the
+// Next firmware uses instead of poking 0x7FFD and 0x1FFD one bit at a time.
 TEST(nextreg_machine_type_needs_the_unlock_bit) {
   Machine m(MachineType::Next);
 

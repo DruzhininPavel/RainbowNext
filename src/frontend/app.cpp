@@ -104,7 +104,7 @@ bool loadRomFromAnywhere(Machine& machine, MachineType type, std::string* used) 
 // at all. It sits next to the main ROM and is not a per-machine setting: every
 // Next needs the same file.
 bool loadDivMmcRomFor(Machine& machine, const std::string& dir, std::string* used) {
-  for (const char* base : {"nxtmmc", "divmmc"}) {
+  for (const char* base : {"nxtmmc", "nextmmc", "divmmc", "esxdos"}) {
     std::string error;
     const std::string path = dir + base + ".rom";
     if (machine.loadDivMmcRom(path, error)) {

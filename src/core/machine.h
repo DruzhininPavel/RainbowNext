@@ -275,6 +275,8 @@ private:
   u8 memReadBase(u16 addr, u32 t);
   void memWriteBase(u16 addr, u8 value, u32 t);
   void installPeripherals();
+  // Push NextRegs 0x0A and 0xB8-0xBB into the divMMC module.
+  void syncDivMmcAutomap();
   void refreshCartridge();
 
   void renderFrame();

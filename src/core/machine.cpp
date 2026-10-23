@@ -1069,6 +1069,17 @@ void Machine::installPeripherals() {
   expansion_.add(std::make_unique<ZxPrinter>(), false);
   expansion_.add(std::make_unique<Cartridge>(), false);
   refreshCartridge();
+  syncDivMmcAutomap();
+}
+
+// The automap is board state that lives in the Next register file: the master
+// switch is 0x0A bit 4 and 0xB8-0xBB say which addresses are entry points.
+// A classic machine has no such registers, so there the module is only useful
+// with automap on.
+void Machine::syncDivMmcAutomap() {
+  divmmc_.setAutomap(!isNext() || (next_.read(0x0A) & 0x10) != 0);
+  divmmc_.setEntryPoints(next_.read(0xB8), next_.read(0xB9), next_.read(0xBA),
+                         next_.read(0xBB));
 }
 
 void Machine::refreshCartridge() {
