@@ -20,6 +20,14 @@ void NextRegFile::reset(bool hard) {
     // programming colours.
     values_[0x85] = values_[0x89] = 0x8F;
     values_[0x86] = values_[0x87] = values_[0x88] = 0xFF;
+    // The rest of the power-on state the boot ROM reads back before it has
+    // programmed anything: machine type 3 with 3.5 MHz timing, joysticks from
+    // the keyboard, the 48K ULA, divMMC automap off, and 0x7F all ones.
+    values_[0x03] = 0x33;
+    values_[0x05] = 0x41;
+    values_[0x08] = 0x10;
+    values_[0x0A] = 0x01;
+    values_[0x7F] = 0xFF;
   }
 
   values_[0x02] &= 0x80;                  // the ESP reset bit latches

@@ -373,11 +373,18 @@ TEST(nextreg_machine_type_needs_the_unlock_bit) {
   Machine m(MachineType::Next);
 
   CHECK_EQ(m.readNextReg(0x03), 0x33); // +2A/+3 timing, +2A/+3 type
-  m.writeNextReg(0x03, 0x60);
+  m.writeNextReg(0x03, 0x20);          // locked: the timing bits do not move
   CHECK_EQ(m.readNextReg(0x03), 0x33);
 
-  m.writeNextReg(0x03, 0xE0); // unlock, then ask for 110 timing
-  CHECK_EQ(m.readNextReg(0x03), 0x63);
+  m.writeNextReg(0x03, 0xA0); // unlock, then ask for timing 2
+  CHECK_EQ(m.readNextReg(0x03), 0x23);
+
+  // The timing is clamped to the four modes the hardware has: 0 means 1 and
+  // anything above 4 means 3.
+  m.writeNextReg(0x03, 0x80);
+  CHECK_EQ(m.readNextReg(0x03), 0x13);
+  m.writeNextReg(0x03, 0xE0);
+  CHECK_EQ(m.readNextReg(0x03), 0x33);
 }
 
 TEST(nextreg_turbo_gives_the_cpu_more_work_per_frame) {

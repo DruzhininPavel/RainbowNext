@@ -1407,12 +1407,28 @@ void Machine::writeNextReg(u8 reg, u8 value) {
       return;
     }
     case 0x03: {
-      // The display timing bits are locked unless bit 7 unlocks them.
+      // The display timing bits only move while bit 7 unlocks them and bit 3 of
+      // the stored value is clear, and the timing is clamped to the four modes
+      // the hardware knows: 0 reads as 1 and anything above 4 as 3.
       u8 type = next_.read(0x03);
-      if ((value & 0x80) != 0) type = u8((type & 0x8F) | (value & 0x70));
+      if ((value & 0x80) != 0 && (type & 0x08) == 0 && (value & 0x08) == 0) {
+        u8 timing = u8((value >> 4) & 0x07);
+        if (timing == 0) timing = 1;
+        if (timing > 4) timing = 3;
+        type = u8((type & 0x0F) | (timing << 4));
+        // The Pentagon has no 60 Hz mode, so entering it clears the bit.
+        if (timing == 4) next_.write(0x05, u8(next_.read(0x05) & ~0x04));
+      }
+      // Bit 3 is a toggle rather than data.
+      if ((value & 0x08) != 0) type ^= 0x08;
+      // The low three bits are the configuration-mode selector. Inside the mode
+      // values 1-4 are stored, which is how the boot ROM records the machine it
+      // was told to configure; 7 enters the mode and any other non-zero value
+      // leaves it.
+      if (configMode_ && (value & 0x07) >= 1 && (value & 0x07) <= 4) {
+        type = u8((type & 0xF8) | (value & 0x07));
+      }
       next_.write(0x03, type);
-      // The low three bits are the configuration-mode selector rather than
-      // stored data: 7 enters the mode and any other non-zero value leaves it.
       if ((value & 0x07) == 0x07) {
         configMode_ = true;
       } else if ((value & 0x07) != 0) {
@@ -1422,11 +1438,36 @@ void Machine::writeNextReg(u8 reg, u8 value) {
       updatePaging();
       return;
     }
+    case 0x04: // ROM/RAM bar and the 0x7FFD lock bit
+      next_.write(reg, u8(value & 0x7F));
+      return;
+    case 0x07: // CPU speed: only the two low bits select a mode
+      next_.write(reg, u8(value & 0x03));
+      return;
+    case 0x68: // ULA control
+      next_.write(reg, u8(value & 0xFD));
+      return;
+    case 0x6E: // NextZXOS border colours, bit 6 is not stored
+    case 0x6F:
+      next_.write(reg, u8(value & 0xBF));
+      return;
+    case 0xC0: // interrupt control
+      next_.write(reg, u8(value & 0xE9));
+      return;
+    case 0xC4: // interrupt enable: bits 6:2 are not data
+      next_.write(reg, u8(value & 0x82));
+      return;
     case 0x50: case 0x51: case 0x52: case 0x53:
     case 0x54: case 0x55: case 0x56: case 0x57:
     case 0x8C: // alternate ROM
-    case 0x8F: // mapping mode: only the standard 128K/+3 layout is modelled
       next_.write(reg, value);
+      updatePaging();
+      return;
+    case 0x8F: // mapping mode: only the standard 128K/+3 layout is modelled
+      // Bits 2:1 ask for the 128K or +3 layout, and the write also refreshes
+      // the 0xC000 bank from the classic paging shadows.
+      next_.write(reg, u8(value & 0x03));
+      if (isNext()) legacyRemap(true, false);
       updatePaging();
       return;
     case 0x8E: { // the 128K memory map as a single register
@@ -1501,7 +1542,7 @@ void Machine::writeNextReg(u8 reg, u8 value) {
       sound_.setStereoMode((value & 0x20) ? Ay38912::Stereo::ACB : Ay38912::Stereo::ABC);
       return;
     case 0x09: // peripheral 2: AY mono bits, bit 4 locks the sprite number
-      next_.write(reg, value);
+      next_.write(reg, u8(value & 0xF7));
       sprites_.setLockstep((value & 0x10) != 0);
       for (int i = 0; i < TurboSound::ChipCount; ++i) {
         sound_.setChipMono(i, (value & (0x20 << i)) != 0);

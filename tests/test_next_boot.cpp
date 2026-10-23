@@ -146,6 +146,9 @@ TEST(boot_spectrum_is_not_touched_by_a_divmmc_rom) {
   Machine machine(MachineType::Spectrum128);
   std::string error;
   CHECK(machine.loadDivMmcRom(romPath("nxtmmc.rom"), error));
-  CHECK_EQ(machine.nextRegs().read(0x03), 0x00);
-  CHECK_EQ(machine.nextRegs().read(0x0A), 0x00);
+  // Only the firmware programs these, so a plain 128K still shows the power-on
+  // state rather than what a Next would have been configured with.
+  CHECK_EQ(machine.nextRegs().read(0x04), 0x00);
+  CHECK_EQ(machine.nextRegs().read(0x0A), 0x01);
+  CHECK_EQ(machine.nextRegs().read(0x8B), 0x00);
 }
