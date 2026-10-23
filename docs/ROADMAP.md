@@ -434,19 +434,36 @@ These are deliberate simplifications, tracked here so they are not forgotten:
     and the black screen looked like a fault. It is implemented now: a four
     write cycling register (X1, X2, Y1, Y2) with inclusive edges, rewound by bit
     2 of NR `0x1C`, applied to the ULA inside `renderFrame()`. xpeccy-plus does
-    not implement it, which is why its screen stays grey past frame 20000 -- on
-    this point we are ahead of the reference rather than behind it.
+    not implement it, which is why its screen keeps a small coloured block field
+    past frame 20000 that our clipped screen removes. That is the one picture
+    difference left at the end of the boot, and it is the reference that is
+    wrong, not us.
 
-    What the reopened window shows is black, because the firmware clears the
-    screen and goes straight back to the `0x0BC8` key wait without drawing
-    anything into the new window. So the stall is unchanged, only better
-    located: the boot reaches the wipe-and-wait stage and never gets to the
-    stage that fills it.
+    *The screen after the wipe is a live console, not a hang.* What the reopened
+    window shows is NextZXOS' empty text page: ULA character RAM all `0x00` with
+    attribute `0x38` (ink 0 on paper 7), which the NextZXOS palette renders as a
+    uniform grey, plus a blinking cursor. It is not frozen. SPACE is consumed,
+    and the OS installs its own IM1 handler at `0x2009` in RAM which calls a
+    key-scan routine at `0x2400` every frame -- that routine walks the row
+    select `L` down, builds `BC = L<<8 | 0xFE`, reads the row with `IN A,(C)`,
+    complements it and stores it through `(DE)`. The result is visible in the
+    documented handshake bytes: `0x5C3B` FLAGS bit 5 is set on a keypress,
+    `0x5C08` holds the key code (`0x0D` for ENTER), and typing `A` echoes a
+    glyph into cell (1,0) next to the cursor. The machine is running a
+    responsive NextZXOS text console.
 
-    The `0x0BC8` loop is also not a timeout. A key press does set FLAGS bit 5 at
-    `0x5C3B`, the routine at `0x0C90` consumes it, and then compares the key
-    code at `0x5C08` against `0x0E` and `0x10` and ignores everything else, so
-    an ordinary character key changes the loop balance and nothing more.
+    Our end state matches the oracle exactly at the level that matters: both stop
+    at the same address (`0x0C8F` is the `HALT`, `0x0C90` the return after it)
+    and both finish with the same eight MMU slots, `FF FF 0A 0B 04 05 0E 0F`.
+    So the paging and the firmware path are not in question.
+
+    What is still open is why the OS stops at an empty text page instead of
+    starting the desktop. The card goes untouched after frame 44: 197 `CMD17`
+    reads load `AUTOEXEC.1ST`, `RTC.SYS`, `RTCSIG.SYS` and `BIOSEXT.BIN`, and
+    `ENSYSTEM.SYS` (cluster 23066, LBA 187868) is never read. The next step is
+    to find what `AUTOEXEC.1ST` tests after its SPACE branch -- a `METADATA/`
+    entry, a machine-config file, or a `0x5C41`/`0x5C81` state byte -- that
+    gates the handover to the desktop.
 
 18. A `.nex` loading screen is loaded into memory but never shown: the
     `loadingBar`, `loadingDelay` and `startDelay` fields are parsed and ignored,

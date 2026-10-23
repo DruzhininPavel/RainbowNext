@@ -119,11 +119,18 @@ Comparing it with RainbowNext is then mechanical:
 * `frame_N.txt` can be turned into an image and compared by eye or by colour
   histogram against `Machine::framebuffer()`;
 * `dump.bin` contains the ULA bank, so the 6912 bytes of screen memory can be
-  diffed byte for byte against ours.
+  diffed byte for byte against ours;
+* `NXSTOPPC=0C8F NXSTOPF=2890` stops on a chosen address and writes `state.txt`
+  with the registers, the eight MMU slots and all 256 NextRegs, which is the
+  cheapest way to prove the paging matches; `NXDUMPNOW=1` dumps the same file at
+  the frame limit instead.
 
 The result recorded in `docs/ROADMAP.md` gap 17 is that a stock System/Next card
 gives a byte-identical ULA bank in both emulators, which is what closed the
 "the boot screen is garbage" question: the picture is the firmware's, not ours.
+The agreement is exact at the level that matters most -- both machines finish at
+the same address with the same eight MMU slots (`FF FF 0A 0B 04 05 0E 0F`) -- and
+it is only the last picture that differs, for the clip-window reason below.
 
 Two practical warnings. Without `NXNOFRAMES=1` the bench writes one
 `frame_N.txt` per frame, which is several gigabytes for a long run -- always set
@@ -133,6 +140,29 @@ it unless the pictures are genuinely needed, and use `NXFRAMEFROM=n` plus no
 passing the card image is what selects the SD-card boot, via `NXSD`. Keys can be
 injected with `NXKEYS="<frame>:<keys>"`, and `TRACE=n` with `TRACEAT=f` turns on
 an instruction trace around one frame.
+
+Getting one picture out of a long boot therefore looks like this -- the `env -u`
+is needed because a stale `NXNOFRAMES` in the shell silently suppresses every
+`frame_N.txt`:
+
+```sh
+mkdir -p /tmp/ref
+cd /tmp/xp && env -u NXNOFRAMES NXFRAMEFROM=2890 \
+  NXSD=/tmp/nextcard4.img NXKEYS="1000:_" KEYHOLD=20 \
+  ./build/out/tests/zxnext-bench \
+    fw:/tmp/romx/ennextzx.rom,/tmp/romx/ennxtmmc.rom \
+    2900 0x000000 2097152 /tmp/ref
+```
+
+`_` is the space key; the letters, `E` for enter, `C` for caps shift and `S` for
+symbol shift are the rest of the alphabet of `NXKEYS`. One entry holds every
+character it names *simultaneously* for `KEYHOLD` frames, so it can press
+`SPACE` or a shifted pair but cannot type a word -- sequential text has to be
+driven from RainbowNext's own probes instead.
+
+The picture comes back 720x303: the unblanked raster including the border, two
+pixels per dot. It is not the 320x256 visible area `Machine::framebuffer()`
+returns, so compare colour histograms or crop, never whole-image bytes.
 
 Two caveats: the bench's `fw:` mode is a test harness, not a full boot, so it
 does not prove that NextZXOS *starts*; and xpeccy-plus is GPL-3.0, so it is
