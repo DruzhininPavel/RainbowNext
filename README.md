@@ -98,10 +98,11 @@ Status: v0.1.3 — M1 and M2 done: 48K and 128K/+2/+3 boot with AY sound, tape
   a driver needs (`CMD0`/`CMD8`/`ACMD41` init, single- and multi-block reads and
   writes, `CMD12` abort, `CMD58`/`CMD59`). On the Next it sits on the machine's
   own ports `0xE7` (chip select) and `0xEB` (data), which is the interface the
-  board ROM's SD driver uses. There is no divMMC: it was removed to come back
-  later as a plugin, so nothing gets mapped over the bottom 8K on the Next's
-  boot path. See [The SD card](docs/ARCHITECTURE.md#the-sd-card) for the port
-  map and what a driver has to do.
+  board ROM's SD driver uses. On the Next that driver lives in the divMMC ROM,
+  which is why divMMC is part of the machine rather than a plugin: the boot ROM
+  maps it over `0x0000` and stops unless it answers with its `"DV"` signature.
+  See [The SD card](docs/ARCHITECTURE.md#the-sd-card) for the port map and what
+  a driver has to do.
 * **Frontend** — resizable window, integer scaling, speed 1×/2×/4×/8×,
   drag & drop loading, Dear ImGui menus and a debugger with breakpoints, a
   disassembly listing, a memory editor and a profiler.

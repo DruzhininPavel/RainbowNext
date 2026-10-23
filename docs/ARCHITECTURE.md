@@ -196,11 +196,40 @@ The emulator computes `~value & 0x0F` and selects the card only when that is
 rather than `0x03` is deliberate: it keeps bit 7 (the flash) from looking like a
 selection too.
 
-This is not a guess about the hardware — the board ROM's own SD driver uses it.
+This is not a guess about the hardware — the boot ROM's own SD driver uses it.
 In `next.rom` page 2 the routine at `0x18D6` does `LD A,0xFE / OUT (0xE7),A`
 for card 0 and `0xFD` for card 1, then streams with `IN A,(0xEB)` and the
 `ED 79` block-transfer form with `C=0xEB`. There are sixteen `IN A,(0xEB)` and
 three `OUT (0xEB),A` in that page alone.
+
+### divMMC, and why it is not a plugin
+
+divMMC is part of the Next, in `src/core/divmmc.*`. It is not a cartridge and it
+does not own a card: `Machine` keeps one `SdCard` and divMMC only maps ROM and
+RAM over the bottom of the address space.
+
+The reason is not sentiment. The boot ROM at `0x1EDB` writes `OUT (0xE3),A` to
+map the card ROM over `0x0000` and then checks `0x0004` for the `"DV"`
+signature; `nxtmmc.rom` starts `F3 C3 6A 00 44 56 09 02`, which puts `44 56`
+exactly there. When the check fails the ROM spins at `JR 0x1ED9` and nothing
+ever boots. The card ROM is also where the esxDOS block-read driver lives
+(`0x1F0F`-`0x1F5C`), so it is the code path that actually reads NextZXOS off the
+card.
+
+What is modelled:
+
+| Piece | Detail |
+|---|---|
+| `0xE3` latch | bit 7 `CONMEM` maps the ROM over `0x0000`, bit 6 `MAPRAM` puts RAM bank 3 over the ROM half, bits 2:0 pick the bank |
+| ROM | one 8 KiB page of a 32 KiB image; the top half (`0x2000`-`0x3FFF`) is read-only ROM, the bottom half RAM once `CONMEM` is set |
+| RAM | 16 x 8 KiB banks, cleared only by a power-on reset |
+| automap | NextReg `0x0A` bit 4 is the master switch; an entry point only fires on an M1 fetch, and the `0x0066`/`0x04C6`/`0x04D7`/`0x0562`/`0x056A` set also requires ROM3 to be paged in |
+| entry points | NextReg `0xB8`-`0xBB`: the set-0 bitmap, its valid mask, its timing byte, and the set-1 bitmap |
+| exit stub | a `RET` to an entry point unmaps after that instruction |
+
+For classic machines divMMC stays what it always was: optional, and not part of
+`Machine`. The `Peripheral` contract still has its memory hooks, so a module can
+map itself over the bottom of memory without the core knowing what it is.
 
 The frontend offers **Tools > Insert SD card image...** and `--sd FILE`; a
 dropped `.img` or `.mmc` does the same. The image is owned by `Machine`, so

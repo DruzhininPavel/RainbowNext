@@ -184,6 +184,13 @@ void Machine::reset(bool preserveRam) {
   // The card keeps its image across a reset; only the SPI handshake restarts.
   sdCard_.reset();
   spiSelect_ = 0xFF;
+  // The divMMC latch always drops; only a power-on reset also clears its RAM,
+  // because esxDOS leaves warm-boot markers there.
+  if (preserveRam) {
+    divmmc_.softReset();
+  } else {
+    divmmc_.hardReset();
+  }
 
   tstates_ = 0;
   cpuTstates_ = 0;
@@ -262,6 +269,13 @@ bool Machine::applyTapeFastLoad(u16 entry) {
   regs.l = 0;
   regs.a = 0;
   regs.pc = 0x05DF;
+  return true;
+}
+
+bool Machine::loadDivMmcRom(const std::string& path, std::string& error) {
+  if (!divmmc_.loadRomFile(path, error)) return false;
+  // The ROM arriving late still has to answer a latch that is already set.
+  updatePaging();
   return true;
 }
 
@@ -463,6 +477,9 @@ void Machine::stepInstruction() {
   }
   ++instructions_;
   cpu_.step();
+  // The divMMC's exit stubs at 0x1FF8 unmap the block once the instruction
+  // that fetched them has finished.
+  if (isNext()) divmmc_.afterInstruction();
 }
 
 std::optional<u16> Machine::runFrame() {
@@ -697,6 +714,10 @@ u8 Machine::memRead(u16 addr, u32 t) {
     u8 value = 0xFF;
     if (expansion_.memRead(addr, t, false, value)) return value;
   }
+  if (isNext()) {
+    u8 value = 0xFF;
+    if (divmmc_.read(addr, false, cpu_.regs().a, value)) return value;
+  }
   return memReadBase(addr, t);
 }
 
@@ -707,11 +728,16 @@ u8 Machine::memFetch(u16 addr, u32 t) {
     u8 value = 0xFF;
     if (expansion_.memRead(addr, t, true, value)) return value;
   }
+  if (isNext()) {
+    u8 value = 0xFF;
+    if (divmmc_.read(addr, true, cpu_.regs().a, value)) return value;
+  }
   return memReadBase(addr, t);
 }
 
 void Machine::memWrite(u16 addr, u8 value, u32 t) {
   if (expansion_.memoryHooked() && expansion_.memWrite(addr, value, t)) return;
+  if (isNext() && divmmc_.write(addr, value)) return;
   memWriteBase(addr, value, t);
 }
 
@@ -771,6 +797,13 @@ u8 Machine::ioReadBase(u16 port, u32) {
       const u8 reg = ula_.ulaPlusRegister();
       if ((reg & 0xC0) == 0x00) return palette_.read8(ulaPalette(), u8(reg & 0x3F));
       return u8(ula_.ulaPlusMode() & 0x01);
+    }
+    // The divMMC control latch. The boot ROM writes it at 0x1EDB and then
+    // checks that 0x0004 reads back "DV", so this must answer before the ROM is
+    // even considered.
+    {
+      u8 value = 0xFF;
+      if (divmmc_.ioRead(port, value)) return value;
     }
     // Reading the SPI data port clocks one byte out of the selected device, so
     // this is a read with a side effect rather than a plain register.
@@ -835,6 +868,10 @@ void Machine::ioWriteBase(u16 port, u8 value, u32) {
     }
     if ((port & 0xC0FF) == 0x803B) { // ULA+ register select
       ula_.writeUlaPlusRegister(value);
+      return;
+    }
+    if ((port & 0x00FF) == DivMmc::PortControl) { // divMMC control latch
+      divmmc_.ioWrite(port, value);
       return;
     }
     if ((port & 0x00FF) == 0xE7) { // SPI chip select, active low per device
@@ -988,6 +1025,8 @@ void Machine::updatePaging() {
   u8 rom = u8((port7ffd_ & 0x10) ? 1 : 0);
   if (isPlus3() || isNext()) rom = u8(rom | ((port1ffd_ & 0x04) ? 2 : 0));
   romBank_ = u8(rom & 0x03);
+  // The divMMC only fires RST 8 while the +3 DOS ROM is the one at 0x0000.
+  divmmc_.setRom3Present(romBank_ == 3);
 
   if (isNext()) {
     // The Next keeps its map in the MMU registers, and the classic paging
@@ -1099,15 +1138,20 @@ void Machine::writeNextReg(u8 reg, u8 value) {
       if ((value & 0x0C) != 0) cpu_.nmi();
       if ((value & 0x03) != 0) reset((value & 0x02) == 0);
       return;
-    case 0x0A:   // peripheral 5
-    case 0xB8:   // the entry points a divMMC module would watch
+    case 0x0A: { // peripheral 5: bit 4 is the divMMC automap master switch
+      next_.write(reg, value);
+      divmmc_.setAutomap((value & 0x10) != 0);
+      return;
+    }
+    case 0xB8:   // the entry points the divMMC watches
     case 0xB9:   // ...which of them need the +3 DOS ROM paged in
     case 0xBA:   // ...and whether the map happens before or after the fetch
-    case 0xBB:   // ...and the second entry-point group
-      // Stored only: nothing on the bus acts on them until a module is
-      // plugged in, but a program that writes them must read them back.
+    case 0xBB: { // ...and the second entry-point group
       next_.write(reg, value);
+      divmmc_.setEntryPoints(next_.read(0xB8), next_.read(0xB9), next_.read(0xBA),
+                             next_.read(0xBB));
       return;
+    }
     case 0x03: {
       // The display timing bits are locked unless bit 7 unlocks them.
       u8 type = next_.read(0x03);

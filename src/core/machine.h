@@ -10,6 +10,7 @@
 #include "core/bus.h"
 #include "core/copper.h"
 #include "core/dac.h"
+#include "core/divmmc.h"
 #include "core/dma.h"
 #include "core/esxdos.h"
 #include "core/expansion.h"
@@ -230,6 +231,13 @@ public:
   // the boot ROM drives it directly, before any module could be mapped in.
   SdCard& sdCard() { return sdCard_; }
   const SdCard& sdCard() const { return sdCard_; }
+  // The divMMC block. On the Next it is part of the FPGA, not a cartridge: the
+  // boot ROM writes port 0xE3 and refuses to continue unless the divMMC ROM
+  // answers with its "DV" signature, so the machine always owns one.
+  DivMmc& divMmc() { return divmmc_; }
+  const DivMmc& divMmc() const { return divmmc_; }
+  // Loads the 8K esxDOS-style ROM the boot ROM expects at 0x0000.
+  bool loadDivMmcRom(const std::string& path, std::string& error);
   const NextRegFile& nextRegs() const { return next_; }
   const NextPalette& palette() const { return palette_; }
   const Sprites& sprites() const { return sprites_; }
@@ -372,6 +380,7 @@ private:
   Z80 cpu_;
   EsxDos esxDos_;
   SdCard sdCard_;
+  DivMmc divmmc_;
   // Port 0xE7 latch. Every device on the bus is selected by clearing its bit,
   // so the reset value leaves all of them idle.
   u8 spiSelect_ = 0xFF;

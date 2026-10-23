@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.24)
-project(RainbowNext VERSION 0.4.2 LANGUAGES CXX)
+project(RainbowNext VERSION 0.5.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -99,6 +99,7 @@ add_library(rainbow_core STATIC
   src/core/dma.cpp
   src/core/expansion.cpp
   src/core/sdcard.cpp
+  src/core/divmmc.cpp
   src/core/esxdos.cpp
   src/peripherals/kempston.cpp
   src/peripherals/kempston_mouse.cpp
@@ -192,6 +193,7 @@ if(RAINBOW_BUILD_TESTS)
     tests/test_dma.cpp
     tests/test_expansion.cpp
     tests/test_sdcard.cpp
+    tests/test_divmmc.cpp
     tests/test_nex.cpp
     tests/test_esxdos.cpp
     src/frontend/config.cpp

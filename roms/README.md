@@ -29,11 +29,19 @@ roms/next.rom      (65 536 bytes)
 roms/next-0.rom … next-3.rom
 ```
 
-That is the only image the Next needs. The emulator has no divMMC: the board
-ROM's own SD driver talks to the Next's built-in SPI interface on ports `0xE7`
-(chip select) and `0xEB` (data), which the emulator implements directly, so a
-card image is enough to get further. NextZXOS is read off that card, not out of
-a second ROM file.
+The Next also needs the divMMC card ROM, which the boot ROM maps in at `0x0000`
+and refuses to continue without:
+
+```
+roms/nxtmmc.rom    (8 192 bytes, or a 32 KiB image of four pages)
+```
+
+It is found automatically next to the main ROM (`nxtmmc.rom`, then
+`divmmc.rom`); the ROM window reports it and warns when it is missing. That ROM
+carries the esxDOS driver that reads NextZXOS off the card through the Next's
+built-in SPI interface on ports `0xE7` (chip select) and `0xEB` (data), so a card
+image is the third thing a Next needs. NextZXOS is read off that card, not out
+of another ROM file.
 
 ## Picking the images once
 

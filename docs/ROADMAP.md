@@ -183,11 +183,14 @@ a multicolour demo renders correctly; `z80test` passes.
       SDHC, block addressing, `CMD18`/`CMD25`/`CMD12`/`CMD23` for the
       multi-block transfers NextZXOS issues). `Machine` owns the card, so it
       survives a machine switch, and `--sd FILE` or a dropped `.img` inserts it
-* [x] divMMC removed. It used to map an esxDOS ROM over the bottom 8K on the
-      Next's boot path, which is not how the Next reaches a card. It is meant to
-      come back as an out-of-tree plugin over the expansion bus, so the memory
-      half of the `Peripheral` contract is kept and exercised, but nothing in
-      the core depends on it
+* [x] divMMC built into the Next, as `src/core/divmmc.*`: the `0xE3` control
+      latch, the 8K esxDOS ROM (32K image, one 8K page at a time), 16 x 8K RAM
+      banks, `CONMEM`/`MAPRAM` mapping, the automap switch on NextReg `0x0A`
+      bit 4, the eight entry points from NextReg `0xB8`-`0xBB`, the ROM3 gate
+      and the exit-stub unmap after the instruction. This is not a plugin: the
+      Next's boot ROM maps it in at `0x0000` and will not continue unless the
+      card ROM answers with its `"DV"` signature, so nothing boots without it.
+      The card is still the machine's own `SdCard`; divMMC never owns one
 * [x] Video pipeline: the ULA → tilemap → Layer 2 → sprite compositor and the
       palette path are in place, plus:
   * Timex SCLD modes on port `0xBF3F`/`0xFF`: standard, `ALTDFILE` (the second
@@ -330,45 +333,43 @@ These are deliberate simplifications, tracked here so they are not forgotten:
     the emulator exits. The SPI clock is not modelled: a command is answered on
     the next byte instead of after the few hundred cycles a real card needs, so
     a driver that polls for readiness simply sees it at once.
-17. NextZXOS does not boot: the Next's boot ROM runs its full power-on
-    sequence and then soft-resets back to itself forever, so the machine ends up
-    in plain 48K BASIC with no `C:` drive. The boot ROM itself is correct -- it
-    is byte-identical to the official `enNextZX.rom`, and the NextReg `0x8E`
-    paging trampoline, the RAM probe and the `LDIR` copies all behave. The
-    observed cycle is `0x0000` -> `0x00EF` (init, RAM test over all 112 8K
-    pages) -> `0x018E` -> `0x3E17` paging -> `0x1F3D` (`KEY-INT` idle) -> back
-    through `0x3E17` -> `0x0000`, where the bank 3 reset stub at `0x3BE8`
-    writes `NEXTREG 0x02,0x81` (soft reset). That reset is deliberate: the boot
-    ROM only soft-resets once it has something to boot, so the real fault is
-    that it never finds NextZXOS.
+17. NextZXOS does not boot yet. The divMMC ROM is now in place and the boot
+    ROM gets past its card check, so this is no longer the "does the machine
+    have the hardware" question it used to be; what is left is the card
+    protocol.
 
-    Its SD driver sits at ROM page 2 `0x18D6`-`0x1AE8` (`0x19DD` is the
-    CMD0/CMD8/CMD55/ACMD41 init, `0x1904` the multi-block read) and is never
-    called. Note that this is *not* a divMMC problem: `0x18E5` is
-    `OUT (0xE7),A` with `0xFE`/`0xFD` for card 0/1 and the rest of the routine
-    streams through `IN A,(0xEB)` and the `ED 79` form with `C=0xEB`, so the
-    board ROM drives the machine's own SPI ports. Those ports are implemented
-    now (see the checklist above), so the remaining question is what makes the
-    ROM decide there is a card to read: with a valid image inserted the driver
-    still never runs, and the only card traffic observed is a stream of
-    malformed `CMD17` frames with garbage arguments (`51 47 D5 F9 AF`), which
-    means something is shifting memory through `0xEB` rather than driving the
-    driver. Finding that caller is what is left.
+    *The gate that was blocking everything.* The boot ROM at `0x1EDB` does
+    `OUT (0xE3),A` to map the card ROM over `0x0000` and then checks `0x0004`
+    for the `"DV"` signature. `nxtmmc.rom` begins `F3 C3 6A 00 44 56 09 02`,
+    which is `"DV"` at offset 4. When the check fails the ROM spins at
+    `JR 0x1ED9` forever, and with no divMMC in the core that is exactly what
+    happened. Two earlier diagnoses are therefore retired: the reset loop was
+    never a crash, and the "third ROM image" was `nxtmmc.rom` being served by
+    the overlay.
 
-    Two earlier diagnoses were wrong and are recorded here so they are not
-    retried. One blamed a `JP 0x3CFC` trampoline in ROM page 2; that address is
-    never reached. The other claimed a third, unidentified ROM image was
-    executing, because `memRead(0x0E44)` returned `C5` while `memRead(0x0000)`
-    returned the boot ROM's `F3` under an identical MMU. Those bytes were
-    `nxtmmc.rom` content served by the divMMC overlay, which answered every
-    read below `0x4000` while mapped in -- nothing exotic, and the module has
-    since been removed. A hot `pc=0x0168` looked like a loop but is the boot
-    ROM's own `LDDR` memory clear at bank 0 `0x0168` -- expected to dominate,
-    since each pass moves `BC=0x3FFE` bytes.
+    *Where it stops now.* With `nxtmmc.rom` loaded the ROM reaches its own
+    `0x3BE8` soft reset after about 823k instructions, and the card read it
+    issues never completes. The driver it uses is the esxDOS one in the card
+    ROM (`0x1F0F`-`0x1F5C`): `0x1F5C` puts `0x51` (`CMD17`) in `A` and calls
+    `0x1F15`, which sends `H`, `L`, `D`, `E` as the 32-bit argument and then
+    polls `IN A,(0xEB)`. There is no `CMD0`/`CMD8`/`CMD55`/`ACMD41` in that
+    path at all, so it is an already-open read, not an initialisation.
 
-    A divMMC is still planned, as an out-of-tree plugin over the expansion bus
-    rather than something on the Next's boot path. When it returns it shares
-    `src/core/sdcard.*` through its own `0xDF` port instead of owning a card.
+    The argument observed is `0x47D5F9AF`, which is out of range and comes back
+    as `R1ParameterError` (`0x40`). The registers explain why: at the call
+    `HL=0x47D5`, `DE=0xF9AF`, `BC=0x3DD7`, `IX=0x2340`, and the sixteen bytes
+    at `IX` are all zero -- the file descriptor the boot ROM is reading through
+    was never filled in. So the card is being blamed for a bad address, and the
+    fault is upstream in whatever was supposed to open that file. `SdCard`
+    itself is correct: driven directly it answers `CMD0` with `0x01`, `CMD8`
+    with `01 00 00 01 AA`, `CMD58` with `01 40 80 80 00` and `CMD17@0` with
+    `00 FF FE 00 01 02 03 04`.
+
+    The next step is therefore not in `src/core/sdcard.*` but in following how
+    the boot ROM populates a descriptor before it maps the card ROM in, starting
+    from the `CALL 0x1EAF` at `0x0846` and the `0x07C4` "position the file"
+    helper it runs first.
+
 18. A `.nex` loading screen is loaded into memory but never shown: the
     `loadingBar`, `loadingDelay` and `startDelay` fields are parsed and ignored,
     so the program starts at once instead of after an animated bar. The

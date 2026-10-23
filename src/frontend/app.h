@@ -153,6 +153,7 @@ private:
   Input input_;
 
   std::string romPath_;
+  std::string divMmcPath_;
   std::optional<MachineType> romDialogTarget_;
   bool showRoms_ = false;
   std::string quickStatePath_;  std::string sdPath_;

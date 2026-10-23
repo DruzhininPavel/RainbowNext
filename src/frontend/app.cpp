@@ -99,6 +99,30 @@ bool loadRomFromAnywhere(Machine& machine, MachineType type, std::string* used) 
   return loadRomFor(machine, type, "", used);
 }
 
+// The Next boot ROM maps divMMC in at 0x0000 and only carries on if the card ROM
+// answers with its "DV" signature at 0x0004, so a Next without one cannot boot
+// at all. It sits next to the main ROM and is not a per-machine setting: every
+// Next needs the same file.
+bool loadDivMmcRomFor(Machine& machine, const std::string& dir, std::string* used) {
+  for (const char* base : {"nxtmmc", "divmmc"}) {
+    std::string error;
+    const std::string path = dir + base + ".rom";
+    if (machine.loadDivMmcRom(path, error)) {
+      if (used != nullptr) *used = path;
+      return true;
+    }
+  }
+  return false;
+}
+
+bool loadDivMmcRomFromAnywhere(Machine& machine, std::string* used) {
+  if (loadDivMmcRomFor(machine, "roms/", used)) return true;
+  if (const char* base = SDL_GetBasePath()) {
+    if (loadDivMmcRomFor(machine, std::string(base) + "roms/", used)) return true;
+  }
+  return loadDivMmcRomFor(machine, "", used);
+}
+
 // Strips the extension and a trailing bank number, so both halves of a split
 // set -- `128.rom` and `128-0.rom` -- name the same base for loadRomSet.
 std::string romBaseFromPath(const std::string& path) {
@@ -254,7 +278,14 @@ bool App::init(const Options& options) {
   // The remembered image is tried before the roms/ lookup, so a machine that
   // was set up once comes back exactly as it was left.
   if (!loaded) loaded = applyRomChoice(machineType);
-  if (loaded) {
+  if (loaded && machineType == MachineType::Next) {
+    loadDivMmcRomFromAnywhere(*machine_, &divMmcPath_);
+    if (divMmcPath_.empty()) {
+      status_ = "nxtmmc.rom is missing - the Next boot ROM will hang without it";
+    } else {
+      status_ = "ROM loaded: " + romPath_;
+    }
+  } else if (loaded) {
     status_ = "ROM loaded: " + romPath_;
   }
   if (!machine_->romLoaded()) {
@@ -636,6 +667,9 @@ bool App::applyRomChoice(MachineType type) {
     }
   }
   if (!loaded) loaded = loadRomFromAnywhere(*machine_, type, &romPath_);
+  if (loaded && type == MachineType::Next) {
+    loadDivMmcRomFromAnywhere(*machine_, &divMmcPath_);
+  }
   return loaded;
 }
 
@@ -690,6 +724,9 @@ bool App::loadRom(const std::string& path) {
   // Choosing a ROM by hand is the user deciding where this machine boots from,
   // so it replaces whatever the ROM window had for it.
   setRomChoice(machine_->type(), path);
+  if (machine_->type() == MachineType::Next) {
+    loadDivMmcRomFromAnywhere(*machine_, &divMmcPath_);
+  }
   // States are fingerprinted against the ROM, so a new ROM makes them all stale.
   clearRewind();
   status_ = "ROM loaded: " + path;
@@ -1659,9 +1696,22 @@ void App::drawRomsWindow() {
         if (ImGui::SmallButton("Forget")) setRomChoice(type, {});
       }
 
-      // The Next's card is not a ROM, but it is the other thing it needs before
-      // it can do anything, so it belongs on the same row of the same window.
+      // The Next's card ROM and SD card are not the machine's ROM, but they are
+      // the other two things it needs before it can do anything, so they belong
+      // in the same window.
       if (type == MachineType::Next) {
+        ImGui::TableNextRow();
+        ImGui::TableNextColumn();
+        ImGui::TextDisabled("  divMMC ROM");
+        ImGui::TableNextColumn();
+        if (!divMmcPath_.empty()) {
+          ImGui::TextUnformatted(divMmcPath_.c_str());
+        } else {
+          ImGui::TextColored(ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled),
+                             "nxtmmc.rom not found - the Next will not boot");
+        }
+        ImGui::TableNextColumn();
+
         ImGui::TableNextRow();
         ImGui::TableNextColumn();
         ImGui::TextDisabled("  SD card");
