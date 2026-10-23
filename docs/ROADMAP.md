@@ -470,6 +470,34 @@ These are deliberate simplifications, tracked here so they are not forgotten:
     What it never does is load `ENSYSTEM.SYS`, so the desktop never starts, and
     that is the open question the last paragraph of this gap states.
 
+    *The key-press trace, and the one register bit that was wrong.* Comparing
+    register writes against the bench after a keypress needed the bench's key
+    syntax first: `NXKEYS` spells SPACE `_`, and the earlier runs in this gap
+    wrote `sp`, which presses `S` and `P` and produces a much shorter trace.
+    With `_` the bench gives four clean write bursts, one per press -- frames
+    305-328, 701-705, 1001-1004 and 1301-1305 -- for 16548 register writes in
+    total. Ordered against ours, the two streams agree for the first ten writes
+    and then part company at the eleventh, on NR `0x06`: the bench writes
+    `0x04` and we wrote `0x00`.
+
+    That bit is not stored data. It reports *configuration mode*, the state the
+    boot ROM runs in, in which NR `0x0A` bits 7:5 and the Layer 2 offsets accept
+    writes; NR `0x03` bit 2 of the value selects it, with `7` entering and any
+    other non-zero value leaving. We had no such state at all, so every
+    configuration-gated write the ROM made was silently dropped and the ROM's
+    read-back told it a different story from the one the bench told it. The mode
+    is implemented now, entered on a Next power-on the way the reference does,
+    and a Next and a 48K both answer the register correctly.
+
+    *The card is not the problem, and that is now measured rather than assumed.*
+    Parsing the bench's SPI trace by port and by value (the port is field seven
+    of a trace line and the value the eighth) and dropping the response
+    artefacts leaves 166 distinct block addresses read by `CMD17` on each side,
+    with a symmetric difference of **zero**. Both read LBA 187868
+    (`0x05BBB800`) exactly once, which is `NEXTZXOS/ENSYSTEM.SYS`. Neither side
+    then puts the file into RAM, so its absence from both memory images is
+    parity, not a fault, and the desktop not starting is not a card bug.
+
     *The ULA is reading the right bank, and this was worth proving.* It is easy
     to misread `screenBank_ * BankSize` as an 8K page index and conclude that
     the ULA shows RAM page 5 while the OS keeps its console in page `0x0A`.

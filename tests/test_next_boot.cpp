@@ -70,3 +70,44 @@ TEST(boot_real_next_rom_completes_its_ram_probe) {
   if (!loadNextRom(machine)) return;
   CHECK_EQ(countVisits(machine, 0x018E, 7, 2500000), 7);
 }
+
+// The boot ROM is handed the machine in configuration mode, which is the only
+// state in which the machine configuration registers accept writes. Register
+// 0x06 bit 2 reports the mode rather than storing it, so a machine that never
+// entered it answers the ROM with a bit it does not expect and takes a
+// different path from the first read onwards.
+TEST(boot_next_starts_in_configuration_mode) {
+  Machine machine(MachineType::Next);
+  CHECK_EQ(machine.readNextReg(0x06) & 0x04, 0x04);
+}
+
+TEST(boot_spectrum_has_no_configuration_mode) {
+  Machine machine(MachineType::Spectrum48);
+  CHECK_EQ(machine.readNextReg(0x06) & 0x04, 0x00);
+}
+
+// The low three bits of register 0x03 are the mode selector: 7 enters, any
+// other non-zero value leaves and 0 is not a command at all.
+TEST(boot_configuration_mode_is_left_by_a_machine_type_write) {
+  Machine machine(MachineType::Next);
+  machine.writeNextReg(0x03, 0x00);
+  CHECK_EQ(machine.readNextReg(0x06) & 0x04, 0x04);
+  machine.writeNextReg(0x03, 0xB3);
+  CHECK_EQ(machine.readNextReg(0x06) & 0x04, 0x00);
+  machine.writeNextReg(0x03, 0xB7);
+  CHECK_EQ(machine.readNextReg(0x06) & 0x04, 0x04);
+}
+
+// Bits 7:5 of register 0x0A are the machine configuration and are only
+// reachable while the mode is on; the divMMC automap switch below them is not.
+TEST(boot_configuration_mode_gates_register_0a) {
+  Machine machine(MachineType::Next);
+  machine.writeNextReg(0x0A, 0xB1);
+  CHECK_EQ(machine.readNextReg(0x0A), 0xB1);
+  machine.writeNextReg(0x03, 0xB3);
+  machine.writeNextReg(0x0A, 0xE0);
+  CHECK_EQ(machine.readNextReg(0x0A), 0xA0);
+  // The divMMC automap switch below the configuration bits is always writable.
+  machine.writeNextReg(0x0A, 0x10);
+  CHECK_EQ(machine.readNextReg(0x0A), 0xB0);
+}

@@ -161,9 +161,14 @@ void Machine::nextFirmwareBoot() {
       {0x83, 0x3F},
       {0x84, 0xFF},
       {0x85, 0x01},
-      {0x03, 0xB3}, // machine type +3 with +3 timing, config mode off
+      {0x03, 0xB3}, // machine type +3 with +3 timing
   };
   for (const auto& write : Writes) writeNextReg(write[0], write[1]);
+
+  // The ROM is handed the machine in configuration mode -- that is the state
+  // xpeccy's firmware hook leaves behind -- and it is the ROM itself that
+  // leaves the mode once it has finished programming the machine.
+  configMode_ = true;
 
   // The firmware's last act is a soft reset, which is what turns the
   // configuration above into a running NextZXOS: the reset keeps the
@@ -184,6 +189,9 @@ void Machine::reset(bool preserveRam) {
     // The alt ROM is loaded by the boot ROM on every boot, so a cold start
     // leaves it blank rather than serving the previous session's image.
     altRom_.assign(AltRomPages * PageSize, 0);
+    // A power cycle hands the machine back to the boot ROM, and the boot ROM
+    // runs in configuration mode; a soft reset keeps whatever mode it is in.
+    configMode_ = type_ == MachineType::Next;
   }
   framebuffer_.assign(FrameWidth * FrameHeight, Palette[0]);
   borderLines_.fill(0);
@@ -635,6 +643,7 @@ template <class Ar> void Machine::serialize(Ar& ar) {
   ar(port7ffd_);
   ar(port1ffd_);
   ar(pagingLocked_);
+  ar(configMode_);
   ar(specialPaging_);
   ar(romLoaded_);
   ar(layer2Clip_);
@@ -1316,6 +1325,11 @@ u8 Machine::readNextReg(u8 reg) const {
     const u32 line = u32(tstates_ % tstatesPerFrame_) / tstatesPerLine_;
     return reg == 0x1E ? u8(line) : u8(line >> 8);
   }
+  if (reg == 0x06) {
+    // Bit 2 is the live configuration-mode flag, not the stored byte: the file
+    // is reset with it clear while the machine can still be in the mode.
+    return u8((next_.read(0x06) & 0xFB) | (configMode_ ? 0x04 : 0x00));
+  }
   if (reg == 0x69) {
     // Composed from the classic ports, exactly like NR 0x8E: bit 6 is the Layer
     // 2 enable of port 0x123B, bit 3 the screen bank of port 0x7FFD and bits
@@ -1344,8 +1358,16 @@ void Machine::writeNextReg(u8 reg, u8 value) {
       if ((value & 0x03) != 0) reset((value & 0x02) == 0);
       return;
     case 0x0A: { // peripheral 5: bit 4 is the divMMC automap master switch
-      next_.write(reg, value);
+      // Bits 7:5 are the machine configuration and only reachable while the
+      // ROM is in configuration mode; the rest is always writable.
+      const u8 previous = next_.read(reg);
+      next_.write(reg, u8((value & 0x1F) | (configMode_ ? (value & 0xE0) : (previous & 0xE0))));
       divmmc_.setAutomap((value & 0x10) != 0);
+      return;
+    }
+    case 0x06: { // peripheral 1: bit 2 reports configuration mode, it is not data
+      const u8 previous = next_.read(reg);
+      next_.write(reg, u8((value & 0xFB) | (configMode_ ? (value & 0x04) : (previous & 0x04))));
       return;
     }
     case 0xB8:   // the entry points the divMMC watches
@@ -1362,6 +1384,13 @@ void Machine::writeNextReg(u8 reg, u8 value) {
       u8 type = next_.read(0x03);
       if ((value & 0x80) != 0) type = u8((type & 0x8F) | (value & 0x70));
       next_.write(0x03, type);
+      // The low three bits are the configuration-mode selector rather than
+      // stored data: 7 enters the mode and any other non-zero value leaves it.
+      if ((value & 0x07) == 0x07) {
+        configMode_ = true;
+      } else if ((value & 0x07) != 0) {
+        configMode_ = false;
+      }
       // The machine type decides which ROM the classic paging ports select.
       updatePaging();
       return;
