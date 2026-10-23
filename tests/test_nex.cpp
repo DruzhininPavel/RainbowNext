@@ -1,5 +1,6 @@
 #include "test_framework.h"
 
+#include <algorithm>
 #include <cstdio>
 #include <cstring>
 #include <filesystem>
@@ -523,4 +524,72 @@ TEST(nex_zero_pc_means_load_without_running) {
   CHECK(m.loadNex(path, error));
   CHECK_EQ(m.cpu().regs().pc, 0);
   CHECK_EQ(m.cpu().regs().sp, 0x5B00);
+}
+
+// The loading-screen palette control byte differs for LoRes: the loader uses
+// the LoRes Layer 2 palette for a LoRes screen and the first Layer 2 palette
+// for everything else, which is the distinction NR 0x43 bit 0 makes.
+TEST(nex_selects_the_lores_palette_for_a_lores_screen) {
+  std::vector<u8> file = makeNex({0}, 0x8000, 0xFF00, 0);
+  file[10] = 0x04; // LoRes: a palette block then a 12K screen
+  file.resize(file.size() + 512 + 12288, 0);
+  appendBank(file, 0);
+  const std::string path = writeTemp("lorespal.nex", file);
+
+  Machine m(MachineType::Next);
+  std::string error;
+  CHECK(m.loadNex(path, error));
+  CHECK_EQ(m.readNextReg(0x43), u8(0x01));
+}
+
+TEST(nex_selects_the_first_layer2_palette_for_a_layer2_screen) {
+  std::vector<u8> file = makeNex({0}, 0x8000, 0xFF00, 0);
+  file[10] = 0x01; // Layer 2: a palette block then a 48K screen
+  file.resize(file.size() + 512 + 49152, 0);
+  appendBank(file, 0);
+  const std::string path = writeTemp("l2pal.nex", file);
+
+  Machine m(MachineType::Next);
+  std::string error;
+  CHECK(m.loadNex(path, error));
+  CHECK_EQ(m.readNextReg(0x43), u8(0x10));
+}
+
+// The loading screens cover 0x4000-0x6FFF, which is the top of bank 5 on a
+// Next, so a .nex that carries one shows it through the ULA before the program
+// has drawn anything.
+TEST(nex_places_the_lores_loading_screen_in_bank_five) {
+  std::vector<u8> file = makeNex({0}, 0x8000, 0xFF00, 0);
+  file[10] = 0x04;
+  file.resize(file.size() + 512, 0);
+  for (int i = 0; i < 12288; ++i) file.push_back(u8(0x5A));
+  appendBank(file, 0);
+  const std::string path = writeTemp("loresscreen.nex", file);
+
+  Machine m(MachineType::Next);
+  std::string error;
+  CHECK(m.loadNex(path, error));
+  CHECK_EQ(m.memRead(u16(0x4000), 0), u8(0x5A));
+  CHECK_EQ(m.memRead(u16(0x6FFF), 0), u8(0x5A));
+}
+
+// A loaded program must actually run: the entry bank lands in MMU 6/7 and the
+// PC/SP come from the header.
+TEST(nex_runs_the_loaded_program) {
+  std::vector<u8> file = makeNex({3}, 0xC000, 0xFF00, 3);
+  appendBank(file, 3);
+  // INC A, repeated, so the PC walks through the bank and A counts the steps.
+  std::fill(file.end() - BankSize, file.end() - BankSize + 4096, u8(0x3C));
+  const std::string path = writeTemp("runs.nex", file);
+
+  Machine m(MachineType::Next);
+  std::string error;
+  CHECK(m.loadNex(path, error));
+  CHECK_EQ(m.cpu().regs().pc, u16(0xC000));
+  CHECK_EQ(m.nextRegs().mmuSlot(6), u8(6));
+
+  const u8 start = m.cpu().regs().a;
+  for (int i = 0; i < 16; ++i) m.stepInstruction();
+  CHECK_EQ(m.cpu().regs().pc, u16(0xC010));
+  CHECK_EQ(m.cpu().regs().a, u8(start + 16));
 }

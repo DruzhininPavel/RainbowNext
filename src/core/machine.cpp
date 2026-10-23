@@ -429,8 +429,13 @@ void Machine::applyNex(const formats::NexFile& nex) {
     // Timex on, and every clip window covering the whole screen.
     writeNextReg(0x62, 0x00);
     writeNextReg(0x61, 0x00);
-    writeNextReg(0x06, 0xA8);
-    writeNextReg(0x08, 0xEE);
+    // nexload reads these two back and edits them in place rather than writing
+    // a constant, so a setting the caller made before loading survives. NR 0x06
+    // gets DivMMC automap switched off and the multiface switched on; NR 0x08
+    // gets locked paging and contention off, stereo back to ABC, SpecDrum,
+    // Timex and TurboSound on, and leaves the internal-speaker bit alone.
+    writeNextReg(0x06, u8((readNextReg(0x06) & ~0x10u) | 0x08u));
+    writeNextReg(0x08, u8((readNextReg(0x08) & 0x10u) | 0xCEu));
     writeNextReg(0x07, 0x03);   // the loader leaves the machine at 28 MHz
     writeNextReg(0x12, 0x09);   // Layer 2 main and shadow banks
     writeNextReg(0x13, 0x0C);
@@ -451,13 +456,17 @@ void Machine::applyNex(const formats::NexFile& nex) {
 
     // The loader blanks the Layer 2 and sprite palettes and fills the ULA one
     // with its sixteen default colours repeated, so a program that only sets
-    // the entries it uses does not inherit a leftover ramp.
+    // the entries it uses does not inherit a leftover ramp. It fills the ULA
+    // palette in two passes, one starting at index 0 and one at 128.
     static constexpr u8 DefaultUla[16] = {
         0x00, 0x02, 0xA0, 0xA2, 0x14, 0x16, 0xB4, 0xB6,
         0x00, 0x03, 0xE0, 0xE7, 0x1C, 0x1F, 0xFC, 0xFF};
     writeNextReg(0x43, 0x00);
-    writeNextReg(0x40, 0x00);
-    for (int entry = 0; entry < 256; ++entry) writeNextReg(0x41, DefaultUla[entry & 15]);
+    writeNextReg(0x42, 0x0F);   // ink mask off, flashing on
+    for (const u8 start : {u8(0), u8(128)}) {
+      writeNextReg(0x40, start);
+      for (int entry = 0; entry < 128; ++entry) writeNextReg(0x41, DefaultUla[entry & 15]);
+    }
     for (const u8 control : {u8(0x10), u8(0x20)}) {
       writeNextReg(0x43, control);
       writeNextReg(0x40, 0x00);
@@ -465,10 +474,11 @@ void Machine::applyNex(const formats::NexFile& nex) {
     }
   }
 
-  // The palette block is written to the Layer 2 first palette, which is what
-  // the loader's LoRes and Layer 2 screens both read.
+  // The palette block belongs to the loading screen. A LoRes screen takes its
+  // colours from the LoRes Layer 2 palette and everything else from the first
+  // Layer 2 palette, which is the distinction NR 0x43 bit 0 makes.
   if (nex.hasPalette) {
-    writeNextReg(0x43, 0x10);
+    writeNextReg(0x43, (nex.screenFlags & 0x04) != 0 ? 0x01 : 0x10);
     writeNextReg(0x40, 0x00);
     for (int entry = 0; entry < 256; ++entry) {
       palette_.setColour9(NextPalette::Layer2First, u8(entry), nex.palette[size_t(entry)]);
@@ -484,6 +494,12 @@ void Machine::applyNex(const formats::NexFile& nex) {
   // 6912 bytes of bank 5, which is where 0x4000 lands on a Next.
   place(9, nex.layer2Screen);
   place(5, nex.ulaScreen);
+  // A LoRes, Timex HiRes or HiCol loading screen covers 0x4000-0x6FFF. The
+  // loader fills that in two reads, 0x4000-0x57FF and 0x6000-0x77FF, but the
+  // two are contiguous in bank 5, so the 12K block lands as one run.
+  place(5, nex.loresScreen);
+  place(5, nex.hiresScreen);
+  place(5, nex.hicolScreen);
   for (const formats::NexBank& bank : nex.banks) place(size_t(bank.number), bank.data);
 
   next_.setMmuSlot(6, u8(nex.entryBank * 2));

@@ -172,7 +172,14 @@ a multicolour demo renders correctly; `z80test` passes.
       (`plugins/fuller`)
 * [x] `.nex` program format: V1.0-V1.3, banks read in the loader's order,
       palette, Layer 2 and ULA loading screens, entry bank, and the register
-      state `nexload` leaves behind. Loading one switches the machine to the Next
+      state `nexload` leaves behind. Loading one switches the machine to the Next.
+      The reset block follows `nexload.asm` literally: NR `0x06` and `0x08` are
+      read-modify-written so a setting made before loading survives, the ULA
+      palette is filled in the loader's two 128-entry passes, the loading screen
+      lands in bank 5 where `0x4000` sees it, and the palette control byte
+      selects the LoRes palette for a LoRes screen. NR `0x08` is readable so
+      that read-modify-write is possible. Programs that need the NextZXOS API
+      still cannot run -- see gap 22.
 * [x] Memory in the `Peripheral` contract: `interceptsMemory()`, `memRead` with
       an M1 flag, `memWrite`, and `Bus::memFetch` so a module can map itself in
       on an opcode fetch and shadow `0x0000`/`0x2000`
@@ -422,6 +429,46 @@ These are deliberate simplifications, tracked here so they are not forgotten:
 21. In blending modes 110 and 111 the half of the ULA layer that is not blended
     is always drawn above the sprites, which is what the modes intend for the
     ULA but not necessarily for the tilemap sharing that layer.
+22. A `.nex` program that calls the NextZXOS API cannot work yet, and this is
+    the one gap that keeps most of the format's own test programs dark. Of the
+    24 `.nex` files in the reference card image, the ones that never touch the
+    OS run: `show512` paints its colour ramp, `daybreak`, `scrollnu`,
+    `santaspr`, `hott`, `tm` and `bbcbasic` all reach their own code. The rest
+    stop on the first `RST 8` and paint nothing.
+
+    The chain is now fully traced. `nexload.asm` does not jump to the header
+    PC: it ends with `LD HL,(PCReg) / LD SP,(SPReg) / RST 0x20`, so a real
+    Next enters the program through the OS, not around it. On ROM page 3 --
+    which is where NextZXOS runs -- `0x0020` holds `C3 5B 15`, the `RST 0x20`
+    entry, and `0x0008` holds `2A 5D 5C`, so the `RST 8` vector has to come
+    from the divMMC ROM mapped over `0x0000`-`0x1FFF`. On ROM page 2, `0x0008`
+    is `C3 18 3F`, and `0x3F18` is the NextZXOS `RST 8` dispatcher: it takes an
+    inline three-byte parameter block (`RST 8`, function byte, 16-bit argument),
+    saves `AF`/`HL`, executes `OUT (0xE3),0` to map the divMMC in, pushes
+    `0x4804` as a return address and then `JP 0x3CFC`, which is
+    `NEXTREG 0x8E,3` -- select ROM 3 -- and falls through into `0x3D00`.
+
+    `0x3D00` is the esxDOS `RST 8` hook page, and the reason nothing works is
+    that it lives in **divMMC RAM** at `0x1D00`, which NextZXOS fills in during
+    its own boot. In the bare ROM image `0x3D00` is font and sprite data
+    (`00 00 00 00 00 00 00 00 00 10 10 10 ...`), so the CPU runs into it as
+    code and derails. The same is true of `RST 8` on ROM page 0: `0x103B` is a
+    `NEXTREG 0x8E` helper that expects `0x5B52`/`0x5B6A` to hold the
+    NextZXOS-saved `HL`/`SP`, and on a machine that never booted the OS both are
+    zero, so `LD SP,HL` loads `0` and the stack pointer is lost.
+
+    So the fix is not in the loader. It is either a booted NextZXOS, or an
+    API shim of our own: install a handler at divMMC RAM `0x1D00` that traps
+    the NextZXOS function codes and services them in C++, the way `EsxDos`
+    already does for `pc == 0x0008`. `EsxDos::trap()` exists but is dead code --
+    `enabled_` defaults to `false` and `Machine` never sets it -- so that is the
+    seam to build on.
+23. Programs that reach their own code still paint nothing because they never
+    enable the layer they draw to. `warhawk`, `lom`, `nextoid` and `revivals`
+    all run a real loop for hundreds of frames but leave NR `0x69` at `0`, so
+    Layer 2 is off and the ULA they show is the blank one the loader left
+    behind. They are not stuck: they are executing something we cannot yet see
+    the point of. Reproducing the OS is the precondition for judging them.
 
 ## Open decisions
 

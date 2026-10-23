@@ -89,7 +89,6 @@ bool NextRegFile::isReadOnly(u8 reg) {
   switch (reg) {
     case 0x00: // machine ID
     case 0x01: // core version
-    case 0x08: // peripheral 3
     case 0x0E: // core sub-version
     case 0x0F:
     case 0x1C: // active raster line
@@ -109,7 +108,6 @@ u8 NextRegFile::read(u8 reg) const {
     // Exactly one of bits 1:0 says how the machine last came up; the boot ROM
     // reads it to tell a cold start from an F4.
     case 0x02: return lastResetHard_ ? 0x02 : 0x01;
-    case 0x08: return 0x00;
     case 0x0E: return 0x0A; // core 3.01.10
     case 0x0F: return 0x00;
     case 0x1C: case 0x1D: case 0x1E: case 0x1F: return 0x00;

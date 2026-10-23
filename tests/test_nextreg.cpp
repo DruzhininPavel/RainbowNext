@@ -358,3 +358,17 @@ TEST(next_boots_the_128k_rom_through_the_mmu) {
   }
   CHECK(lit > 100); // the menu has been drawn
 }
+
+// NR 0x08 is the machine-type register. It is readable, so a loader can read
+// it back, edit one bit and write it again, which is exactly what nexload does
+// before it hands control to a .nex program.
+TEST(nextreg_08_reads_back_the_value_that_was_written) {
+  Machine m(MachineType::Next);
+  m.writeNextReg(0x08, 0xCE);
+  CHECK_EQ(m.readNextReg(0x08), u8(0xCE));
+
+  // A read-modify-write that only touches one bit must keep the others.
+  const u8 value = u8((m.readNextReg(0x08) & 0x10u) | 0xCEu);
+  m.writeNextReg(0x08, value);
+  CHECK_EQ(m.readNextReg(0x08), u8(0xCE));
+}
