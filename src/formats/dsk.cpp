@@ -1,6 +1,8 @@
 #include "formats/dsk.h"
 
 #include <algorithm>
+#include <cctype>
+#include <cstddef>
 #include <cstring>
 #include <fstream>
 #include <iterator>
@@ -8,9 +10,15 @@
 namespace rainbow::formats {
 namespace {
 
-constexpr char StandardMagic[] = "MV - CPCEMU Disk-File\r\nDisk-Info\r\n";
-constexpr char ExtendedMagic[] = "EXTENDED CPC DSK File\r\nDisk-Info\r\n";
-constexpr size_t MagicSize = 34;
+// Disk images in the wild spell the header ID differently: the original
+// CPCEMU uses "MV - CPCEMU Disk-File\r\nDisk-Info\r\n", while +3 tooling
+// (RealSpectrum, Spectaculator) writes "MV - CPCEMU +3 Disk Image" padded with
+// NULs instead. Both share the "MV - CPC" prefix, so match on that rather than
+// on the full 34-byte string.
+constexpr char StandardMagicPrefix[] = "MV - CPC";
+constexpr size_t StandardMagicPrefixSize = sizeof(StandardMagicPrefix) - 1;
+constexpr char ExtendedMagicPrefix[] = "EXTENDED ";
+constexpr size_t ExtendedMagicPrefixSize = sizeof(ExtendedMagicPrefix) - 1;
 constexpr size_t TrackInfoSize = 0x100;
 constexpr size_t SectorInfoSize = 8;
 
@@ -147,8 +155,8 @@ bool parseDsk(const std::vector<u8>& bytes, DiskImage& out, std::string& error) 
     return false;
   }
 
-  const bool extended = std::memcmp(bytes.data(), ExtendedMagic, MagicSize) == 0;
-  if (!extended && std::memcmp(bytes.data(), StandardMagic, MagicSize) != 0) {
+  const bool extended = std::memcmp(bytes.data(), ExtendedMagicPrefix, ExtendedMagicPrefixSize) == 0;
+  if (!extended && std::memcmp(bytes.data(), StandardMagicPrefix, StandardMagicPrefixSize) != 0) {
     error = "not a CPCEMU or extended DSK image";
     return false;
   }
@@ -165,8 +173,16 @@ bool parseDsk(const std::vector<u8>& bytes, DiskImage& out, std::string& error) 
 
   const size_t trackCount = size_t(out.tracks) * size_t(out.sides);
   // Extended images keep a per-track size table where the standard format has
-  // one fixed size for every track.
-  const u16 fixedSize = readLe16(bytes, 0x34);
+  // one fixed size for every track. That size normally sits at 0x34, but some
+  // writers (notably RealSpectrum's "+3 Disk Image" variant) place it at 0x32
+  // instead, so fall back to deriving it from the file length.
+  u16 fixedSize = readLe16(bytes, 0x34);
+  if (!extended && fixedSize < TrackInfoSize) fixedSize = readLe16(bytes, 0x32);
+  if (!extended && fixedSize < TrackInfoSize && bytes.size() > TrackInfoSize &&
+      (bytes.size() - TrackInfoSize) % trackCount == 0) {
+    const size_t derived = (bytes.size() - TrackInfoSize) / trackCount;
+    if (derived >= TrackInfoSize && derived <= 0xFFFF) fixedSize = u16(derived);
+  }
   if (!extended && fixedSize < TrackInfoSize) {
     error = "invalid track size in the disk header";
     return false;
@@ -204,6 +220,75 @@ bool loadDskFile(const std::string& path, DiskImage& out, std::string& error) {
   if (!parseDsk(bytes, out, error)) return false;
   out.path = path;
   return true;
+}
+
+namespace {
+
+// TR-DOS always uses the same geometry, which is why the container needs no
+// header: 80 cylinders, two sides, sixteen 256-byte sectors per track.
+constexpr int TrdTracks = 80;
+constexpr int TrdSides = 2;
+constexpr int TrdSectors = 16;
+constexpr size_t TrdSectorSize = 256;
+constexpr size_t TrdSize = size_t(TrdTracks) * TrdSides * TrdSectors * TrdSectorSize;
+
+} // namespace
+
+bool parseTrd(const std::vector<u8>& bytes, DiskImage& out, std::string& error) {
+  if (bytes.size() != TrdSize) {
+    error = "TRD image must be exactly " + std::to_string(TrdSize) + " bytes";
+    return false;
+  }
+
+  out = DiskImage{};
+  out.creator = "TR-DOS";
+  out.tracks = TrdTracks;
+  out.sides = TrdSides;
+  out.extended = false;
+  out.trackList.resize(size_t(TrdTracks) * size_t(TrdSides));
+
+  // The file order is the physical order of a formatted track, and the sector
+  // ids run 1..16 in that same order: the interleave TR-DOS uses lives in the
+  // ROM's read loop, not in the image.
+  size_t offset = 0;
+  for (size_t index = 0; index < out.trackList.size(); ++index) {
+    DskTrack& track = out.trackList[index];
+    track.track = int(index / size_t(TrdSides));
+    track.side = int(index % size_t(TrdSides));
+    track.formatted = true;
+    track.dataRate = 0;
+    track.sectors.reserve(TrdSectors);
+    for (int sector = 0; sector < TrdSectors; ++sector) {
+      DskSector entry;
+      entry.c = u8(track.track);
+      entry.h = u8(track.side);
+      entry.r = u8(sector + 1);
+      entry.n = 1; // 256 bytes
+      entry.data.assign(bytes.begin() + std::ptrdiff_t(offset),
+                        bytes.begin() + std::ptrdiff_t(offset + TrdSectorSize));
+      offset += TrdSectorSize;
+      track.sectors.push_back(std::move(entry));
+    }
+  }
+  return true;
+}
+
+bool loadTrdFile(const std::string& path, DiskImage& out, std::string& error) {
+  std::vector<u8> bytes;
+  if (!readFile(path, bytes, error)) return false;
+  if (!parseTrd(bytes, out, error)) return false;
+  out.path = path;
+  return true;
+}
+
+bool loadDiskFile(const std::string& path, DiskImage& out, std::string& error) {
+  std::string extension;
+  const size_t dot = path.find_last_of('.');
+  if (dot != std::string::npos) extension = path.substr(dot);
+  std::transform(extension.begin(), extension.end(), extension.begin(),
+                 [](unsigned char ch) { return char(std::tolower(ch)); });
+  if (extension == ".trd") return loadTrdFile(path, out, error);
+  return loadDskFile(path, out, error);
 }
 
 } // namespace rainbow::formats

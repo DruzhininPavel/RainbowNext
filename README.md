@@ -53,11 +53,13 @@ Status: v0.1.3 — M1 and M2 done: 48K and 128K/+2/+3 boot with AY sound, tape
   that paces a byte every `32 * prescalar` clocks so a block can be streamed
   out as sampled audio while the CPU keeps running.
 * **ULA** — port `0xFE` read/write, border, beeper, 8×5 keyboard matrix,
-  Fuse-compatible memory contention, floating bus.
+  memory contention with the six-busy, two-idle pattern anchored to the first
+  pixel of the display, floating bus.
 * **Machines** — 48K, 128K, +2, +3 and Pentagon, each with its own timings
   (69 888 / 70 908 / 71 680 T-states per frame at 3.5 MHz).
 * **Paging** — `0x7FFD` RAM/screen/ROM bank + lock, `0x1FFD` CP/M special paging
-  and the +3 ROM bit, contention following the paged bank.
+  and the +3 ROM bit, contention following the paged bank: odd banks at
+  `0xC000` on the 128K and the grey +2, every bank on the +2A/+3.
 * **Video** — 256×192 screen with correct Spectrum addressing and flashing,
   rendered into a 320×256 ARGB8888 framebuffer with border. On the Next the ULA
   also answers the Timex SCLD port (`ALTDFILE`, `EXTCOLOUR` and 512-pixel
@@ -72,9 +74,12 @@ Status: v0.1.3 — M1 and M2 done: 48K and 128K/+2/+3 boot with AY sound, tape
   the ROM loader trap at `0x0556`.
 * **ROM sets** — banked ROM images (`128-0.rom`…, `plus3-0.rom`…) are assembled
   into a single image, so the machine can page through all four banks.
-* **Disk** — +3 µPD765 on ports `0x2FFD`/`0x3FFD` with standard CPCEMU `.dsk`
-  and extended `.edsk` images (SPECIFY, SEEK, READ ID, READ/WRITE DATA, FORMAT
-  TRACK), driven by the real +3 ROM.
+* **Disk** — +3 µPD765 on ports `0x2FFD`/`0x3FFD` with standard CPCEMU `.dsk`,
+  extended `.edsk` and raw TR-DOS `.trd` images (SPECIFY, SEEK, READ ID,
+  READ/WRITE DATA, FORMAT TRACK), driven by the real +3 ROM, so the +3 `Loader`
+  boots programs straight off the image. Both the `MV - CPCEMU Disk-File` and
+  the `MV - CPCEMU +3 Disk Image` headers are accepted, including the writers
+  that keep the track size at `0x32`.
 * **Snapshots** — `.sna` (48K/128K) and `.z80` (v1, v2, v3 with RLE).
 * **RZX** — record and replay the RZX container: the input block holds the value
   every port read returned, so a replay reproduces the run regardless of what
@@ -84,15 +89,19 @@ Status: v0.1.3 — M1 and M2 done: 48K and 128K/+2/+3 boot with AY sound, tape
   and the loader's register state. Loading one switches the machine to the Next.
 * **Modular peripherals** — an expansion bus in the spirit of the edge
   connector. A Kempston joystick, a Kempston mouse, a ZX Printer (with PBM
-  export), a ROM cartridge and a DivMMC ship with the emulator; each is a module
-  that can be switched on and off in `Peripherals`, and the choice is remembered
-  in `rainbow.cfg`. Further modules are shared libraries dropped into a
+  export) and a ROM cartridge ship with the emulator; each is a module that can
+  be switched on and off in `Peripherals`, and the choice is remembered in
+  `rainbow.cfg`. Further modules are shared libraries dropped into a
   `peripherals/` folder next to the executable — the emulator finds them at
   startup and needs no rebuild (see [Writing a peripheral](#writing-a-peripheral)).
-* **DivMMC and SD card** — the mass-storage interface esxDOS runs on: an 8K (or
-  32K) DivMMC ROM, sixteen 8K RAM banks, the automap on the hook addresses, and
-  an SPI SD card that talks to a plain sector image. Load `esxdos.rom` and a
-  card image from `Peripherals`; both are yours to supply.
+* **DivMMC and SD card (in development)** — the mass-storage interface esxDOS
+  runs on: an 8K (or 32K) DivMMC ROM, sixteen 8K RAM banks, the automap on the
+  hook addresses, and an SPI SD card that talks to a plain sector image. The
+  module ships **unplugged**: its Next support is unfinished and the hook
+  derails the Next boot ROM, so it has to be switched on deliberately in
+  `Peripherals`, then given an `esxdos.rom` and a card image (both yours to
+  supply). Classic 128K + esxDOS is the configuration it is being developed
+  against. See [DivMMC](#divmmc) for the current state and what is still open.
 * **Frontend** — resizable window, integer scaling, speed 1×/2×/4×/8×,
   drag & drop loading, Dear ImGui menus and a debugger with breakpoints, a
   disassembly listing, a memory editor and a profiler.
@@ -185,14 +194,24 @@ ROM images are not bundled — see [`roms/README.md`](roms/README.md).
 ./build/rainbow game.tap             # ROM from roms/, tape inserted
 ./build/rainbow --rom 48.rom --tape game.tzx --snapshot save.z80
 ./build/rainbow --rom roms/plus3-0.rom --disk game.dsk
-./build/rainbow --rom roms/48.rom --sd nextzxos.img   # DivMMC SD card
+./build/rainbow --rom roms/128.rom --sd nextzxos.img  # DivMMC SD card (in development)
 ./build/rainbow --rom roms/next.rom --esxdos gamefiles/ # RST 8 from a directory
 ./build/rainbow --state quick.rbn      # carry on from a saved state
 ```
 
 A bare path is routed by extension: `.rom`, `.tap`/`.tzx`, `.sna`/`.z80`,
-`.nex`, `.dsk`/`.edsk`, `.img`, `.rbn`. The same files can be dropped onto the
+`.nex`, `.dsk`/`.edsk`/`.trd`, `.img`, `.rbn`. The same files can be dropped onto the
 window.
+
+Pick a ROM once and the emulator remembers it. **Machine > ROM images...** lists
+every machine with the image it will boot from: `Choose...` stores a path for
+that machine, `Forget` drops it and goes back to searching `roms/`. Machines that
+need a second image alongside their board ROM — the Next, which will not boot
+without its DivMMC/esxDOS ROM — get a sub-row of their own, so the companion is
+configured next to the board ROM instead of showing up later as a complaint.
+Opening a ROM by hand (`File > Open ROM...`, or dropping a file on the window)
+writes the same setting, so the next start comes up exactly where this one did,
+on the same machine.
 
 `--esxdos DIR` points the program's `RST 8` calls at a host directory instead of
 booting the DivMMC firmware: `F_OPEN`, `F_READ`, `F_WRITE`, `F_SEEK` and the
@@ -302,10 +321,11 @@ only: Fuse and other RZX players will refuse them.
 src/core/          Z80, ULA, AY, DACs, µPD765, SD card, Machine — no OS deps
 src/core/          peripheral.h and expansion.h: the bus and the module contract
 src/peripherals/   built-in modules: kempston, kempston mouse, printer,
-                   cartridge, divmmc (SPI SD card shared from src/core/sdcard)
+                   cartridge, divmmc (SPI SD card shared from src/core/sdcard;
+                   ships unplugged, still in development)
 src/plugin/        the C ABI and the loader for out-of-tree modules
 plugins/           example plugin: a Fuller Audio Box joystick interface
-src/formats/       SNA / Z80 / NEX images, TAP / TZX tapes, DSK / EDSK disks
+src/formats/       SNA / Z80 / NEX images, TAP / TZX tapes, DSK / EDSK / TRD disks
 src/frontend/      SDL3 + Dear ImGui host: app, audio, input, debugger, config
 tests/             unit tests, incl. an end-to-end boot test (no ROM required)
 docs/              ARCHITECTURE.md, REFERENCES.md, ROADMAP.md
@@ -350,7 +370,16 @@ on macOS and in the SDL pref path on Linux, and is a flat `key = value` file:
 plugin_dir = /path/to/peripherals
 peripheral = kempston
 peripheral = printer
+machine = next
+rom.next = /path/to/roms/next.rom
+divmmc.next = /path/to/roms/nxtmmc.rom
 ```
+
+`machine` is the machine the last session ran, and the `rom.<id>` /
+`divmmc.<id>` pairs are the images picked in **Machine > ROM images...** (ids are
+`48`, `128`, `plus2`, `plus3`, `pentagon`, `next`). A missing `rom.<id>` means
+"search `roms/`", which is what a fresh install does. Unknown keys are ignored,
+so an older build still opens a newer file.
 
 ## Testing
 
@@ -358,7 +387,7 @@ peripheral = printer
 ctest --test-dir build --output-on-failure
 ```
 
-414 tests cover the Z80 core (timings, flags, undocumented opcodes,
+507 tests cover the Z80 core (timings, flags, undocumented opcodes,
 interrupts), the disassembler (base, CB, ED, indexed and Z80N forms, lengths and
 flow), the debugger's breakpoints and profiler, save states (round trips of the
 CPU, memory, paging and peripherals, and the refusals for a damaged, truncated,
@@ -366,16 +395,19 @@ foreign or differently-ROM'd file), the rewind buffer, the Z80N extension, the
 Next MMU, palette, Layer 2, the Timex modes and the ULA+/ULANext attribute
 paths, the blending priority modes,
 sprites (including relative and unified sprites and the collision flags), the
-tilemap, the Copper and the zxnDMA, ULA behaviour, contention, floating bus,
-frame length, audio rate, both snapshot formats, the NEX parser and its
+tilemap, the Copper and the zxnDMA, ULA behaviour, the contention pattern and
+its per-machine phase, floating bus, frame length, audio rate, both snapshot formats, the NEX parser and its
 application to the machine, the AY, the TurboSound chip select and stereo bits,
 the SpecDrum and SoundDrive DAC ports, 128K/+3 paging and timings, tape blocks,
 the µPD765 and the DSK parser, the expansion bus with its modules and plugin
 loader, the DivMMC and its SPI SD card (single- and multi-block reads and
-writes), the settings file, and end-to-end runs of hand-assembled programs
-through the machine. Golden tests also boot the real
-`roms/128-0.rom` and `roms/plus3-0.rom` sets when those files are present; they
-skip themselves on a clean checkout.
+writes, and that the module ships unplugged), the settings file, and end-to-end
+runs of hand-assembled programs through the machine. Golden-frame tests hash
+the finished picture for the classic screen, flash, Timex hi-res, ULA+, Layer 2,
+sprites, the tilemap, LoRes and Radastan, so an unintended change to the
+renderer fails the run with the scene named. Golden boot tests also drive the
+real `roms/128-0.rom` and `roms/plus3-0.rom` sets when those files are present;
+they skip themselves on a clean checkout.
 
 ## License
 

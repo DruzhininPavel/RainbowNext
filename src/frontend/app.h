@@ -1,6 +1,7 @@
 #pragma once
 
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -74,8 +75,7 @@ private:
   };
 
   bool loadRom(const std::string& path);
-  bool loadSnapshot(const std::string& path);
-  bool loadTape(const std::string& path);
+  bool loadSnapshot(const std::string& path);  bool loadTape(const std::string& path);
   bool loadDisk(const std::string& path);
   bool loadCartridge(const std::string& path);
   bool loadDivMmcRom(const std::string& path);
@@ -101,9 +101,30 @@ private:
   void clearRewind();
   void openFileDialog(DialogKind kind);
   void openSaveDialog(DialogKind kind);
+  // The ROM dialogs remember which machine they were opened for: File > Open
+  // ROM targets the running machine, the ROM window targets whichever row was
+  // clicked and only applies at once if that machine is the one running.
+  void openRomDialog(DialogKind kind, MachineType target);
   void reset();
   // Types the ROM's load command and starts the deck; see Autoload.
   void autoloadTape();
+
+  // ROM images. Each machine remembers the files chosen for it, so a second
+  // start needs no clicking; an empty choice falls back to the roms/ lookup.
+  const RomChoice& romChoice(MachineType type) const;
+  // `persist` is false only during startup, where the config is written once at
+  // the end: saving earlier would record the machine's default peripherals
+  // before the user's list has been replayed.
+  void setRomChoice(MachineType type, const std::string& main, const std::string& divMmc,
+                    bool persist = true);
+  // Loads the remembered (or discovered) images for `type` into machine_.
+  bool applyRomChoice(MachineType type);
+  // The Next cannot boot without its divMMC image, so it is applied with the
+  // board ROM rather than waiting for the user to remember it.
+  bool applyDivMmcChoice(MachineType type);
+  // Where a machine's ROM would come from right now, for the ROM window.
+  std::string effectiveRomPath(MachineType type) const;
+  void drawRomsWindow();
 
   // Settings that outlive a run: which peripherals are plugged in and where
   // plugin libraries are looked for.
@@ -128,8 +149,9 @@ private:
   Input input_;
 
   std::string romPath_;
-  std::string quickStatePath_;
-  std::string sdPath_;
+  std::optional<MachineType> romDialogTarget_;
+  bool showRoms_ = false;
+  std::string quickStatePath_;  std::string sdPath_;
   std::vector<u8> sdImage_;
   std::string pendingDialogResult_;
   bool dialogOpen_ = false;

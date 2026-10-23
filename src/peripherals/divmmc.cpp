@@ -76,13 +76,23 @@ void DivMmc::reset() {
   spiLatch_ = 0xFF;
   std::fill(ram_.begin(), ram_.end(), u8(0));
   card_.reset();
-  card_.select(true);
+  card_.select(legacySpiPort());
+}
+
+// The reset button drops the latch and the SPI state but leaves the 128K RAM
+// alone -- it is ordinary memory on the board, and esxDOS keeps its warm-boot
+// markers there.
+void DivMmc::softReset() {
+  control_ = 0;
+  spiLatch_ = 0xFF;
+  card_.reset();
+  card_.select(legacySpiPort());
 }
 
 void DivMmc::enable() {
   control_ = 0;
   spiLatch_ = 0xFF;
-  card_.select(true);
+  card_.select(legacySpiPort());
 }
 
 void DivMmc::disable() {
@@ -105,9 +115,30 @@ bool DivMmc::ioRead(u16 port, u32, u8& value) {
     value = control_;
     return true;
   }
-  if (low == PortSpiData || low == PortUnmap || low == PortMapIn) {
-    // The DivMMC+ hands the SPI byte back on 0xE7 and 0xEB as well, so a driver
-    // written for either board works.
+  if (low == PortSpiData && legacySpiPort_) {
+    // The SPI interface is a shift register, not a latch: any eight clocks,
+    // whether the driver reads or writes, move a byte out to the card and a
+    // byte back in. A driver therefore sends its command with writes and
+    // collects the answer with reads, and the byte a write returned is
+    // discarded because during the command frame the card is silent.
+    spiLatch_ = card_.transfer(0xFF);
+    value = spiLatch_;
+    return true;
+  }
+  if (low == PortData) {
+    // 0xEB is the data port on the Next. On the older boards it is the map-in
+    // latch, which still reads back the last byte shifted.
+    if (legacySpiPort_) {
+      value = spiLatch_;
+    } else {
+      // Reading the Next's data port clocks a byte out of the card just like
+      // writing does, and drivers poll it while waiting for a response.
+      spiLatch_ = card_.transfer(0xFF);
+      value = spiLatch_;
+    }
+    return true;
+  }
+  if (low == PortUnmap && legacySpiPort_) {
     value = spiLatch_;
     return true;
   }
@@ -128,11 +159,29 @@ bool DivMmc::ioWrite(u16 port, u8 value, u32) {
     // clears it. The Next can clear it through NextReg 0x09 bit 3, which this
     // module does not watch, so the latch is simply writable.
     control_ = value;
-    card_.select(!mappedIn());
+    // On the Next the chip select lives on its own port, so the mapping latch
+    // has nothing to do with the card.
+    if (legacySpiPort_) card_.select(!mappedIn());
     return true;
   }
-  // The card's chip select is not a port of its own: the board ties it to the
-  // mapping latch, so a driver talks to the card exactly while the module is
+  if (!legacySpiPort_) {
+    // On the Next the chip select has a port of its own and 0xEB shifts a byte
+    // through the card: bit 0 low selects the SD card, high releases it.
+    if (low == PortUnmap) {
+      // Bit 0 is the SD card 0 select and bit 1 is card 1's; a board with one
+      // socket answers on either, which is what the Next does when it falls
+      // back to the second slot.
+      card_.select((value & 0x03) != 0x03);
+      return true;
+    }
+    if (low == PortData) {
+      spiLatch_ = card_.transfer(value);
+      return true;
+    }
+    return false;
+  }
+  // On the older boards the chip select is not a port of its own: it is tied to
+  // the mapping latch, so a driver talks to the card exactly while the module is
   // mapped out. That is why esxDOS unmaps before every SPI access.
   if (low == PortUnmap) {
     control_ &= u8(~Conmem);
@@ -151,12 +200,43 @@ bool DivMmc::ioWrite(u16 port, u8 value, u32) {
   return false;
 }
 
+bool DivMmc::hookEnabled(u16 addr) const {
+  u8 points = entryPoints0_;
+  u8 bit = 0;
+  switch (addr) {
+    case 0x0000: bit = 0x01; break;
+    case 0x0008: bit = 0x02; break;
+    case 0x0010: bit = 0x04; break;
+    case 0x0018: bit = 0x08; break;
+    case 0x0020: bit = 0x10; break;
+    case 0x0028: bit = 0x20; break;
+    case 0x0030: bit = 0x40; break;
+    case 0x0038: bit = 0x80; break;
+    case 0x0066: points = entryPoints1_; bit = 0x01; break;
+    case 0x04C6: points = entryPoints1_; bit = 0x04; break;
+    case 0x04D7: points = entryPoints1_; bit = 0x10; break;
+    case 0x0562: points = entryPoints1_; bit = 0x08; break;
+    case 0x056A: points = entryPoints1_; bit = 0x20; break;
+    default: return false;
+  }
+  if ((points & bit) == 0) return false;
+  // 0xB9 only covers the eight RST and reset vectors. A clear bit there means
+  // the point fires only while the +3 DOS ROM is paged, which is how the
+  // original divMMC behaved and why RST 8 is not hooked on a stock Next.
+  if (addr < 0x0066 && (entryPointsValid0_ & bit) == 0 && rom3Present_ &&
+      !rom3Present_()) {
+    return false;
+  }
+  return true;
+}
+
 bool DivMmc::memRead(u16 addr, u32, bool m1, u8& value) {
   if (rom_.empty() || addr >= 0x4000) return false;
 
   // The automap: an opcode fetch at a hook address maps the module in before
-  // the fetch is answered, which is the whole point of the M1 flag.
-  if (m1 && isHookAddress(addr)) control_ |= Conmem;
+  // the fetch is answered, which is the whole point of the M1 flag. It only
+  // happens while the board option is on.
+  if (m1 && automap_ && hookEnabled(addr)) control_ |= Conmem;
   if (!mappedIn()) return false;
 
   if (addr < 0x2000) {

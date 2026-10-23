@@ -80,6 +80,10 @@ void ExpansionBus::reset() {
   for (Slot& slot : slots_) slot.module->reset();
 }
 
+void ExpansionBus::softReset() {
+  for (Slot& slot : slots_) slot.module->softReset();
+}
+
 void ExpansionBus::tick(u32 cycles) {
   for (Slot& slot : slots_) {
     if (slot.enabled) slot.module->tick(cycles);

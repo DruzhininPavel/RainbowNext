@@ -52,7 +52,6 @@ struct Timings {
   u16 bottomBorder = 48;
   u16 verticalRetrace = 24;
   u16 interruptLength = 32;
-  u16 topLeftPixel = 14336;
   bool contended = true;
 };
 
@@ -98,7 +97,9 @@ public:
 
   explicit Machine(MachineType type = MachineType::Spectrum48);
 
-  void reset();
+  // A power-on reset also clears the RAM. A soft or hard reset triggered from
+  // NextReg 0x02 leaves the SRAM contents intact, as on real hardware.
+  void reset(bool preserveRam = false);
 
   bool loadRom(const std::string& path);
   // Loads a multi-bank ROM image (128K, +2, +2A, +3). A 16K file fills one
@@ -175,6 +176,11 @@ public:
   Tape& tape() { return tape_; }
   const Tape& tape() const { return tape_; }
   const u32* framebuffer() const { return framebuffer_.data(); }
+  // Headless runs (conformance tests, batch tools) skip the per-pixel
+  // compositor. Timing, interrupts and the border log still advance, so the
+  // emulated program cannot tell the difference.
+  void setVideoEnabled(bool on) { videoEnabled_ = on; }
+  bool videoEnabled() const { return videoEnabled_; }
   int frameWidth() const { return FrameWidth; }
   int frameHeight() const { return FrameHeight; }
   u64 frames() const { return frames_; }
@@ -247,6 +253,8 @@ private:
   u8 memReadBase(u16 addr, u32 t);
   void memWriteBase(u16 addr, u8 value, u32 t);
   void installPeripherals();
+  // Push NextRegs 0x0A and 0xB8-0xBB into the divMMC module.
+  void syncDivMmcAutomap();
   void refreshCartridge();
 
   void renderFrame();
@@ -311,6 +319,12 @@ private:
   // from the file 8K above it. The framebuffer is 256 wide, so each output pixel
   // is the average of the two hi-res pixels it covers.
   void renderUlaHiresRow(int y, std::array<u32, ScreenWidth>& row) const;
+  // LoRes replaces the ULA with a 128x96 image stretched over the whole 256x192
+  // viewport, two display pixels per dot. NextReg 0x15 bit 7 switches it on and
+  // 0x6A bit 5 turns it into Radastan, four bits per dot.
+  bool loresEnabled() const;
+  bool radastanMode() const;
+  void renderLoresRow(int y, std::array<u32, ScreenWidth>& row) const;
   // Register 0x15 orders sprites, Layer 2 and the ULA from top to bottom.
   std::array<int, 3> layerOrder() const;
   static int layerDepth(const std::array<int, 3>& order, int layer);
@@ -339,7 +353,7 @@ private:
   void mapBank(int slot, int bank, bool ram);
   void applySnapshot(const formats::Snapshot& snapshot);
   void applyNex(const formats::NexFile& nex);
-  bool applyTapeFastLoad();
+  bool applyTapeFastLoad(u16 entry);
 
   // The body of a save state, shared by both directions. Defined in
   // machine.cpp and instantiated for the reader and the writer, so the two can
@@ -409,6 +423,8 @@ private:
   u64 cpuTstates_ = 0;
   u32 turboAccum_ = 0;
   u64 frames_ = 0;
+  // Monotonic, so runFrame() can tell that the guest reset the machine.
+  u64 resets_ = 0;
   u64 instructions_ = 0;
   IoReadHook* ioReadHook_ = nullptr;
   bool irqLine_ = false;
@@ -416,6 +432,7 @@ private:
 
   std::vector<u16> breakpoints_;  // sorted, so the per-instruction test is a search
   bool profiling_ = false;
+  bool videoEnabled_ = true;
   std::array<u32, 65536> samples_{};
   u64 sampleTotal_ = 0;
 

@@ -18,7 +18,7 @@ flowchart TD
         FDC["µPD765<br/>+3 disk controller,<br/>two ports, non-DMA"]
         FMT["Formats<br/>SNA, Z80, TAP, TZX, DSK"]
         EXP["Expansion bus<br/>edge connector, I/O + memory,<br/>built-in + plugin modules"]
-        MMC["DivMMC<br/>esxDOS ROM, RAM window,<br/>SPI SD card"]
+        MMC["DivMMC (in development)<br/>esxDOS ROM, RAM window,<br/>SPI SD card, ships unplugged"]
     end
 
     subgraph host["Frontend (SDL3 + Dear ImGui)"]
@@ -85,7 +85,8 @@ There are two levels of module, and the difference is only who compiles them:
 * **Built-in** (`src/peripherals/`) are compiled into `rainbow_core`, created by
   a factory in `Machine::installPeripherals()` and type-safe. They can reach the
   rest of the core directly when they need to; `kempston`, `kempston-mouse`,
-  `printer`, `cartridge` and `divmmc` ship this way.
+  `printer`, `cartridge` and `divmmc` ship this way. `divmmc` is the one that
+  arrives unplugged (see [DivMMC and the SD card](#divmmc-and-the-sd-card)).
 * **Plugins** are shared libraries (`.dylib` / `.so` / `.dll`) in a folder next
   to the executable, found at startup and after `Rescan plugin folder`. They
   talk to the emulator through the plain C ABI of `src/plugin/plugin_api.h` and
@@ -155,6 +156,17 @@ one, plug in a fake module and drive it without a CPU or a ROM — see
 is the first module that uses the memory half of the contract. It owns two
 things.
 
+> **Status: in development, unplugged by default.** The module is created on
+> every machine but `Machine::installPeripherals()` adds it disabled, so
+> `rainbow.cfg`, the `Peripherals` menu, `--sd` and `Load DivMMC ROM...` are
+> what switch it on. Classic 128K + esxDOS is the configuration it is being
+> worked on. Its Next support is unfinished: on `MachineType::Next` the hook
+> returns into what is a `+3DOS` data table in the real ROM, the boot ROM then
+> executes data and soft-resets, so NextZXOS never reaches its menu. The
+> intended fix is to rework it as a separate out-of-tree plugin (the expansion
+> bus is the natural integration path) rather than keep it on the Next's boot
+> path.
+
 **The memory window.** When `conmem` is set the module replaces `0x0000-0x1FFF`
 with its ROM and `0x2000-0x3FFF` with one of sixteen 8K RAM banks, so `control`
 (the latch on port `0xE3`) selects the bank in bits 3:0, `mapram` in bit 6 puts
@@ -200,8 +212,7 @@ The frontend offers `Load DivMMC ROM...` and `Insert SD card image...` under
 Both switch the module on. The card image is owned by the app rather than the
 module, so switching the machine type rebuilds the bus without ejecting the
 card. The ROM is not shipped — put `esxdos.rom` (8K, or 32K for a DivMMC+)
-wherever you keep your ROMs and load it
-from there.
+wherever you keep your ROMs and load it from there.
 
 ## Timings
 
@@ -213,11 +224,21 @@ behavioural reference only:
 | 48K | 3 500 000 | — | 224 | 69 888 |
 | 128K / +2 | 3 546 900 | 1 773 400 | 228 | 70 908 |
 | +2A / +3 | 3 546 900 | 1 773 400 | 228 | 70 908 |
-| Pentagon | 3 584 000 | 1 792 000 | 224 | 70 908 |
+| Pentagon | 3 584 000 | 1 792 000 | 224 | 71 680 |
 
-Contention follows the Fuse pattern `{5,4,3,2,1,0,0,6}` indexed by
-`(x + 7) & 7` and only applies to `0x4000-0x7FFF` and `0xC000-0xFFFF` while the
-contended bank is paged into the screen window.
+Contention follows the pattern `{6,5,4,3,2,1,0,0}`: six busy T-states and two
+idle ones out of every eight, because the ULA fetches two pixels per T-state.
+The cycle is anchored to the first T-state of the display window and then
+indexed by the absolute T-state, which is what makes the machines differ. The
+48K line is 224 T-states, a multiple of eight, so every line meets the same
+phase; the 128K, the +3 and the Next line is 228, so their phase advances by
+four and the first pixel alternates between six and two T-states of delay.
+
+Contention applies to `0x4000-0x7FFF` always, and to `0xC000-0xFFFF` only while
+a contended bank is paged into the screen window: the 128K and the grey +2
+contend on the odd banks alone, because the gate array cannot see the even ones,
+while the +2A/+3 ASIC contends whatever bank it puts there. The Pentagon has no
+contention at all.
 
 ## Data flow of one frame
 
@@ -382,6 +403,14 @@ block per track with an eight-byte entry per sector (C, H, R, N, ST1, ST2,
 length), which is exactly the CHRN tuple the controller reports in READ ID and
 searches for in READ/WRITE DATA. Sectors are stored with `128 << n` bytes so a
 read can hand out a fixed-size block regardless of how the image was written.
+
+A raw TR-DOS `.trd` needs no decoder at all: it carries no header, so the
+geometry is fixed at 80 cylinders, two sides and sixteen 256-byte sectors per
+track, and the file is exactly those sectors in physical order. `parseTrd`
+synthesises the same `DiskImage` with sector ids 1..16, which is what the
+controller reports and the TR-DOS ROM asks for. `loadDiskFile` dispatches on the
+extension so the rest of the code never has to know which container it was
+handed.
 
 `Upd765` borrows the image instead of owning it: `Machine` holds the
 `DiskImage` and re-points the controller after a load or a reset, which keeps

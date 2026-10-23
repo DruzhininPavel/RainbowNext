@@ -43,6 +43,8 @@ public:
   void setObserver(std::function<void()> observer) { observer_ = std::move(observer); }
 
   void reset();
+  // The reset button: modules keep whatever they hold in RAM.
+  void softReset();
   void tick(u32 cycles);
 
   bool ioRead(u16 port, u32 t, u8& value);

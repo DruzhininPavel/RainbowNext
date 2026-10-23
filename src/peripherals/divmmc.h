@@ -1,5 +1,6 @@
 #pragma once
 
+#include <functional>
 #include <string>
 #include <vector>
 
@@ -25,8 +26,14 @@ class DivMmc final : public Peripheral {
 public:
   static constexpr u16 PortControl = 0xE3;
   static constexpr u16 PortUnmap = 0xE7;
-  static constexpr u16 PortMapIn = 0xEB;
+  static constexpr u16 PortData = 0xEB;
+  // The original DivIDE put the SPI byte on 0xDF; the Next moved it to 0xEB and
+  // handed 0xDF to the Kempston joystick and DAC D, so the legacy port is only
+  // decoded on a classic machine.
   static constexpr u16 PortSpiData = 0xDF;
+  // The map-in latch of the older boards sits on the same port as the Next's
+  // data port; which of the two a write means depends on the host.
+  static constexpr u16 PortMapIn = PortData;
   // The status port is decoded on four mirrors so a driver can pick one that
   // does not collide with whatever else is plugged in.
   static constexpr u16 PortStatus = 0x1F;
@@ -41,6 +48,7 @@ public:
 
   const PeripheralInfo& info() const override;
   void reset() override;
+  void softReset() override;
   void enable() override;
   void disable() override;
 
@@ -69,6 +77,40 @@ public:
   bool romLoaded() const { return !rom_.empty(); }
   u8 control() const { return control_; }
   void setControl(u8 value) { control_ = value; }
+  // Automap is a board option rather than part of the latch: it decides whether
+  // an opcode fetch at a hook address pulls the module in by itself. The Next
+  // exposes it as NextReg 0x0A bit 4 and leaves it off, so its boot ROM keeps
+  // the RST 0/8 vectors until NextZXOS hands them to esxDOS.
+  void setAutomap(bool on) { automap_ = on; }
+  bool automap() const { return automap_; }
+  // Which addresses automap, and under what conditions. The Next puts this in
+  // NextRegs 0xB8-0xBB: 0xB8/0xBB hold one enable bit per entry point, 0xB9
+  // says whether a point fires everywhere or only while the +3 DOS ROM is the
+  // one paged in, and 0xBA asks for the map to happen after the instruction
+  // rather than before it. Mapping before the fetch is what makes a hook
+  // address work at all, so the timing bits are accepted but not acted on.
+  void setEntryPoints(u8 points0, u8 valid0, u8 timing0, u8 points1) {
+    entryPoints0_ = points0;
+    entryPointsValid0_ = valid0;
+    entryPointsTiming0_ = timing0;
+    entryPoints1_ = points1;
+  }
+  u8 entryPoints0() const { return entryPoints0_; }
+  u8 entryPointsValid0() const { return entryPointsValid0_; }
+  u8 entryPointsTiming0() const { return entryPointsTiming0_; }
+  u8 entryPoints1() const { return entryPoints1_; }
+  // The machine answers whether the +3 DOS ROM is the one at 0x0000.
+  void setRom3PresentProvider(std::function<bool()> provider) {
+    rom3Present_ = std::move(provider);
+  }
+  // Whether an opcode fetch at `addr` pulls the module in, entry points and the
+  // ROM3 condition included. The automap master switch is not consulted.
+  bool hookEnabled(u16 addr) const;
+  // Whether the DivIDE-era 0xDF data port is decoded. Off on the Next, where
+  // 0xDF belongs to the Kempston joystick and DAC D; the data port there is
+  // 0xEB, which is always decoded.
+  void setLegacySpiPort(bool on) { legacySpiPort_ = on; }
+  bool legacySpiPort() const { return legacySpiPort_; }
   bool mappedIn() const { return (control_ & Conmem) != 0; }
   bool mapram() const { return (control_ & Mapram) != 0; }
   int bank() const { return control_ & 0x0F; }
@@ -90,6 +132,13 @@ private:
   std::vector<u8> rom_;
   std::vector<u8> ram_ = std::vector<u8>(size_t(BankCount) * BankSize, 0);
   u8 control_ = 0;
+  bool automap_ = true;
+  bool legacySpiPort_ = true;
+  u8 entryPoints0_ = 0x83;
+  u8 entryPointsValid0_ = 0x01;
+  u8 entryPointsTiming0_ = 0x00;
+  u8 entryPoints1_ = 0xCD;
+  std::function<bool()> rom3Present_;
   SdCard card_;
   // The SPI port is one register: a write clocks a byte through the card and
   // latches what came back, a read hands that latched byte over without

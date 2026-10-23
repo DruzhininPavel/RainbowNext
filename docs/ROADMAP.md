@@ -21,9 +21,31 @@ done by loading a ROM or a snapshot.
       a `LOAD ""` run from a real TAP, and golden tests that boot the real `roms/48.rom`
 * [x] `48.rom` boots to the BASIC prompt: the copyright message is printed and
       `PRINT 42` evaluates to `42` with the `0 OK, 0:1` report
-* [ ] `z80test` / `zexall` conformance runs in CI
+* [x] `z80test` conformance suite runs as part of the unit tests: `z80doc` and
+      `z80docflags` pass 160 of 160, `z80full` and `z80flags` 154 of 160. The
+      remaining six are the two `SCF`+`CCF` sequences, whose vectors the suite
+      derives from a pseudo-random mix of both instructions, and the four
+      `->NOP'` block cases that depend on how an undefined `ED 00` behaves.
+      `z80memptr`, which observes the internal WZ register through `BIT n,(HL)`,
+      is wired in as a regression guard at 143 of 160: `JR`, `DJNZ`,
+      `IN r,(C)`/`OUT (C),r`, `LD (BC),A`/`LD (DE),A` and the `ADD HL,rr`
+      family now leave the documented WZ behind, the rest is listed in
+      `docs/REFERENCES.md`
+* [x] Zilog NMOS `SCF`/`CCF` undocumented-flag rule: F3/F5 come from `A` when
+      the previous instruction wrote the flags and are ORed with the old bits
+      otherwise. `POP AF` does not count as a flag write, and an intervening
+      `DD`/`FD` prefix forgets that a flag write happened
+* [x] Synthetic test ROM (`tools/make_test_rom.py` → `tests/data/test48.rom`) so
+      the suites run without the copyrighted Spectrum ROM
+* [ ] `zexall` conformance run
 * [x] TAP/TZX tape loading
-* [ ] Golden-frame image hashes
+* [x] Golden-frame hashes: `tests/test_golden.cpp` renders ten scenes and
+      compares an FNV-1a hash of the whole 320×256 surface against a recorded
+      value. The scenes build their own memory contents, so no ROM is needed:
+      the classic screen with per-cell ink/paper/bright, flash blinking, Timex
+      hi-res, ULA+, a Layer 2 gradient, two sprites, the tilemap, LoRes and
+      Radastan. Every scene also asserts a few named pixels first, so a hash
+      cannot record a renderer that draws the wrong picture
 
 **Exit criteria:** `48.rom` boots to the BASIC prompt and executes BASIC (done);
 a multicolour demo renders correctly; `z80test` passes.
@@ -39,10 +61,19 @@ a multicolour demo renders correctly; `z80test` passes.
 * [x] Frame timings: 69 888 (128K), 70 908 (+2A/+3), 71 680 (Pentagon)
 * [x] Contention per paged bank; Pentagon reports no contention
 * [x] Real ROM boot verified: 128K menu, ROM paging into 48 BASIC, +3 Amstrad menu
-* [ ] Exact 128K contention (`offset` 1 vs 4, `line_times[]`)
+* [x] Exact contention: the six-busy, two-idle pattern is anchored to the first
+      T-state of the display window and then follows the absolute T-state, so
+      the 48K, whose 224-T-state line is a multiple of eight, meets the same
+      phase on every line while the 128K, the +3 and the Next, whose lines are
+      228 T-states, walk the phase by four and alternate between six and two
+      T-states of delay at the first pixel. The +2A/+3 ASIC contends every bank
+      at `0xC000`, whereas the 128K and the grey +2 contend only while an odd
+      bank is paged there, because the gate array cannot see the even ones.
 * [x] +3 disk controller (µPD765) and `.dsk`/`.edsk`: SPECIFY, SENSE DRIVE,
       SENSE INTERRUPT, RECALIBRATE, SEEK, READ ID, READ DATA/DELETED/TRACK,
-      WRITE DATA/DELETED, FORMAT TRACK; standard CPCEMU and extended images
+      WRITE DATA/DELETED, FORMAT TRACK; standard CPCEMU, extended and raw TR-DOS
+      images, plus the `MV - CPCEMU +3 Disk Image` header variant; the +3 ROM
+      `Loader` boots programs from a `.dsk`
 * [ ] Pentagon ULA+ attributes and `0xDFFD`/`0xEFF7` magic ports
 * [ ] Real-time tape playback tuning for protected loaders (turbo blocks, custom pilots)
 
@@ -97,7 +128,15 @@ a multicolour demo renders correctly; `z80test` passes.
 * [x] The second Layer 2 palette, selectable for drawing by `0x43` bits 6:4 and
       for display by `0x43` bit 2, and bit 7 of a Layer 2 colour, which the
       blending modes use to lift the pixel above the sprites
-* [ ] Radastan mode
+* [x] LoRes and Radastan: `0x15` bit 7 replaces the ULA with a 128×96 image
+      stretched over the whole 256×192 viewport, two display pixels per dot and
+      two rows per image row. LoRes keeps eight bits per dot and adds the `0x6A`
+      palette offset to the high nibble only; Radastan takes four bits per dot
+      from one palette block, narrowed to `11` & offset(1:0) while ULA+ owns the
+      top 64 entries and to the plain high nibble once ULANext takes it back.
+      `0x6A` bit 4 XORs the Timex display file select, `0x32`/`0x33` scroll the
+      image in half-dot steps, and the clip registers are unimplemented on
+      hardware, so LoRes pixels are always opaque
 * [x] The Copper of registers `0x60`-`0x63`: 2K of program memory addressed by
       `0x61` (low byte) and bits 2:0 of `0x62` (high three bits), the `WAIT`
       and `MOVE` instructions, `0x0000` as a no-op and `0xFFFF` as the halt,
@@ -140,7 +179,9 @@ a multicolour demo renders correctly; `z80test` passes.
 * [x] DivMMC: an 8K or 32K esxDOS ROM, sixteen 8K RAM banks, `mapram`, the
       automap on `0x0000`/`0x0008`/`0x0038`/`0x0066`/`0x04C6`/`0x0562`, and an
       SPI SD card on an in-memory sector image (`CMD0`-`CMD59`, SDHC, block
-      addressing). Loaded from the `Peripherals` menu
+      addressing). Loaded from the `Peripherals` menu. Ships **unplugged** --
+      classic 128K + esxDOS is the configuration it is being finished on, and
+      its Next support currently derails the Next boot ROM (see item 17)
 * [x] SD card image access for NextZXOS: the card is `src/core/sdcard.*`, shared
       by the DivMMC and the Next firmware instead of hidden inside the module,
       with `CMD18`/`CMD25`/`CMD12`/`CMD23` for the multi-block reads and writes
@@ -219,13 +260,25 @@ a multicolour demo renders correctly; `z80test` passes.
       layer that sits beside the matrix so releasing the pad cannot clear a key
       the keyboard holds. `Start` summons the toolbar for a pad with no pointer,
       `Back` pauses. See `docs/ARCHITECTURE.md`, "Input and handhelds"
+* [x] Persistent ROM settings. `Machine > ROM images...` lists every machine
+      with the image it boots from, `Choose...` stores a path and `Forget` drops
+      it, both written to `rainbow.cfg` as `rom.<id>` so a fresh start needs no
+      `--rom`. Machines that need a second image get a sub-row: the Next has a
+      divMMC slot (`divmmc.<id>`), which is where the esxDOS ROM belongs, so it
+      is loaded together with the board ROM instead of surfacing later as a
+      warning. The machine itself is stored too (`machine`), and picking a ROM
+      by hand writes the same setting, so the window and the manual path cannot
+      disagree
 
 ## Known gaps
 
 These are deliberate simplifications, tracked here so they are not forgotten:
 
-1. `Machine::contention` uses the simplified pattern without `line_times[]`;
-   it can differ from Fuse by a few T-states at the exact border edges.
+1. `Machine::contention` derives its window from the border geometry rather
+   than from a per-line `line_times[]` table, so the contended window is the
+   whole display rectangle and the pattern restarts with it. The phase and the
+   per-bank `0xC000` rule match the hardware; what is missing is the Next's
+   layer 2 and sprite fetches, which contend on their own schedules.
 2. `Ula::reset()` always sets `defaultValue_ = 0xBF`; 128K Issue 3 should use
    `b & 0x10 ? 0xFF : 0xBF`.
 3. `ioRead` for ports other than `0xFE` does not return the floating bus on 48K.
@@ -242,8 +295,8 @@ These are deliberate simplifications, tracked here so they are not forgotten:
    completes in the same frame; the +3 ROM only polls the interrupt line, which
    this satisfies. Writes go straight into the in-memory image and are not
    flushed back to the `.dsk` file.
-9. Contention uses one fixed pattern per line instead of a per-line
-   `line_times[]` table, so the 128K/+3 windows start a few T-states early.
+9. The contended window is the display rectangle for every machine, so the
+   border lines a ULA fetch steals from the edges are not modelled.
 10. The Copper's horizontal `WAIT` position is decoded but does not delay the
     instruction: the compositor samples the register file once per scanline, so
     a Copper write lands at the start of its line rather than at its column.
@@ -276,9 +329,24 @@ These are deliberate simplifications, tracked here so they are not forgotten:
     the emulator exits. The SPI clock is not modelled: a command is answered on
     the next byte instead of after the few hundred cycles a real card needs, so
     a driver that polls for readiness simply sees it at once.
-17. The DivMMC does not decode NextReg `0xB8`-`0xBB`, the programmable automap
-    entry points, and its status port at `0x1F` is an approximation (card detect
-    and busy only); the exact bit layout of a real board was not available.
+17. DivMMC on the Next is unfinished and the module therefore ships unplugged.
+    The hook, the automap entry points and the SD card now all work: the boot
+    ROM reaches the divMMC ROM's `RST 0x08` handler, the card answers with a
+    valid R1 and the handler returns. The remaining break is inside the boot
+    ROM itself. Its glue at ROM page 2 `0x3F18`-`0x3F3D` ends with
+    `PUSH 0x4804 / JP 0x3CFC`, and ROM page 2 `0x3CFC` holds
+    `NEXTREG 0x8E,3` -- `ED 91 8E 03` and then zero fill. The write selects
+    ROM page 3, so the next fetch is `0x3D00`, which in the `+3DOS` ROM is
+    zero fill too (verified byte-identical to `plus3.rom` from `0x3D00` on), and
+    the CPU NOP-slides out of page 3 into the `+3DOS` soft reset instead of
+    returning to `0x4804`. ROM page 3 `0x3CFC` is `C9`, exactly the `RET` the
+    glue needs, so the trampoline only works if ROM 3 is already selected when
+    `JP 0x3CFC` runs. Working out why a real Next is in that state -- the ROM
+    bytes are the same, so it is not an image difference -- is what is left.
+    The plan is still to finish this as a separate out-of-tree plugin over the
+    expansion bus rather than keep it on the Next's boot path. Its status port
+    at `0x1F` is also an approximation (card detect and busy only); the exact
+    bit layout of a real board was not available.
 18. A `.nex` loading screen is loaded into memory but never shown: the
     `loadingBar`, `loadingDelay` and `startDelay` fields are parsed and ignored,
     so the program starts at once instead of after an animated bar. The

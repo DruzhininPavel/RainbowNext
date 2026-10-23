@@ -64,9 +64,11 @@ Exchange command(SdCard& card, u8 cmd, u32 arg, size_t extra = 0) {
   const u8 frame[6] = {u8(0x40 | cmd), u8(arg >> 24), u8(arg >> 16), u8(arg >> 8),
                        u8(arg), 0x95};
   for (size_t i = 0; i < 5; ++i) card.transfer(frame[i]);
-  // The R1 comes back on the clock that shifts the CRC byte in, exactly as it
-  // does on a real card, so that transfer's answer starts the response.
-  out.bytes.push_back(card.transfer(frame[5]));
+  // The card does not drive MISO during the command frame, so the CRC clock
+  // reads high and the R1 arrives on the clock after it, exactly as it does on
+  // a real card.
+  card.transfer(frame[5]);
+  out.bytes.push_back(card.transfer(0xFF));
   // Drain the rest: the queue is finite, so a fixed number of clocks is enough
   // and keeps the test independent of the internal length.
   for (size_t i = 0; i < 32 + extra; ++i) out.bytes.push_back(card.transfer(0xFF));
@@ -596,7 +598,9 @@ TEST(divmmc_routes_spi_bytes_through_the_data_port) {
   CHECK(div.loadCard(makeCard(), error));
   div.ioWrite(DivMmc::PortUnmap, 0, 0);
 
-  // CMD0 shifted out one byte at a time, then the R1 that comes back.
+  // CMD0 shifted out one byte at a time, then the R1 that comes back. The card
+  // is silent while the frame is being clocked in, so the CRC's own clock is
+  // its one byte of latency and the first read returns the response.
   div.ioWrite(DivMmc::PortSpiData, 0x40, 0);
   for (int i = 0; i < 4; ++i) div.ioWrite(DivMmc::PortSpiData, 0x00, 0);
   div.ioWrite(DivMmc::PortSpiData, 0x95, 0);
@@ -604,6 +608,76 @@ TEST(divmmc_routes_spi_bytes_through_the_data_port) {
   u8 value = 0;
   CHECK(div.ioRead(DivMmc::PortSpiData, 0, value));
   CHECK_EQ(value, u8(0x01));  // idle
+}
+
+TEST(divmmc_next_selects_the_card_through_port_e7) {
+  DivMmc div;
+  div.setLegacySpiPort(false);
+  std::string error;
+  CHECK(div.loadCard(makeCard(), error));
+
+  // On the Next the mapping latch says nothing about the card: every socket
+  // stays released until 0xE7 picks one.
+  CHECK(!div.card().selected());
+  CHECK(div.ioWrite(DivMmc::PortControl, u8(DivMmc::Conmem), 0));
+  CHECK(!div.card().selected());
+
+  // Bit 0 low picks SD card 0 and bit 1 low picks card 1; the value is not
+  // otherwise a chip select, so 0xFE and 0xFD both mean "a card is listening".
+  CHECK(div.ioWrite(DivMmc::PortUnmap, 0xFE, 0));
+  CHECK(div.card().selected());
+  CHECK(div.ioWrite(DivMmc::PortUnmap, 0xFD, 0));
+  CHECK(div.card().selected());
+
+  // All bits high is the released state the driver leaves behind.
+  CHECK(div.ioWrite(DivMmc::PortUnmap, 0xFF, 0));
+  CHECK(!div.card().selected());
+}
+
+TEST(divmmc_next_data_port_reads_clock_the_card) {
+  DivMmc div;
+  div.setLegacySpiPort(false);
+  std::string error;
+  CHECK(div.loadCard(makeCard(), error));
+  CHECK(div.ioWrite(DivMmc::PortUnmap, 0xFE, 0));
+
+  // Everything goes through 0xEB, and only a read clocks a byte in: the driver
+  // spins on the port until the card answers.
+  auto send = [&div](u8 cmd, u32 arg) {
+    div.ioWrite(DivMmc::PortData, u8(0x40 | cmd), 0);
+    div.ioWrite(DivMmc::PortData, u8(arg >> 24), 0);
+    div.ioWrite(DivMmc::PortData, u8(arg >> 16), 0);
+    div.ioWrite(DivMmc::PortData, u8(arg >> 8), 0);
+    div.ioWrite(DivMmc::PortData, u8(arg), 0);
+    div.ioWrite(DivMmc::PortData, 0x95, 0);
+  };
+  auto poll = [&div](size_t count) {
+    std::vector<u8> got;
+    for (size_t i = 0; i < count; ++i) {
+      u8 value = 0xFF;
+      div.ioRead(DivMmc::PortData, 0, value);
+      got.push_back(value);
+    }
+    return got;
+  };
+
+  poll(4);  // the card needs a few clocks to enter SPI mode
+  send(0, 0);
+  poll(4);
+  send(8, 0x1AA);
+  poll(4);
+  send(55, 0);
+  poll(4);
+  send(41, 0x40000000);
+  poll(4);
+
+  send(17, 0);  // READ_SINGLE_BLOCK, sector 0
+  const std::vector<u8> block = poll(64);
+  bool sawToken = false;
+  for (u8 value : block) {
+    if (value == 0xFE) sawToken = true;
+  }
+  CHECK(sawToken);
 }
 
 TEST(divmmc_loads_an_image_by_extension) {
@@ -736,4 +810,115 @@ TEST(divmmc_is_off_the_bus_until_it_is_plugged_in) {
   CHECK(!machine.expansion().enabled("divmmc"));
   CHECK_EQ(machine.memFetch(0x0066, 0), u8(0x3F));
   CHECK(!div->mappedIn());
+}
+
+TEST(divmmc_hook_enable_follows_the_entry_point_registers) {
+  DivMmc div;
+  div.setEntryPoints(0x82, 0x00, 0x00, 0xCD);
+
+  // 0xB8 asks for 0x0038 and 0x0008 and nothing else, so the reset vector is
+  // not an entry point any more.
+  CHECK(!div.hookEnabled(0x0000));
+  CHECK(div.hookEnabled(0x0038));
+  CHECK(!div.hookEnabled(0x0010));
+
+  // 0xB9 is clear for 0x0008, so the point only fires while the +3 DOS ROM is
+  // the one paged in. That is exactly what keeps the Next boot ROM's own use of
+  // RST 8 as a bank switcher working.
+  bool rom3 = false;
+  div.setRom3PresentProvider([&rom3] { return rom3; });
+  CHECK(!div.hookEnabled(0x0008));
+  rom3 = true;
+  CHECK(div.hookEnabled(0x0008));
+
+  // 0xB9 bit 0 is set for 0x0000, so that point does not care about ROM3.
+  CHECK(div.hookEnabled(0x0038));
+
+  // 0xBB keeps the esxDOS hooks and drops the NMI vectors, which it does by
+  // leaving bits 0 and 1 clear.
+  div.setEntryPoints(0x00, 0x00, 0x00, 0x04);
+  CHECK(!div.hookEnabled(0x0066));
+  CHECK(div.hookEnabled(0x04C6));
+  CHECK(!div.hookEnabled(0x0562));
+}
+
+TEST(next_divmmc_starts_unplugged) {
+  // Its Next support is unfinished -- the hook derails the boot ROM -- so the
+  // module ships unplugged and waits to be switched on deliberately.
+  for (const MachineType type :
+       {MachineType::Spectrum48, MachineType::Spectrum128, MachineType::Plus2,
+        MachineType::Plus3, MachineType::Pentagon, MachineType::Next}) {
+    Machine machine(type);
+    CHECK(machine.expansion().find("divmmc") != nullptr);
+    CHECK(!machine.expansion().enabled("divmmc"));
+  }
+}
+
+TEST(next_divmmc_automap_starts_off_and_follows_register_0x0a) {
+  Machine machine(MachineType::Next);
+  auto* div = static_cast<DivMmc*>(machine.expansion().find("divmmc"));
+  CHECK(div != nullptr);
+
+  // A hard reset clears the master switch, so the boot ROM keeps both RST
+  // vectors for itself.
+  CHECK(!div->automap());
+
+  machine.writeNextReg(0x0A, 0x10);
+  CHECK(div->automap());
+  machine.writeNextReg(0x0A, 0x00);
+  CHECK(!div->automap());
+}
+
+TEST(next_divmmc_entry_point_registers_reach_the_module) {
+  Machine machine(MachineType::Next);
+  auto* div = static_cast<DivMmc*>(machine.expansion().find("divmmc"));
+  CHECK(div != nullptr);
+
+  // The soft reset defaults: 0x0000 and 0x0038 everywhere, the rest only with
+  // ROM3 paged in.
+  CHECK_EQ(div->entryPoints0(), u8(0x83));
+  CHECK_EQ(div->entryPointsValid0(), u8(0x01));
+  CHECK_EQ(div->entryPointsTiming0(), u8(0x00));
+  CHECK_EQ(div->entryPoints1(), u8(0xCD));
+
+  machine.writeNextReg(0xB8, 0x82);
+  machine.writeNextReg(0xB9, 0x00);
+  machine.writeNextReg(0xBB, 0xF2);
+  CHECK_EQ(div->entryPoints0(), u8(0x82));
+  CHECK_EQ(div->entryPointsValid0(), u8(0x00));
+  CHECK_EQ(div->entryPoints1(), u8(0xF2));
+}
+
+TEST(next_divmmc_rst8_only_maps_in_with_rom3_paged) {
+  Machine machine(MachineType::Next);
+  std::vector<u8> system(0x10000, 0x3F);
+  CHECK(machine.loadRomImageData(system.data(), system.size()));
+  machine.reset();
+
+  auto* div = static_cast<DivMmc*>(machine.expansion().find("divmmc"));
+  CHECK(div != nullptr);
+  // The module is unplugged by default until its Next support is finished, so
+  // the test has to switch it on the same way a user would.
+  CHECK(machine.expansion().setEnabled("divmmc", true));
+  std::string error;
+  CHECK(div->loadRom(std::vector<u8>(DivMmc::RomSize, 0xC9), error));
+
+  // What the Next boot ROM itself programs before it turns the automap on.
+  machine.writeNextReg(0x0A, 0x10);
+  machine.writeNextReg(0xB8, 0x82);
+  machine.writeNextReg(0xB9, 0x00);
+
+  // ROM bank 0 is paged, so the RST 8 vector belongs to the ROM.
+  CHECK_EQ(machine.romBank(), u8(0x00));
+  CHECK_EQ(machine.memFetch(0x0008, 0), u8(0x3F));
+  CHECK(!div->mappedIn());
+
+  // Page the +3 DOS ROM in and the same fetch is a call into esxDOS. ROM 3 is
+  // the one that needs both select bits: 0x7FFD bit 4 for the low bit and
+  // 0x1FFD bit 2 for the high one.
+  machine.ioWrite(0x7FFD, 0x10, 0);
+  machine.ioWrite(0x1FFD, 0x04, 0);
+  CHECK_EQ(machine.romBank(), u8(0x03));
+  CHECK_EQ(machine.memFetch(0x0008, 0), u8(0xC9));
+  CHECK(div->mappedIn());
 }

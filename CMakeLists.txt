@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.24)
-project(RainbowNext VERSION 0.1.4 LANGUAGES CXX)
+project(RainbowNext VERSION 0.4.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -196,8 +196,9 @@ if(RAINBOW_BUILD_TESTS)
     tests/test_nex.cpp
     tests/test_esxdos.cpp
     src/frontend/config.cpp
+    tests/test_config.cpp
     src/frontend/autoload.cpp
-  tests/test_turbosound.cpp
+    tests/test_turbosound.cpp
     tests/test_tilemap.cpp
     tests/test_nextreg.cpp
     tests/test_ula.cpp
@@ -211,6 +212,11 @@ if(RAINBOW_BUILD_TESTS)
     tests/test_128k_boot.cpp
     tests/test_dsk.cpp
     tests/test_boot.cpp
+    tests/test_z80test.cpp
+    tests/test_rom_selftest.cpp
+    tests/test_next_boot.cpp
+    tests/test_golden.cpp
+    tests/test_lores.cpp
   )
   target_link_libraries(rainbow_tests PRIVATE rainbow_core rainbow_plugin)
   target_compile_options(rainbow_tests PRIVATE -Wall -Wextra -Wpedantic)

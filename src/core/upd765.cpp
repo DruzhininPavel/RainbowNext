@@ -42,6 +42,10 @@ size_t commandLength(u8 opcode) {
   }
 }
 
+// ST0 bit 5 (SE, seek end) belongs to SENSE INTERRUPT STATUS only. Data commands
+// that succeed must report ST0 = 0x00 | head | unit; the +3 ROM rejects a result
+// whose ST0 does not match the unit it asked for.
+constexpr u8 St0Ok = 0x00;        // IC = normal termination
 constexpr u8 St0Interrupt = 0x20; // IC = normal termination, seek end
 constexpr u8 St0Abnormal = 0x40;  // IC = abnormal termination
 constexpr u8 St0Invalid = 0x80;   // IC = invalid command
@@ -130,7 +134,15 @@ void Upd765::writeCommand(u8 value) {
 }
 
 void Upd765::writeData(u8 value) {
-  if (phase_ != Phase::Execution || !cpuToFdc_) return;
+  // The chip has a single data register. Command bytes, parameters and sector
+  // data all arrive through it, and the current phase decides what a write
+  // means; the +3 ROM sends commands to 0x3FFD and only reads the main status
+  // register from 0x2FFD, so dropping writes outside the data phase would
+  // swallow every command it issues.
+  if (phase_ != Phase::Execution || !cpuToFdc_) {
+    writeCommand(value);
+    return;
+  }
   buffer_.push_back(value);
   const u8 opcode = command_[0] & 0x1F;
   size_t expected = 0;
@@ -152,7 +164,13 @@ void Upd765::writeData(u8 value) {
 
 void Upd765::finishCommand() {
   const u8 opcode = command_[0] & 0x1F;
-  unit_ = command_[0] & 0x03;
+  // Every multi-byte command carries the drive number in bits 0-1 of its second
+  // byte (HD/US); the opcode byte's low bits are part of the opcode itself.
+  // Only SENSE INTERRUPT STATUS is a single-byte command, so it is the one case
+  // where the drive comes from the opcode byte. Reading the opcode byte for all
+  // commands made RECALIBRATE (0x07) report drive 3, which the +3 ROM correctly
+  // rejected as "seek failed" and retried forever.
+  unit_ = command_.size() > 1 ? u8(command_[1] & 0x03) : u8(command_[0] & 0x03);
 
   switch (opcode) {
     case OpSpecify:
@@ -164,17 +182,22 @@ void Upd765::finishCommand() {
     case OpSenseDrive:
       unit_ = command_[1] & 0x03;
       head_ = (command_[1] >> 2) & 0x01;
-      status0_ = u8(St0Interrupt | unit_);
-      pushResult(status0_, driveStatus(), 0, 0, 0, 0, 0);
+      // SENSE DRIVE STATUS answers with ST3 alone.
+      status0_ = driveStatus();
+      pushResult(status0_, 0, 0, 0, 0, 0, 0, 1);
       return;
 
     case OpSenseInterrupt:
       if (!seekPending_) {
-        pushResult(St0Invalid, 0, 0, 0, 0, 0, 0);
+        // Nothing pending: IC = invalid command, and the chip returns ST0 only.
+        pushResult(St0Invalid, 0, 0, 0, 0, 0, 0, 1);
         return;
       }
       seekPending_ = false;
-      pushResult(u8(St0Interrupt | (seekStatus_ & 0x03)), 0, 0, u8(seekCylinder_), 0, 0, 0);
+      // SENSE INTERRUPT STATUS answers with ST0 followed by the present
+      // cylinder number.
+      pushResult(u8(St0Interrupt | (seekStatus_ & 0x03)), u8(seekCylinder_), 0, 0, 0, 0, 0,
+                 2);
       return;
 
     case OpRecalibrate:
@@ -223,8 +246,9 @@ void Upd765::finishCommand() {
       return;
 
     default:
+      // An invalid command is answered with ST0 alone.
       status0_ = u8(St0Invalid | unit_);
-      pushResult(status0_, 0x80, 0, 0, 0, 0, 0);
+      pushResult(status0_, 0, 0, 0, 0, 0, 0, 1);
       return;
   }
 }
@@ -256,7 +280,7 @@ void Upd765::readId() {
   lastH_ = sector.h;
   lastR_ = sector.r;
   lastN_ = sector.n;
-  status0_ = u8(St0Interrupt | (head_ ? 0x04 : 0x00) | unit_);
+  status0_ = u8(St0Ok | (head_ ? 0x04 : 0x00) | unit_);
   pushResult(status0_, 0, 0, sector.c, sector.h, sector.r, sector.n);
 }
 
@@ -354,7 +378,7 @@ void Upd765::endExecution() {
   }
 
   // READ DATA / READ TRACK finished: report where it stopped.
-  const u8 status = u8(status1_ == 0 ? St0Interrupt : St0Abnormal);
+  const u8 status = u8(status1_ == 0 ? St0Ok : St0Abnormal);
   pushResult(u8(status | (head_ ? 0x04 : 0x00) | unit_), status1_, status2_, lastC_, lastH_,
              lastR_, lastN_);
 }
@@ -387,8 +411,7 @@ void Upd765::writeSectors() {
   }
   track.formatted = true;
 
-  pushResult(u8(St0Interrupt | (head_ ? 0x04 : 0x00) | unit_), 0, 0, lastC_, lastH_, lastR_,
-             lastN_);
+  pushResult(u8(St0Ok | (head_ ? 0x04 : 0x00) | unit_), 0, 0, lastC_, lastH_, lastR_, lastN_);
 }
 
 void Upd765::formatTrack() {
@@ -418,7 +441,7 @@ void Upd765::formatTrack() {
   }
   track.formatted = !track.sectors.empty();
 
-  pushResult(u8(St0Interrupt | (head_ ? 0x04 : 0x00) | unit_), 0, 0, u8(cylinder_), u8(head_),
+  pushResult(u8(St0Ok | (head_ ? 0x04 : 0x00) | unit_), 0, 0, u8(cylinder_), u8(head_),
              u8(count), sizeCode);
 }
 
@@ -426,11 +449,13 @@ void Upd765::formatTrack() {
 // Helpers
 // ---------------------------------------------------------------------------
 
-void Upd765::pushResult(u8 status0, u8 status1, u8 status2, u8 c, u8 h, u8 r, u8 n) {
+void Upd765::pushResult(u8 status0, u8 status1, u8 status2, u8 c, u8 h, u8 r, u8 n,
+                        size_t count) {
   status0_ = status0;
   status1_ = status1;
   status2_ = status2;
   result_ = {status0, status1, status2, c, h, r, n};
+  result_.resize(count < result_.size() ? count : result_.size());
   cursor_ = 0;
   phase_ = Phase::Result;
 }
@@ -438,7 +463,9 @@ void Upd765::pushResult(u8 status0, u8 status1, u8 status2, u8 c, u8 h, u8 r, u8
 u8 Upd765::driveStatus() const {
   u8 st3 = u8(unit_ & 0x03);
   if (head_ != 0) st3 |= 0x04;
-  if (hasDisk()) {
+  // Only drive 0 is modelled; reporting a second drive as ready would make the
+  // +3 ROM try to use a unit that does not exist.
+  if (unit_ == 0 && hasDisk()) {
     if (disk_->sides > 1) st3 |= 0x08; // two-sided
     st3 |= 0x20;                       // ready
   }

@@ -29,10 +29,41 @@ roms/next.rom      (65 536 bytes)
 roms/next-0.rom … next-3.rom
 ```
 
+The Next needs a **second** image: the 8 KiB divMMC / esxDOS ROM that ships
+beside the board ROM in the official distribution (`enNxtmmc.rom`):
+
+```
+roms/nxtmmc.rom    (8 192 bytes)
+```
+
+The board ROM does not contain the divMMC code. While booting it loads `0x1F01`
+into `BC` and jumps through `RST 0x38`, expecting the module to be mapped in at
+that address; without the image the CPU walks off into empty RAM and the machine
+restarts forever. The frontend therefore loads the divMMC ROM automatically for
+the Next (and only for the Next), looking for `nxtmmc`, `nextmmc`, `divmmc` and
+`esxdos` with a `.rom` or `.bin` extension in `roms/`, next to the executable,
+and in the working directory. On the other machines the divMMC stays the user's
+choice and is not touched.
+
+## Picking the images once
+
+Instead of passing `--rom` on every start, open **Machine > ROM images...** and
+press `Choose...` on the machine you want. The path is written to `rainbow.cfg`
+next to the other settings and is used from then on; `Forget` clears it and goes
+back to searching `roms/`. Each machine keeps its own images, so switching
+between a 128K and a Next never picks up the wrong-sized ROM, and the machine
+itself is remembered too, so the next start comes up where the last one ended.
+
+The Next's row has a divMMC sub-row, which is where the companion image above
+belongs — the emulator then loads it together with the board ROM instead of
+telling you later that it is missing. The toolbar shows `NO DIVMMC` while a
+machine that needs one does not have it; the chip disappears once the image is
+loaded.
+
 If no `next` set is found the Next falls back to the `128` set, so a Next without
-its own ROM still boots the 128K machine. The ROM only covers the board ROM;
-NextZXOS lives on the SD card image and is loaded separately with `--sd` (see
-below).
+its own ROM still boots the 128K machine. The ROMs only cover the board and
+divMMC; NextZXOS lives on the SD card image and is loaded separately with `--sd`
+(see below).
 
 ### How banked ROM sets are loaded
 
@@ -60,6 +91,20 @@ The Next also takes an SD card image, which is where NextZXOS and its ROMs live:
 
 An `.img` dropped onto the window is mounted as the card as well; the card is
 owned by the frontend, so it survives a machine change.
+
+The official distribution ships as a directory tree rather than an image, so
+`tools/make_sd_image.py` turns it into a card. It writes the partition table,
+the FAT32 volume and every file by hand, which means it needs no privileges and
+works the same on macOS and Linux:
+
+```sh
+python3 tools/make_sd_image.py /path/to/sn-complete-24.11 roms/nextsd.img
+./build/rainbow --sd roms/nextsd.img
+```
+
+The default size is 512 MB; `--size-mb` changes it and the image is refused if
+the tree does not fit. Names are stored in their original case and the
+Mac bookkeeping files are left out.
 
 Snapshots can be dropped onto the window (`.sna`, `.z80`) or opened from the
 *File* menu; a snapshot carries its own memory image and does not need a ROM

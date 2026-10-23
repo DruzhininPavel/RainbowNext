@@ -158,7 +158,7 @@ TEST(nextreg_port_7ffd_repages_the_high_slots) {
   CHECK_EQ(m.nextRegs().mmuSlot(7), 0x06);
 }
 
-TEST(nextreg_reset_register_clears_ram) {
+TEST(nextreg_soft_reset_keeps_ram_and_hard_reset_clears_it) {
   Machine m(MachineType::Next);
 
   m.writeNextReg(0x50, 0x02);
@@ -166,6 +166,13 @@ TEST(nextreg_reset_register_clears_ram) {
   m.writeNextReg(0x02, 0x01); // soft reset
 
   CHECK_EQ(m.nextRegs().mmuSlot(0), NextRegFile::RomPage);
+  CHECK_EQ(m.readNextReg(0x02), 0x01); // the ROM can tell it was a warm start
+  m.writeNextReg(0x50, 0x02);
+  CHECK_EQ(m.memRead(0x0000, 0), 0x99);
+
+  m.writeNextReg(0x02, 0x02); // hard reset
+
+  CHECK_EQ(m.readNextReg(0x02), 0x02);
   m.writeNextReg(0x50, 0x02);
   CHECK_EQ(m.memRead(0x0000, 0), 0x00);
 }
@@ -213,6 +220,58 @@ TEST(nextreg_alternate_rom_swaps_the_low_rom_bank) {
 
   m.writeNextReg(0x8C, 0x00);
   CHECK_EQ(m.memRead(0x0000, 0), 0x03);
+}
+
+// Register 0x8E exposes the whole 128K memory map at once, which is what the
+// Next firmware uses instead of poking 0x7FFD and 0x1FFD one bit at a time.
+TEST(nextreg_0x8e_maps_the_128k_memory_in_one_write) {
+  Machine m(MachineType::Next);
+  loadPatternRom(m); // bank 0
+
+  // Bits 0 and 1 select the ROM bank and are readable through the classic
+  // ports, so the register and 0x7FFD/0x1FFD have to agree in both directions.
+  m.writeNextReg(0x8E, 0x03); // ROM 3, bit 3 clear: the RAM map is untouched
+  CHECK_EQ(m.port7ffd() & 0x10, 0x10);
+  CHECK_EQ(m.port1ffd() & 0x04, 0x04);
+  CHECK_EQ(m.readNextReg(0x8E) & 0x07, 0x03);
+
+  m.writeNextReg(0x8E, 0x00); // back to ROM 0
+  CHECK_EQ(m.port7ffd() & 0x10, 0x00);
+  CHECK_EQ(m.port1ffd() & 0x04, 0x00);
+
+  // Bit 3 asks for the RAM bank in bits 6:4; without it the register leaves
+  // the mapping alone, which is how a caller changes only the ROM.
+  m.writeNextReg(0x8E, 0x3A); // bank 3, ROM 2, paging mode bit set
+  CHECK_EQ(m.nextRegs().mmuSlot(6), 0x06);
+  CHECK_EQ(m.nextRegs().mmuSlot(7), 0x07);
+  CHECK_EQ(m.readNextReg(0x8E), 0x3A);
+
+  m.writeNextReg(0x8E, 0x30); // bank 3 again, RAM bits already set
+  CHECK_EQ(m.nextRegs().mmuSlot(6), 0x06);
+
+  // Bit 2 is the +2A/+3 paging mode bit of port 0x1FFD.
+  m.writeNextReg(0x8E, 0x3C);
+  CHECK_EQ(m.port1ffd() & 0x01, 0x01);
+  CHECK_EQ(m.readNextReg(0x8E) & 0x04, 0x04);
+}
+
+TEST(next_ula_screen_bank_follows_port_7ffd) {
+  Machine m(MachineType::Next);
+  loadPatternRom(m);
+
+  // The Next maps memory through the MMU registers, but the ULA still takes
+  // its screen from bit 3 of 0x7FFD. A game that keeps Layer 2 in the low
+  // banks uses it to pick the free one, so it has to move the ULA with it.
+  m.ioWrite(0x7FFD, 0x00, 0);
+  CHECK_EQ(m.screenBank(), 5);
+  CHECK_EQ(m.ramBank(), 0);
+
+  m.ioWrite(0x7FFD, 0x08, 0);
+  CHECK_EQ(m.screenBank(), 7);
+
+  m.ioWrite(0x7FFD, 0x0B, 0);
+  CHECK_EQ(m.screenBank(), 7);
+  CHECK_EQ(m.ramBank(), 3);
 }
 
 TEST(nextreg_machine_type_needs_the_unlock_bit) {

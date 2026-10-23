@@ -30,12 +30,12 @@ namespace rainbow {
 const Timings& timingsFor(MachineType type) {
   // Values mirror the base_timings table in Fuse's libspectrum (see
   // docs/REFERENCES.md). Fields: cpu, ay, left, screen, right, hretrace,
-  // top, vscreen, bottom, vretrace, intlen, top_left_pixel, contended.
-  static const Timings t48{3500000, 0, 24, 128, 24, 48, 48, 192, 48, 24, 32, 14336, true};
-  static const Timings t128{3546900, 1773400, 24, 128, 24, 52, 48, 192, 48, 23, 36, 14362, true};
-  static const Timings tPlus3{3546900, 1773400, 24, 128, 24, 52, 48, 192, 48, 23, 32, 14365, true};
-  static const Timings tPentagon{3584000, 1792000, 36, 128, 28, 32, 64, 192, 48, 16, 36, 17988, false};
-  static const Timings tNext{3546900, 1773400, 24, 128, 24, 52, 48, 192, 48, 23, 36, 14362, true};
+  // top, vscreen, bottom, vretrace, intlen, contended.
+  static const Timings t48{3500000, 0, 24, 128, 24, 48, 48, 192, 48, 24, 32, true};
+  static const Timings t128{3546900, 1773400, 24, 128, 24, 52, 48, 192, 48, 23, 36, true};
+  static const Timings tPlus3{3546900, 1773400, 24, 128, 24, 52, 48, 192, 48, 23, 32, true};
+  static const Timings tPentagon{3584000, 1792000, 36, 128, 28, 32, 64, 192, 48, 16, 36, false};
+  static const Timings tNext{3546900, 1773400, 24, 128, 24, 52, 48, 192, 48, 23, 36, true};
 
   switch (type) {
     case MachineType::Spectrum48: return t48;
@@ -135,7 +135,7 @@ Machine::Machine(MachineType type)
       });
 }
 
-void Machine::reset() {
+void Machine::reset(bool preserveRam) {
   cpu_.reset();
   cpu_.setExtendedInstructions(type_ == MachineType::Next);
   ula_.reset(type_ != MachineType::Spectrum48);
@@ -143,11 +143,13 @@ void Machine::reset() {
   beeper_.reset();
   tape_.rewind();
 
-  ram_.assign(RamPages * PageSize, 0);
+  if (!preserveRam) ram_.assign(RamPages * PageSize, 0);
   framebuffer_.assign(FrameWidth * FrameHeight, Palette[0]);
   borderLines_.fill(0);
 
-  next_.reset();
+  // A hard reset (or a power cycle) is the one that reports itself as hard
+  // through register 0x02, and the only one that clears the RAM.
+  next_.reset(!preserveRam);
   palette_.reset();
   sprites_.reset();
   copper_.reset();
@@ -175,12 +177,21 @@ void Machine::reset() {
   dacs_.reset();
   fdc_.reset();
   fdc_.setDisk(hasDiskController() && !disk_.empty() ? &disk_ : nullptr);
-  expansion_.reset();
+  if (preserveRam) {
+    expansion_.softReset();
+  } else {
+    expansion_.reset();
+  }
+  // The Next drives the automap option from NextReg 0x0A bit 4, which a hard
+  // reset clears so the boot ROM keeps the RST 0/8 vectors. A classic machine
+  // has no such register and the module is only useful with automap on.
+  syncDivMmcAutomap();
 
   tstates_ = 0;
   cpuTstates_ = 0;
   turboAccum_ = 0;
   frames_ = 0;
+  ++resets_;
   irqLine_ = false;
   irqEnd_ = 0;
 
@@ -213,24 +224,30 @@ bool Machine::loadDisk(const std::string& path, std::string& error) {
     return false;
   }
   formats::DiskImage image;
-  if (!formats::loadDskFile(path, image, error)) return false;
+  if (!formats::loadDiskFile(path, image, error)) return false;
   disk_ = std::move(image);
   fdc_.reset();
   fdc_.setDisk(&disk_);
   return true;
 }
 
-// Serves the ROM's LD-BYTES routine (0x0556) from the loaded image instead of
-// waiting for the real pulse train. On entry A holds the flag byte the caller
-// expects, IX the destination and DE the length; on success the routine would
-// leave with DE = 0 and carry set, which the exit at 0x05DF reproduces by
-// loading A from a zero checksum and comparing it against 1.
-bool Machine::applyTapeFastLoad() {
+// Serves the ROM's LD-BYTES routine from the loaded image instead of waiting
+// for the real pulse train. On entry A holds the flag byte the caller expects,
+// IX the destination and DE the length; on success the routine would leave
+// with DE = 0 and carry set, which the exit at 0x05DF reproduces by loading A
+// from a zero checksum and comparing it against 1.
+//
+// Custom loaders often copy LD-BYTES' own `INC D / EX AF,AF' / DEC D` prologue
+// and jump straight to 0x0562, skipping the DI / OUT / PUSH HL part they have
+// already done. The ROM picks the flag byte back up from AF' at 0x05A9, so that
+// entry expects it in the shadow accumulator instead of A.
+bool Machine::applyTapeFastLoad(u16 entry) {
   const formats::TapeBlock* block = tape_.seekDataBlock();
   if (block == nullptr || block->data.empty()) return false;
 
   Z80::Registers& regs = cpu_.regs();
-  if (block->data[0] != regs.a) return false; // misaligned tape: let the ROM wait
+  const u8 expected = entry == 0x0562 ? regs.a2 : regs.a;
+  if (block->data[0] != expected) return false; // misaligned tape: let the ROM wait
 
   const size_t length = size_t(regs.d) << 8 | regs.e;
   const size_t available = block->data.size() - 1;
@@ -437,22 +454,26 @@ void Machine::applyNex(const formats::NexFile& nex) {
 
 void Machine::stepInstruction() {
   if (irqLine_) cpu_.interrupt();
-  if (cpu_.regs().pc == 0x0556 && tape_.fastLoad() && applyTapeFastLoad()) return;
-  if (cpu_.regs().pc == 0x0008 && esxDos_.trap(*this, cpu_.regs())) return;
+  const u16 pc = cpu_.regs().pc;
+  if ((pc == 0x0556 || pc == 0x0562) && tape_.fastLoad() && applyTapeFastLoad(pc)) return;
+  if (pc == 0x0008 && esxDos_.trap(*this, cpu_.regs())) return;
   // Sampled after the interrupt, so the profile blames the handler rather than
   // the instruction the interrupt pushed off.
   if (profiling_) {
-    ++samples_[cpu_.regs().pc];
+    ++samples_[pc];
     ++sampleTotal_;
   }
-  ++instructions_;
   ++instructions_;
   cpu_.step();
 }
 
 std::optional<u16> Machine::runFrame() {
   const u64 target = frames_ + 1;
-  while (frames_ < target) {
+  // The guest can ask for a reset from inside an instruction (NextReg 0x02),
+  // which rewinds the frame counter and would leave this loop waiting for a
+  // frame that has already gone by. One reset is enough of a frame boundary.
+  const u64 resets = resets_;
+  while (frames_ < target && resets_ == resets) {
     // Only pay for the search once something is armed.
     if (!breakpoints_.empty()) {
       const u16 pc = cpu_.regs().pc;
@@ -506,7 +527,7 @@ namespace {
 constexpr u8 kStateMagic[8] = {'R', 'B', 'N', 'S', 'T', 'A', 'T', 'E'};
 // Bump whenever the field order or the set of fields changes. An older build
 // refuses a newer state instead of reading it as garbage.
-constexpr u32 kStateVersion = 1;
+constexpr u32 kStateVersion = 2;
 constexpr size_t kStateHeader = sizeof(kStateMagic) + 4 + 1 + 1 + 8;
 
 } // namespace
@@ -758,7 +779,10 @@ u8 Machine::ioReadBase(u16 port, u32) {
   if ((port & 0x0001) == 0) {
     if ((port & 0x00FF) == 0xFE) {
       u8 value = ula_.read(port, keyboard_);
-      value = u8((value & ~0x40) | (tape_.ear() ? 0x40 : 0x00));
+      // Only a running tape drives the EAR input. With the motor stopped the
+      // line idles low, which is the 0xBF the ULA already reports and what the
+      // ROM loader and the Z80 conformance suites expect from an idle machine.
+      if (tape_.playing()) value = u8((value & ~0x40) | (tape_.ear() ? 0x40 : 0x00));
       return value;
     }
     return floatingBus();
@@ -915,9 +939,30 @@ void Machine::installPeripherals() {
   expansion_.add(std::make_unique<ZxPrinter>(), false);
   expansion_.add(std::make_unique<Cartridge>(), false);
   // Last, because its status port shares 0x1F with the Kempston joystick and
-  // the joystick is the one most software expects to find there.
-  expansion_.add(std::make_unique<DivMmc>(), false);
+  // the joystick is the one most software expects to find there. The Next has
+  // the module built in, but the emulation is still a work in progress and it
+  // derails the Next boot ROM, so it starts unplugged everywhere and has to be
+  // switched on deliberately.
+  auto divmmc = std::make_unique<DivMmc>();
+  divmmc->setRom3PresentProvider([this] { return romBank() == 3; });
+  // The Next moved the SPI byte to 0xEB and its chip select to 0xE7, leaving
+  // 0xDF to the Kempston joystick and DAC D; the older boards decode 0xDF.
+  divmmc->setLegacySpiPort(!isNext());
+  expansion_.add(std::move(divmmc), false);
   refreshCartridge();
+  syncDivMmcAutomap();
+}
+
+// The automap is board state that lives in the Next register file: the master
+// switch is 0x0A bit 4 and 0xB8-0xBB say which addresses are entry points.
+// A classic machine has no such registers, so there the module is only useful
+// with automap on.
+void Machine::syncDivMmcAutomap() {
+  auto* div = static_cast<DivMmc*>(expansion_.find("divmmc"));
+  if (div == nullptr) return;
+  div->setAutomap(!isNext() || (next_.read(0x0A) & 0x10) != 0);
+  div->setEntryPoints(next_.read(0xB8), next_.read(0xB9), next_.read(0xBA),
+                      next_.read(0xBB));
 }
 
 void Machine::refreshCartridge() {
@@ -955,8 +1000,12 @@ void Machine::updatePaging() {
 
   if (isNext()) {
     // The Next keeps its map in the MMU registers, and the classic paging
-    // ports only write into those same registers.
+    // ports only write into those same registers. The ULA still takes its
+    // screen bank from 0x7FFD bit 3, which is how a game swaps between the
+    // shadow screen and the one Layer 2 uses.
     updateNextMmu();
+    ramBank_ = u8(port7ffd_ & 0x07);
+    screenBank_ = (port7ffd_ & 0x08) ? 7 : 5;
     return;
   }
 
@@ -984,6 +1033,11 @@ void Machine::updatePaging() {
   }
 
   mapBank(0, romBank_, false);
+  // Bit 3 of 0x7FFD only picks the bank the ULA fetches from. The window at
+  // 0x4000 is hard-wired to bank 5 in normal paging mode; the shadow screen in
+  // bank 7 is only reachable by paging it into 0xC000. Programs keep their
+  // variables at 0x7F00..0x7FFF in bank 5 and expect them to stay visible
+  // after selecting the shadow screen.
   mapBank(1, 5, true); // the fixed bank holding the main screen
   mapBank(2, 2, true);
   mapBank(3, ramBank_, true);
@@ -1036,13 +1090,29 @@ u8 Machine::readNextReg(u8 reg) const {
     const u32 line = u32(tstates_ % tstatesPerFrame_) / tstatesPerLine_;
     return reg == 0x1E ? u8(line) : u8(line >> 8);
   }
+  if (reg == 0x8E) {
+    // Composed from the classic ports, so a guest that reads the register back
+    // sees whatever it last wrote through either interface.
+    const u8 bank = isNext() ? u8(next_.mmuSlot(6) >> 1) : u8(port7ffd_ & 0x07);
+    const u8 rom = u8((isPlus3() || isNext()) ? ((port1ffd_ & 0x04) ? 2 : 0) : 0);
+    return u8((bank << 4) | 0x08 | (rom | ((port7ffd_ & 0x10) ? 1 : 0)) |
+              ((port1ffd_ & 0x01) ? 0x04 : 0x00));
+  }
   return next_.read(reg);
 }
 
 void Machine::writeNextReg(u8 reg, u8 value) {
   switch (reg) {
-    case 0x02: // soft or hard reset
-      if ((value & 0x03) != 0) reset();
+    case 0x02: // bit 1 asks for a hard reset, bit 0 for a soft one
+      if ((value & 0x03) != 0) reset((value & 0x02) == 0);
+      return;
+    case 0x0A:   // peripheral 5: the divMMC automap master switch is bit 4
+    case 0xB8:   // divMMC entry points 0
+    case 0xB9:   // ...which of them need the +3 DOS ROM paged in
+    case 0xBA:   // ...and whether the map happens before or after the fetch
+    case 0xBB:   // divMMC entry points 1
+      next_.write(reg, value);
+      syncDivMmcAutomap();
       return;
     case 0x03: {
       // The display timing bits are locked unless bit 7 unlocks them.
@@ -1054,7 +1124,28 @@ void Machine::writeNextReg(u8 reg, u8 value) {
     case 0x50: case 0x51: case 0x52: case 0x53:
     case 0x54: case 0x55: case 0x56: case 0x57:
     case 0x8C: // alternate ROM
+    case 0x8F: // mapping mode: only the standard 128K/+3 layout is modelled
       next_.write(reg, value);
+      updatePaging();
+      return;
+    case 0x8E: // the 128K memory map as a single register
+      // Bits 0 and 1 are the two ROM select bits of ports 0x7FFD and 0x1FFD and
+      // bit 2 the +2A/+3 paging mode, all of which are visible as the classic
+      // ports. The RAM bank is only taken when bit 3 asks for it, which is how
+      // a caller can change the ROM without disturbing the RAM mapping. The
+      // 0x7FFD lock freezes this register just as it freezes that port.
+      if (pagingLocked_) return;
+      if ((value & 0x08) != 0) {
+        const u8 bank = u8((value >> 4) & 0x07);
+        port7ffd_ = u8((port7ffd_ & 0xF0) | bank);
+        if (isNext()) {
+          next_.setMmuSlot(6, u8(bank * 2));
+          next_.setMmuSlot(7, u8(bank * 2 + 1));
+        }
+      }
+      port7ffd_ = u8((port7ffd_ & ~0x10) | ((value & 0x01) ? 0x10 : 0x00));
+      port1ffd_ = u8((port1ffd_ & ~0x05) | ((value & 0x02) ? 0x04 : 0x00) |
+                     ((value & 0x04) ? 0x01 : 0x00));
       updatePaging();
       return;
     case 0x40: // palette index
@@ -1165,14 +1256,16 @@ u32 Machine::turboMultiplier() const {
 u8 Machine::contention(u16 addr, u32 t) {
   if (!timings_.contended) return 0;
 
-  // Every machine with a ULA contends on bank 5 at 0x4000. The 128K also
-  // contends on 0xC000 when an odd bank is paged there; the +2A/+3 does not,
-  // and the Pentagon has no contention at all (`contended` is false there).
+  // Every machine with a ULA contends on the memory it fetches: bank 5 at
+  // 0x4000, and the RAM at 0xC000. The 128K and the grey +2 only contend there
+  // while an odd bank is paged in, because the odd banks are the ones the gate
+  // array can see; the +2A/+3 ASIC contends whatever bank it puts at 0xC000.
+  // The Pentagon has no contention at all (`contended` is false there).
   bool contended = false;
   if (addr >= 0x4000 && addr < 0x8000) {
     contended = true;
-  } else if (addr >= 0xC000 && !isPlus3() && (page_[7].page & 2) != 0) {
-    contended = true;
+  } else if (addr >= 0xC000) {
+    contended = isPlus3() || (ramBank() & 1) != 0;
   }
   if (!contended) return 0;
 
@@ -1186,11 +1279,17 @@ u8 Machine::contention(u16 addr, u32 t) {
     return 0;
   }
 
-  // The ULA contends on six of every eight T-states. The classic 48K pattern
-  // (6,5,4,3,2,1,0,0) starts at the first visible T-state.
-  static constexpr u8 Pattern[8] = {5, 4, 3, 2, 1, 0, 0, 6};
-  const u32 x = hc - timings_.leftBorder;
-  return Pattern[(x + 7) & 7];
+  // The ULA fetches two pixels per T-state, so each group of eight T-states
+  // repeats the same bus pattern: six busy ones and two idle ones at the end.
+  // The cycle is anchored to the first T-state of the display window, so every
+  // machine opens its display on the first step. From there the step follows
+  // the absolute T-state, which is what separates the machines: the 48K line is
+  // 224 T-states, a multiple of eight, so it meets the same phase on every
+  // line, while the 128K, the +3 and the Next use 228 and walk it by four.
+  static constexpr u8 Pattern[8] = {6, 5, 4, 3, 2, 1, 0, 0};
+  const u32 displayStart =
+      tstatesPerLine_ * u32(timings_.topBorder) + timings_.leftBorder;
+  return Pattern[(t - displayStart) & 7];
 }
 
 u8 Machine::floatingBus() const {
@@ -1292,9 +1391,11 @@ void Machine::tick(u32 cycles) {
       audio_.push_back(std::clamp(outL, -1.0f, 1.0f));
       audio_.push_back(std::clamp(outR, -1.0f, 1.0f));
     }
-    // Two seconds of interleaved stereo.
+    // Two seconds of interleaved stereo. Trim in chunks: once the buffer sits
+    // at the limit the naive one-in-one-out erase memmoves ~700 KB per
+    // scanline, which dwarfs the emulation itself.
     const size_t limit = size_t(sampleRate_) * 4;
-    if (audio_.size() > limit) {
+    if (audio_.size() > limit + 4096) {
       audio_.erase(audio_.begin(), audio_.begin() + long(audio_.size() - limit));
     }
 
@@ -1306,7 +1407,7 @@ void Machine::tick(u32 cycles) {
       if (completed < borderLines_.size()) borderLines_[completed] = ula_.border();
 
       if (newFrameT == 0) {
-        renderFrame();
+        if (videoEnabled_) renderFrame();
         ++frames_;
         frameStart();
       }
@@ -1454,7 +1555,6 @@ void Machine::renderFrame() {
 
       bool l2Priority = false;
       const u32 l2Rgb = inWindow ? layer2Pixel(layer2, ux, y, l2Priority) : Transparent;
-
       u32 rgb = border;
       u8 occluder = 0;
       bool blended = false;
@@ -1484,14 +1584,21 @@ void Machine::renderFrame() {
       }
 
       if (!blended) {
-        for (int depth = 0; depth < 3; ++depth) {
-          const int layer = order[size_t(depth)];
-          if (layer == LayerSprites) continue; // sprites are a second pass
-          const u32 colour = layer == LayerLayer2 ? l2Rgb : uRgb;
-          if (colour == Transparent) continue;
-          if (depth < spriteDepth) occluder = 1;
-          rgb = colour;
-          break;
+        // A Layer 2 colour flagged as a priority colour in the palette is drawn
+        // above every other layer, whatever order 0x15 asks for.
+        if (l2Priority && l2Rgb != Transparent) {
+          rgb = l2Rgb;
+          occluder = 1;
+        } else {
+          for (int depth = 0; depth < 3; ++depth) {
+            const int layer = order[size_t(depth)];
+            if (layer == LayerSprites) continue; // sprites are a second pass
+            const u32 colour = layer == LayerLayer2 ? l2Rgb : uRgb;
+            if (colour == Transparent) continue;
+            if (depth < spriteDepth) occluder = 1;
+            rgb = colour;
+            break;
+          }
         }
       }
       row[x] = rgb;
@@ -1691,6 +1798,11 @@ Machine::TilemapView Machine::tilemapView() const {
 }
 
 void Machine::renderUlaRow(int y, std::array<u32, ScreenWidth>& row) const {
+  if (loresEnabled()) {
+    renderLoresRow(y, row);
+    return;
+  }
+
   // Timex modes 1 and 2 move the attributes, and mode 6 is a different display
   // entirely. The modes without a documented behaviour of their own (3, 4, 5,
   // 7) reuse the second file like mode 1 does, which is what the Timex hardware
@@ -1753,6 +1865,77 @@ void Machine::renderUlaHiresRow(int y, std::array<u32, ScreenWidth>& row) const 
       const u32 right = (pixels & (0x4000u >> (pair * 2))) ? ink : paper;
       row[size_t(col * 8 + pair)] = averageColours(left, right);
     }
+  }
+}
+
+bool Machine::loresEnabled() const {
+  return isNext() && (next_.read(0x15) & 0x80) != 0;
+}
+
+bool Machine::radastanMode() const {
+  return (next_.read(0x6A) & 0x20) != 0;
+}
+
+void Machine::renderLoresRow(int y, std::array<u32, ScreenWidth>& row) const {
+  // LoRes is a 128x96 image stretched over the whole 256x192 viewport, so every
+  // dot is two display pixels wide and two rows tall. NextReg 0x32/0x33 scroll
+  // it in half-dot steps and 0x6A bit 5 turns it into Radastan, four bits per
+  // dot. The image is linear, unlike the interleaved ULA screen file.
+  const u8 control = next_.read(0x6A);
+  const bool radastan = radastanMode();
+  const int paletteOffset = control & 0x0F;
+  const int scrollX = next_.read(0x32);
+  const int scrollY = next_.read(0x33);
+  const int palette = ulaPalette();
+  // 0x6A bit 4 XORs the Timex display file select, so Radastan can swap the two
+  // 6K halves of the bank without disturbing the SCLD register.
+  const bool secondFile =
+      ((ula_.screenMode() & 0x01) != 0) != ((control & 0x10) != 0);
+  const size_t bankBase = size_t(screenBank_) * BankSize;
+  const size_t base = bankBase + (radastan && secondFile ? 0x2000 : 0);
+
+  // The vertical scroll wraps inside the 192 line viewport, and the odd shape of
+  // the wrap above 192 is what the core does when the two are added together.
+  int scrolled = y + scrollY;
+  if (scrolled >= 192) scrolled = ((((scrolled >> 6) + 1) & 0x03) << 6) |
+                                  (scrolled & 0x3F);
+  const int line = scrolled >> 1;
+
+  size_t rowBase;
+  if (radastan) {
+    // 96 rows of 64 bytes: two dots per byte, 128 dots per row.
+    rowBase = size_t(line & 0x7F) << 6;
+  } else {
+    // 96 rows of 128 bytes, the second 48 of which live 8K further up so that
+    // the image fills 0x4000-0x57FF and 0x6000-0x77FF. A scrolled line past the
+    // bottom of the image walks on into the unused tail of the bank.
+    size_t offset = size_t(line) << 7;
+    if (scrolled >= 96)
+      offset = ((((offset >> 11) + 1) & 0x07) << 11) | (offset & 0x07FF);
+    rowBase = offset & 0x3FFF;
+  }
+
+  // Radastan takes its sixteen colours from one block of the palette selected by
+  // 0x6A bits 3:0, and only two of those bits apply when ULA+ owns the top 64
+  // entries. LoRes keeps eight bits per dot and only shifts the high nibble.
+  const bool ulaPlus = ulaPlusEnabled() && (next_.read(0x43) & 0x01) == 0;
+  const u8 highNibble = radastan
+                            ? (ulaPlus ? u8(0xC0 | (paletteOffset & 0x03))
+                                       : u8((paletteOffset & 0x0F) << 4))
+                            : 0;
+  for (int x = 0; x < ScreenWidth; ++x) {
+    const int px = (x + scrollX) & 0xFF;
+    u8 entry;
+    if (radastan) {
+      const u8 packed = ram_[base + rowBase + size_t(px >> 2)];
+      const u8 dot = (px & 0x02) != 0 ? u8(packed & 0x0F) : u8(packed >> 4);
+      entry = u8(highNibble | dot);
+    } else {
+      const u8 packed = ram_[base + rowBase + size_t(px >> 1)];
+      const u8 high = u8(((packed >> 4) + paletteOffset) & 0x0F);
+      entry = u8((high << 4) | (packed & 0x0F));
+    }
+    row[size_t(x)] = palette_.colour(palette, entry);
   }
 }
 
