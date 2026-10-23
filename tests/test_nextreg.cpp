@@ -413,7 +413,11 @@ TEST(nextreg_turbo_gives_the_cpu_more_work_per_frame) {
   CHECK(fast > base * 19 / 10);
   CHECK(fast < base * 21 / 10);
   const u32 fastest = runOneFrame(3);
-  CHECK(fastest > base * 7);
+  // Eight times the clock, but at 28 MHz every memory read also costs a wait
+  // state, so the loop's 18 T-states become 21 and a frame gets 18/21 of the
+  // eightfold throughput.
+  CHECK(fastest > base * 13 / 2);
+  CHECK(fastest < base * 7);
 }
 
 // The Next keeps the 128K ROM in the bottom slots, so the 128K menu is the

@@ -1672,6 +1672,16 @@ u8 Machine::contention(u16 addr, u32 t) {
   return Pattern[(t - displayStart) & 7];
 }
 
+// At 28 MHz the SRAM needs more than one CPU clock to answer, so every memory
+// read costs a wait state. Bank 7 is the exception: it is the bank the ULA
+// reads the screen from, and the hardware lets it answer in time.
+u8 Machine::readWait(u16 addr, u32 t) {
+  (void)t;
+  if (!isNext() || next_.turbo() != 3) return 0;
+  const Page& page = page_[size_t(addr >> 13) & 7];
+  return (page.ram && page.page == 0x0E) ? 0 : 1;
+}
+
 u8 Machine::floatingBus() const {
   const u32 frameT = u32(tstates_ % tstatesPerFrame_);
   const u32 line = frameT / tstatesPerLine_;

@@ -28,7 +28,7 @@ void Z80::reset() {
 u8 Z80::fetch() {
   const u32 t = bus_.now();
   const u8 value = bus_.memFetch(regs_.pc, t);
-  const u8 wait = bus_.contention(regs_.pc, t);
+  const u8 wait = bus_.contention(regs_.pc, t) + bus_.readWait(regs_.pc, t);
   tick(4 + wait);
   ++regs_.pc;
   incR();
@@ -50,7 +50,7 @@ u16 Z80::fetchImm16() {
 u8 Z80::read8(u16 addr) {
   const u32 t = bus_.now();
   const u8 value = bus_.memRead(addr, t);
-  const u8 wait = bus_.contention(addr, t);
+  const u8 wait = bus_.contention(addr, t) + bus_.readWait(addr, t);
   tick(3 + wait);
   return value;
 }
@@ -1190,7 +1190,11 @@ u32 Z80::step() {
   if (eiDelay_ > 0) --eiDelay_;
 
   if (regs_.halted) {
-    tick(4);
+    // A halted Z80 keeps running M1 cycles, so it still drives MREQ at the next
+    // instruction address. The Next charges its 28 MHz read wait on those too.
+    const u32 t = bus_.now();
+    const u8 wait = bus_.contention(regs_.pc, t) + bus_.readWait(regs_.pc, t);
+    tick(4 + wait);
     return u32(cycles_ - start);
   }
 
