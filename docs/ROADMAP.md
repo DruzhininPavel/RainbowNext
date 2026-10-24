@@ -344,10 +344,11 @@ These are deliberate simplifications, tracked here so they are not forgotten:
     the emulator exits. The SPI clock is not modelled: a command is answered on
     the next byte instead of after the few hundred cycles a real card needs, so
     a driver that polls for readiness simply sees it at once.
-17. NextZXOS does not boot yet. The divMMC ROM is now in place and the boot
-    ROM gets past its card check, so this is no longer the "does the machine
-    have the hardware" question it used to be; what is left is the card
-    protocol.
+17. NextZXOS boots to a live text console but never reaches the desktop: after
+    the boot screen is wiped the OS sits in an empty page waiting for a key and
+    then has nothing to hand over to. The hardware side of the boot is finished
+    -- the framebuffer is pixel-identical to an independent emulator -- so what
+    is left is the firmware's own handover condition.
 
     *The gate that was blocking everything.* The boot ROM at `0x1EDB` does
     `OUT (0xE3),A` to map the card ROM over `0x0000` and then checks `0x0004`
@@ -409,16 +410,16 @@ These are deliberate simplifications, tracked here so they are not forgotten:
     static picture, and its ULA bank is **byte-identical to ours** (6912 of 6912
     bytes match). The pattern is what the boot ROM draws in this configuration.
 
-    The reason it is garbage rather than text is the font copy at `0x2396`
-    (`LD HL,0x3D00 / LD DE,0xBC00 / LD BC,0x0300 / RST 0x28`): `0x3D00` resolves
-    to ROM bank 0, which holds the boot ROM's own code and strings, not the 8x8
-    font. The font lives at ROM offset `0xFD08` (bank 3), and the boot ROM asks
-    for the legacy remap with `NEXTREG 0x8E,0x02` at `0x3E13` just before the
-    copy. Our NR `0x8E` write sets the paging bits but does not recompute MMU
-    slots 2-5 the way xpeccy's `nx_remap()` does, so the remap is incomplete --
-    but xpeccy, which does implement it, produces the same picture, so this is
-    not what is keeping NextZXOS from starting. Implementing the full remap is
-    still worth doing for correctness; it is no longer on the critical path.
+    A frame-by-frame comparison settles it. Over the whole boot window the two
+    framebuffers agree: with neither machine pressing a key every sampled frame
+    is **pixel identical**, and with both machines pressing the *same* key the
+    agreement is 105 of 105 frames. The one comparison that did diverge -- first
+    differing frame 503, immediately after the keypress at 500 -- was a harness
+    mistake, not an emulator one: the two sides were being fed different keys.
+    Our side pressed matrix row 0 column 0, which is CAPS SHIFT, while the
+    bench's `' '` entry lands on the SPACE half-row. Pressing the same physical
+    key on both sides removes the difference completely, so there is no
+    rendering divergence left in the boot.
 
     *The clip window closes the boot screen.* The grey picture holds from frame
     300 to frame 8280 and then the whole display goes black, which looked like a
@@ -457,6 +458,82 @@ These are deliberate simplifications, tracked here so they are not forgotten:
     and both finish with the same eight MMU slots, `FF FF 0A 0B 04 05 0E 0F`.
     So the paging and the firmware path are not in question.
 
+    *The instruction stream is identical, and the clock nearly so.* Both sides
+    were traced from reset for 300 000 instructions and the PC columns diffed
+    byte for byte: they agree for the first 244 992, including the whole
+    `nxtmmc.rom` prologue, and each takes exactly one interrupt in that window
+    (the oracle at `0E5C` -> `0038`, we 138 instructions later). An earlier
+    reading that our `JP 0x006A` came from the wrong ROM was an artefact of a
+    probe that read memory after `stepInstruction()` had already run the
+    instruction, so the divMMC automap was never at fault and needs no gate on
+    NR `0x83` bit 0.
+
+    What did differ was the clock, by 660 000 T over that trace. Two rules in
+    xpeccy's `nx_mrd_in()` account for all of it. At 28 MHz every read costs one
+    wait state (`zxnext.c:520`), except a BRAM read from bank 7, which is the
+    one page that does not wait (`zxnext.c:510`) -- bank 5 waits like SRAM.
+    Writes never wait. A halted CPU keeps running M1 cycles and so keeps paying
+    it. `Bus::readWait()` carries the rule and `Z80` adds it to `fetch()`,
+    `read8()` and the halt cycle. With both in place the same 300 000
+    instructions end 1 262 T apart, 0.023 % of the trace, and the residual is
+    the interrupt phase: we raise the frame interrupt at the frame boundary
+    while the hardware raises it at a pixel (`inth + 1`, line 0) with a 32 clock
+    pulse.
+
+    *The interrupt phase is a raster-origin question, not an interrupt one.*
+    Moving the assertion was tried and reverted. Raising it at the core's own
+    position -- raw line 1, 3063 dots before the boundary -- puts us 26
+    instructions ahead of the reference and the pulse then falls outside the
+    ROM's `EI` window often enough that no interrupt is taken at all in 300 000
+    instructions. The offset that best matches the reference is 414 T before the
+    boundary, which is line 309 of 311, i.e. inside the vertical retrace and 61
+    lines away from the line 248 the hardware uses; that aligns the instruction
+    stream for 9 000 instructions longer but only by cancelling our accumulated
+    drift against a raster origin that is 61 lines out. So the thing to move is
+    the origin `tstates_` counts from, together with `borderLines_` and
+    `renderFrame()`, not `frameStart()`. Until that is done the boundary is the
+    least-wrong place to raise it.
+
+    *The console is live, and that is measurable.* The same System/Next card,
+    booted for 1600 frames with SPACE pressed at 300, 700, 1000 and 1300, ends
+    in the keyboard-scan loop on both sides: the bench reports `pc 0C8F` and we
+    report `0C90`. The block field this gap describes holds until somewhere
+    between frames 700 and 1100, and after it is wiped the reopened clip window
+    shows the empty page carrying exactly one 8x8 cursor cell. A SPACE press
+    then advances that cell by one column -- column 5 at frame 1100, column 6 at
+    frame 1600 -- so the guest is consuming the key and echoing it, which is the
+    same conclusion the handshake bytes above reach from the other direction.
+    What it never does is load `ENSYSTEM.SYS`, so the desktop never starts, and
+    that is the open question the last paragraph of this gap states.
+
+    *The key-press trace, and the one register bit that was wrong.* Comparing
+    register writes against the bench after a keypress needed the bench's key
+    syntax first: `NXKEYS` spells SPACE `_`, and the earlier runs in this gap
+    wrote `sp`, which presses `S` and `P` and produces a much shorter trace.
+    With `_` the bench gives four clean write bursts, one per press -- frames
+    305-328, 701-705, 1001-1004 and 1301-1305 -- for 16548 register writes in
+    total. Ordered against ours, the two streams agree for the first ten writes
+    and then part company at the eleventh, on NR `0x06`: the bench writes
+    `0x04` and we wrote `0x00`.
+
+    That bit is not stored data. It reports *configuration mode*, the state the
+    boot ROM runs in, in which NR `0x0A` bits 7:5 and the Layer 2 offsets accept
+    writes; NR `0x03` bit 2 of the value selects it, with `7` entering and any
+    other non-zero value leaving. We had no such state at all, so every
+    configuration-gated write the ROM made was silently dropped and the ROM's
+    read-back told it a different story from the one the bench told it. The mode
+    is implemented now, entered on a Next power-on the way the reference does,
+    and a Next and a 48K both answer the register correctly.
+
+    *The card is not the problem, and that is now measured rather than assumed.*
+    Parsing the bench's SPI trace by port and by value (the port is field seven
+    of a trace line and the value the eighth) and dropping the response
+    artefacts leaves 166 distinct block addresses read by `CMD17` on each side,
+    with a symmetric difference of **zero**. Both read LBA 187868
+    (`0x05BBB800`) exactly once, which is `NEXTZXOS/ENSYSTEM.SYS`. Neither side
+    then puts the file into RAM, so its absence from both memory images is
+    parity, not a fault, and the desktop not starting is not a card bug.
+
     *The ULA is reading the right bank, and this was worth proving.* It is easy
     to misread `screenBank_ * BankSize` as an 8K page index and conclude that
     the ULA shows RAM page 5 while the OS keeps its console in page `0x0A`.
@@ -490,23 +567,64 @@ These are deliberate simplifications, tracked here so they are not forgotten:
     RAM pages through `nxv_bram()` and only its CPU-side path redirects to the
     shadow, so the bytes we hold are the ones actually being displayed.
 
-    *A keypress is the one input that diverges.* Holding SPACE at frame 500
-    wakes the guest out of `PAUSE 0` in both implementations, and the decode
-    itself is provably correct: our instruction trace through the interrupt and
-    the ROM's `KEY_SCAN` loop is structurally identical to the bench's, with the
-    same `19F7` entry, the same `RST 0x38` chain through `0x0045`-`0x0056`, the
-    same `0x2009`-`0x2422` scan routine, the same `BC = FEFE, FDFE, FBFE, F7FE,
-    EFFE` row walk and the same `SP`. The difference is what the guest does
-    afterwards. Ours reacts one frame early (its screen changes at frame 502,
-    the bench's at 503) and then stops, while the bench spends frames 503-528
-    redrawing -- the pixel difference climbs from 2 947 to 20 055 and then
-    freezes, which is the bench finishing a new page while we have already
-    stopped. It is not a blank screen: our page `0x0A` does hold a drawn dialog,
-    including the title bar, and our framebuffer carries four colours with the
-    same paper as the bench. What differs is the layout and one palette entry --
-    we paint 1 179 pixels bright red where the bench paints 1 050 cyan and 128
-    red -- so the remaining fault is in which page of the dialog we end up
-    showing, not in whether we draw one.
+    *The keypress matches too.* Holding a key at frame 500 wakes the guest out
+    of `PAUSE 0` in both implementations, and the redraw that follows is the
+    same redraw once both sides press the same key: 105 of 105 frames match
+    exactly. The decode was never in doubt -- our trace through the interrupt
+    and the ROM's `KEY_SCAN` loop is structurally identical to the bench's, with
+    the same `19F7` entry, the same `RST 0x38` chain through `0x0045`-`0x0056`,
+    the same `0x2009`-`0x2422` scan routine, the same
+    `BC = FEFE, FDFE, FBFE, F7FE, EFFE` row walk and the same `SP`.
+
+    *Which address line selects which half-row, settled for good.* The `BC` walk
+    above is the authority: `KEY_SCAN` starts at `0xFEFE` with its row counter at
+    zero, and the ROM's own key codes put CAPS SHIFT at code 0, so `0xFEFE`
+    (A8) is the CAPS SHIFT row and `0x7FFE` (A15) is the SPACE row. Driving the
+    48K ROM with every row and column confirms it: `0xFEFE` echoes CAPS
+    SHIFT/Z/X/C/V, `0xFDFE` ENTER/L/K/J/H, `0xFBFE` P/O/I/U/Y, and `0x7FFE`
+    SPACE/SYMBOL SHIFT/M/N/B. `Keyboard::read()` has always matched that, and so
+    do `Mapping[]` and the pad table in `src/frontend/input.cpp`. A detour
+    during this investigation briefly flipped the implementation to the
+    opposite convention; it was reverted once the ROM itself was used as the
+    oracle, because the ROM's behaviour is the definition.
+
+    *The legacy paging ports rebuild the whole map.* The Next treats ports
+    `0x7FFD`/`0x1FFD` and NR `0x8E` as a shorthand for MMU writes rather than
+    as direct page selectors, and it only rewrites the slots the classic
+    hardware owns -- that is what lets a program park its own page in slots 2-5
+    and still switch the RAM bank with `0x7FFD`. `Machine::legacyRemap()` now
+    does that: the four fixed +3 CP/M tables, the "leaving CP/M mode" restore of
+    slots 2-5 to `0x0A, 0x0B, 0x04, 0x05`, slots 0/1 back to the selected ROM,
+    and the rule that a write which sets the `0x7FFD` lock still pages its bank
+    in first and only then freezes the port. It does not move the boot by a
+    single pixel, which is the expected result: NextZXOS programs its map
+    through the MMU registers, so the shorthand only matters to software that
+    relies on it. Not modelled, because no Next configuration we emulate can
+    reach them: the Pentagon `0xEFF7` option that puts RAM 0/1 at `0x0000`, and
+    the `0xDFFD` bank extension.
+
+    *The firmware hook was dead code, and that was the largest remaining gap.*
+    `nextFirmwareBoot()` reproduced the reference's `nx_firmware()` write table
+    faithfully and nothing ever called it, so a cold Next ran the raw ROM from
+    its reset vector and NextZXOS was handed a machine whose configuration
+    registers still held their power-on values. It is now invoked when the
+    divMMC ROM lands, which is the last piece of a Next ROM set. The mode has
+    to be entered *before* the table runs rather than after it, because the
+    firmware programs the FPGA while it is itself in configuration mode; the
+    table's final `0x03` write carries machine type 3 and leaves the mode
+    again, which is what the real firmware does before it jumps to NextZXOS.
+
+    With the hook running, the register file a program finds at its first
+    instruction matches the reference on everything the firmware sets:
+    `0x03 = 0x33`, `0x04 = 0x03`, `0x05 = 0x5B`, `0x0A = 0x11`,
+    `0x10 = 0x04`, `0x11 = 0x00`, `0x89 = 0x8F`. Three register rules the
+    comparison turned up ride along: `0x10` and `0x11` only accept writes in
+    configuration mode (`0x10` keeping its bits 6:5, `0x11` only its bits 2:0),
+    `0x85` and `0x89` store bits 7 and 3:0 and read the rest back as zero, and
+    `0x41` is a write-only data path into the palette rather than a stored
+    byte. A hard reset also seeds the two palette indices the FPGA powers up
+    with, so a boot ROM reading them back before programming colours sees
+    `0x8F` and not `0x0F`.
 
     What is still open is why the OS stops at an empty text page instead of
     starting the desktop. The card goes untouched after frame 44: 197 `CMD17`

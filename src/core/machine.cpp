@@ -161,8 +161,13 @@ void Machine::nextFirmwareBoot() {
       {0x83, 0x3F},
       {0x84, 0xFF},
       {0x85, 0x01},
-      {0x03, 0xB3}, // machine type +3 with +3 timing, config mode off
+      {0x03, 0xB3}, // machine type +3 with +3 timing
   };
+  // The firmware programs the FPGA while it is itself in configuration mode,
+  // so the gated registers above take the bits it means to set. The last
+  // 0x03 write above carries machine type 3, which leaves the mode again --
+  // exactly what the real firmware does before it jumps to NextZXOS.
+  configMode_ = true;
   for (const auto& write : Writes) writeNextReg(write[0], write[1]);
 
   // The firmware's last act is a soft reset, which is what turns the
@@ -184,6 +189,9 @@ void Machine::reset(bool preserveRam) {
     // The alt ROM is loaded by the boot ROM on every boot, so a cold start
     // leaves it blank rather than serving the previous session's image.
     altRom_.assign(AltRomPages * PageSize, 0);
+    // A power cycle hands the machine back to the boot ROM, and the boot ROM
+    // runs in configuration mode; a soft reset keeps whatever mode it is in.
+    configMode_ = type_ == MachineType::Next;
   }
   framebuffer_.assign(FrameWidth * FrameHeight, Palette[0]);
   borderLines_.fill(0);
@@ -320,6 +328,10 @@ bool Machine::loadDivMmcRom(const std::string& path, std::string& error) {
   if (!divmmc_.loadRomFile(path, error)) return false;
   // The ROM arriving late still has to answer a latch that is already set.
   updatePaging();
+  // This is the last piece of a Next ROM set, so the firmware has everything
+  // it needs to hand the machine over to NextZXOS. Every other machine just
+  // got a divMMC ROM and boots from its own reset vector.
+  if (type_ == MachineType::Next) nextFirmwareBoot();
   return true;
 }
 
@@ -635,6 +647,7 @@ template <class Ar> void Machine::serialize(Ar& ar) {
   ar(port7ffd_);
   ar(port1ffd_);
   ar(pagingLocked_);
+  ar(configMode_);
   ar(specialPaging_);
   ar(romLoaded_);
   ar(layer2Clip_);
@@ -1089,13 +1102,11 @@ void Machine::refreshCartridge() {
 void Machine::writePort7ffd(u8 value) {
   if (pagingLocked_) return;
   port7ffd_ = value;
+  // On the Next the classic ports are a shorthand for MMU writes. The map is
+  // rebuilt before the lock is taken, because a write that sets bit 5 still
+  // pages its bank in first and only then freezes the ports.
+  if (isNext()) legacyRemap(true, false);
   pagingLocked_ = (value & 0x20) != 0;
-  // On the Next the classic ports are a shorthand for MMU writes.
-  if (isNext() && !pagingLocked_) {
-    const u8 bank = u8(value & 0x07);
-    next_.setMmuSlot(6, u8(bank * 2));
-    next_.setMmuSlot(7, u8(bank * 2 + 1));
-  }
   updatePaging();
 }
 
@@ -1106,7 +1117,11 @@ void Machine::writePort7ffd(u8 value) {
 // exclusively by bit 5 of 0x7FFD, which freezes this port too.
 void Machine::writePort1ffd(u8 value) {
   if (pagingLocked_) return;
+  // Leaving CP/M mode has to restore the middle of the address space, so the
+  // transition is recorded before the shadow is overwritten.
+  const bool leaving = (port1ffd_ & 0x01) != 0 && (value & 0x01) == 0;
   port1ffd_ = value;
+  if (isNext()) legacyRemap(true, leaving);
   updatePaging();
 }
 
@@ -1244,6 +1259,49 @@ void Machine::updateNextMmu() {
   }
 }
 
+// On the Next the three classic memory ports are a shorthand for MMU writes:
+// 0x7FFD, 0x1FFD and register 0x8E rebuild the map from the 7FFD and 1FFD
+// shadows instead of naming pages directly. Only the slots the classic hardware
+// controls are rewritten, which is what lets a program park its own page in
+// slots 2-5 and still switch the RAM bank with 0x7FFD. The exception is +3
+// special paging, which owns all eight slots at once and has to hand the
+// standard map back when it is left.
+void Machine::legacyRemap(bool ramChange, bool leavingSpecial) {
+  // 0x1FFD bit 0 is the +3 CP/M mode. Its map is fixed: one of four tables
+  // picked by 0x1FFD bits 2:1, and every slot shows RAM, because the mode
+  // exists so that CP/M can own the whole 64K.
+  if ((port1ffd_ & 0x01) != 0) {
+    static constexpr u8 Maps[4][8] = {
+        {0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07},
+        {0x08, 0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F},
+        {0x08, 0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x06, 0x07},
+        {0x08, 0x09, 0x0E, 0x0F, 0x0C, 0x0D, 0x06, 0x07},
+    };
+    const u8* map = Maps[(port1ffd_ >> 1) & 0x03];
+    for (int slot = 0; slot < 8; ++slot) next_.setMmuSlot(slot, map[slot]);
+    return;
+  }
+  // Outside special paging 0x0000 and 0x2000 always show the selected ROM.
+  next_.setMmuSlot(0, NextRegFile::RomPage);
+  next_.setMmuSlot(1, NextRegFile::RomPage);
+  // Leaving CP/M mode leaves the CP/M map behind in the middle of the address
+  // space, so slots 2-5 go back to the standard 10/11/4/5.
+  if (leavingSpecial) {
+    next_.setMmuSlot(2, 0x0A);
+    next_.setMmuSlot(3, 0x0B);
+    next_.setMmuSlot(4, 0x04);
+    next_.setMmuSlot(5, 0x05);
+  }
+  // The 0xC000 half only follows the RAM bank when this write actually changed
+  // it, so a 0x1FFD write that only touches a ROM bit cannot steal the bank a
+  // program paged in through the MMU slots.
+  if (ramChange || leavingSpecial) {
+    const u8 bank = u8(port7ffd_ & 0x07);
+    next_.setMmuSlot(6, u8(bank * 2));
+    next_.setMmuSlot(7, u8(bank * 2 + 1));
+  }
+}
+
 
 // ===========================================================================
 // Next register file
@@ -1271,6 +1329,34 @@ u8 Machine::readNextReg(u8 reg) const {
     const u32 line = u32(tstates_ % tstatesPerFrame_) / tstatesPerLine_;
     return reg == 0x1E ? u8(line) : u8(line >> 8);
   }
+  // Register 0x06 is stored as written, bit 2 included. The firmware sets the
+  // bit while the mode is on and it stays set afterwards, which is what the
+  // boot ROM's read-modify-write of the register expects: composing the bit
+  // from the live mode instead makes the ROM read 0x00 where the hardware
+  // answers 0x04 and it writes a different value from the first one onwards.
+  if (reg == 0x08) {
+    // Bit 7 reports whether port 0x7FFD is still unlocked, which is machine
+    // state rather than something the register file holds: a write of the bit
+    // is a command to unlock, and the answer always comes from the lock.
+    return u8((pagingLocked_ ? 0x00 : 0x80) | (next_.read(0x08) & 0x7F));
+  }
+  if (reg == 0x0A) {
+    // Bit 2 is reserved on the Next and reads back as zero.
+    return u8(next_.read(0x0A) & 0xFB);
+  }
+  // The clip windows are four-entry rings and a read answers the entry the next
+  // write would land on, not the one just written. The boot ROM walks a window
+  // by writing a corner and reading the next one back, so returning the stored
+  // byte instead of the ring makes it read the corner it just wrote every time.
+  if (reg == 0x18) return layer2Clip_[layer2ClipIndex_ & 0x03];
+  if (reg == 0x19) return sprites_.clip()[sprites_.clipIndex() & 0x03];
+  if (reg == 0x1A) return ulaClip_[ulaClipIndex_ & 0x03];
+  if (reg == 0x1B) return tilemapClip_[tilemapClipIndex_ & 0x03];
+  if (reg == 0x1C) {
+    // The four write positions packed two bits each, tilemap in the high pair.
+    return u8((tilemapClipIndex_ << 6) | (ulaClipIndex_ << 4) |
+              (u8(sprites_.clipIndex() & 0x03) << 2) | (layer2ClipIndex_ & 0x03));
+  }
   if (reg == 0x69) {
     // Composed from the classic ports, exactly like NR 0x8E: bit 6 is the Layer
     // 2 enable of port 0x123B, bit 3 the screen bank of port 0x7FFD and bits
@@ -1280,11 +1366,13 @@ u8 Machine::readNextReg(u8 reg) const {
   }
   if (reg == 0x8E) {
     // Composed from the classic ports, so a guest that reads the register back
-    // sees whatever it last wrote through either interface.
+    // sees whatever it last wrote through either interface. In CP/M mode the
+    // low ROM bit lives in 0x1FFD bit 1 instead of 0x7FFD bit 4.
     const u8 bank = isNext() ? u8(next_.mmuSlot(6) >> 1) : u8(port7ffd_ & 0x07);
+    const bool special = (port1ffd_ & 0x01) != 0;
     const u8 rom = u8((isPlus3() || isNext()) ? ((port1ffd_ & 0x04) ? 2 : 0) : 0);
-    return u8((bank << 4) | 0x08 | (rom | ((port7ffd_ & 0x10) ? 1 : 0)) |
-              ((port1ffd_ & 0x01) ? 0x04 : 0x00));
+    const u8 lowRom = special ? u8((port1ffd_ & 0x02) ? 1 : 0) : u8((port7ffd_ & 0x10) ? 1 : 0);
+    return u8((bank << 4) | 0x08 | (rom | lowRom) | (special ? 0x04 : 0x00));
   }
   return next_.read(reg);
 }
@@ -1297,8 +1385,16 @@ void Machine::writeNextReg(u8 reg, u8 value) {
       if ((value & 0x03) != 0) reset((value & 0x02) == 0);
       return;
     case 0x0A: { // peripheral 5: bit 4 is the divMMC automap master switch
-      next_.write(reg, value);
+      // Bits 7:5 are the machine configuration and only reachable while the
+      // ROM is in configuration mode; the rest is always writable.
+      const u8 previous = next_.read(reg);
+      next_.write(reg, u8((value & 0x1B) | (configMode_ ? (value & 0xE0) : (previous & 0xE0))));
       divmmc_.setAutomap((value & 0x10) != 0);
+      return;
+    }
+    case 0x06: { // peripheral 1: bit 2 reports configuration mode, it is not data
+      const u8 previous = next_.read(reg);
+      next_.write(reg, u8((value & 0xFB) | (configMode_ ? (value & 0x04) : (previous & 0x04))));
       return;
     }
     case 0xB8:   // the entry points the divMMC watches
@@ -1311,47 +1407,108 @@ void Machine::writeNextReg(u8 reg, u8 value) {
       return;
     }
     case 0x03: {
-      // The display timing bits are locked unless bit 7 unlocks them.
+      // The display timing bits only move while bit 7 unlocks them and bit 3 of
+      // the stored value is clear, and the timing is clamped to the four modes
+      // the hardware knows: 0 reads as 1 and anything above 4 as 3.
       u8 type = next_.read(0x03);
-      if ((value & 0x80) != 0) type = u8((type & 0x8F) | (value & 0x70));
+      if ((value & 0x80) != 0 && (type & 0x08) == 0 && (value & 0x08) == 0) {
+        u8 timing = u8((value >> 4) & 0x07);
+        if (timing == 0) timing = 1;
+        if (timing > 4) timing = 3;
+        type = u8((type & 0x0F) | (timing << 4));
+        // The Pentagon has no 60 Hz mode, so entering it clears the bit.
+        if (timing == 4) next_.write(0x05, u8(next_.read(0x05) & ~0x04));
+      }
+      // Bit 3 is a toggle rather than data.
+      if ((value & 0x08) != 0) type ^= 0x08;
+      // The low three bits are the configuration-mode selector. Inside the mode
+      // values 1-4 are stored, which is how the boot ROM records the machine it
+      // was told to configure; 7 enters the mode and any other non-zero value
+      // leaves it.
+      if (configMode_ && (value & 0x07) >= 1 && (value & 0x07) <= 4) {
+        type = u8((type & 0xF8) | (value & 0x07));
+      }
       next_.write(0x03, type);
+      if ((value & 0x07) == 0x07) {
+        configMode_ = true;
+      } else if ((value & 0x07) != 0) {
+        configMode_ = false;
+      }
       // The machine type decides which ROM the classic paging ports select.
       updatePaging();
       return;
     }
+    case 0x04: // ROM/RAM bar and the 0x7FFD lock bit
+      next_.write(reg, u8(value & 0x7F));
+      return;
+    case 0x07: // CPU speed: only the two low bits select a mode
+      next_.write(reg, u8(value & 0x03));
+      return;
+    case 0x68: // ULA control
+      next_.write(reg, u8(value & 0xFD));
+      return;
+    case 0x6E: // NextZXOS border colours, bit 6 is not stored
+    case 0x6F:
+      next_.write(reg, u8(value & 0xBF));
+      return;
+    case 0xC0: // interrupt control
+      next_.write(reg, u8(value & 0xE9));
+      return;
+    case 0xC4: // interrupt enable: bits 6:2 are not data
+      next_.write(reg, u8(value & 0x82));
+      return;
     case 0x50: case 0x51: case 0x52: case 0x53:
     case 0x54: case 0x55: case 0x56: case 0x57:
     case 0x8C: // alternate ROM
-    case 0x8F: // mapping mode: only the standard 128K/+3 layout is modelled
       next_.write(reg, value);
       updatePaging();
       return;
-    case 0x8E: // the 128K memory map as a single register
+    case 0x8F: // mapping mode: only the standard 128K/+3 layout is modelled
+      // Bits 2:1 ask for the 128K or +3 layout, and the write also refreshes
+      // the 0xC000 bank from the classic paging shadows.
+      next_.write(reg, u8(value & 0x03));
+      if (isNext()) legacyRemap(true, false);
+      updatePaging();
+      return;
+    case 0x8E: { // the 128K memory map as a single register
       // Bits 0 and 1 are the two ROM select bits of ports 0x7FFD and 0x1FFD and
       // bit 2 the +2A/+3 paging mode, all of which are visible as the classic
       // ports. The RAM bank is only taken when bit 3 asks for it, which is how
       // a caller can change the ROM without disturbing the RAM mapping. The
-      // 0x7FFD lock freezes this register just as it freezes that port.
-      if (pagingLocked_) return;
-      if ((value & 0x08) != 0) {
-        const u8 bank = u8((value >> 4) & 0x07);
-        port7ffd_ = u8((port7ffd_ & 0xF0) | bank);
-        if (isNext()) {
-          next_.setMmuSlot(6, u8(bank * 2));
-          next_.setMmuSlot(7, u8(bank * 2 + 1));
-        }
-      }
-      port7ffd_ = u8((port7ffd_ & ~0x10) | ((value & 0x01) ? 0x10 : 0x00));
-      port1ffd_ = u8((port1ffd_ & ~0x05) | ((value & 0x02) ? 0x04 : 0x00) |
-                     ((value & 0x04) ? 0x01 : 0x00));
+      // 0x7FFD lock does not reach this register: it freezes the ports, not the
+      // register interface, and NextZXOS' `RST 8` dispatcher relies on that to
+      // select ROM 3 with a locked 0x7FFD.
+      if ((value & 0x08) != 0) port7ffd_ = u8((port7ffd_ & 0xF8) | ((value >> 4) & 0x07));
+      // The low ROM bit only drives 0x7FFD outside CP/M mode; inside it, that
+      // bit moves to 0x1FFD bit 1, which is where this register reads it back.
+      const bool special = (value & 0x04) != 0;
+      if (!special) port7ffd_ = u8((port7ffd_ & ~0x10) | ((value & 0x01) ? 0x10 : 0x00));
+      const bool leaving = (port1ffd_ & 0x01) != 0 && !special;
+      port1ffd_ = u8((port1ffd_ & ~0x07) | (special ? 0x01 : 0x00) |
+                     ((value & 0x02) ? 0x04 : 0x00) | ((value & 0x01) ? 0x02 : 0x00));
+      if (isNext()) legacyRemap((value & 0x08) != 0, leaving);
       updatePaging();
+      return;
+    }
+    case 0x10: // Layer 2 resolution: only reachable in configuration mode, and
+               // bits 6:5 belong to the file rather than to this write
+      if (configMode_) {
+        next_.write(reg, u8((next_.read(reg) & 0x60) | (value & 0x1F)));
+      }
+      return;
+    case 0x11: // Layer 2 scroll MSB, likewise configuration mode only
+      if (configMode_) next_.write(reg, u8(value & 0x07));
+      return;
+    case 0x85: // internal port enable: bit 7 selects the write mode, bits 3:0
+    case 0x89: // the enables themselves; the upper bits read back as written
+      next_.write(reg, u8(value & 0x8F));
       return;
     case 0x40: // palette index
       next_.write(reg, value);
       palette_.setIndex(value);
       return;
-    case 0x41: // 8-bit palette colour
-      next_.write(reg, value);
+    case 0x41: // 8-bit palette colour; the port is a write-only data path, so
+               // nothing is stored and a read back answers from the palette
       palette_.write8(value);
       return;
     case 0x43: // palette control
@@ -1374,12 +1531,18 @@ void Machine::writeNextReg(u8 reg, u8 value) {
       copper_.writeData16(value);
       return;
     case 0x08: // peripheral 3: TurboSound, stereo arrangement, DACs
-      next_.write(reg, value);
+      // Bit 7 is a command rather than data: writing it releases the 0x7FFD
+      // lock, and reading the register answers the bit from the lock instead.
+      if ((value & 0x80) != 0) {
+        port7ffd_ &= u8(~0x20u);
+        pagingLocked_ = false;
+      }
+      next_.write(reg, u8(value & 0x7F));
       sound_.setEnabled((value & 0x02) != 0);
       sound_.setStereoMode((value & 0x20) ? Ay38912::Stereo::ACB : Ay38912::Stereo::ABC);
       return;
     case 0x09: // peripheral 2: AY mono bits, bit 4 locks the sprite number
-      next_.write(reg, value);
+      next_.write(reg, u8(value & 0xF7));
       sprites_.setLockstep((value & 0x10) != 0);
       for (int i = 0; i < TurboSound::ChipCount; ++i) {
         sound_.setChipMono(i, (value & (0x20 << i)) != 0);
@@ -1425,17 +1588,17 @@ void Machine::writeNextReg(u8 reg, u8 value) {
     case 0x18: // Layer 2 clip window, four writes: X1, X2, Y1, Y2
       next_.write(reg, value);
       layer2Clip_[layer2ClipIndex_ & 0x03] = value;
-      ++layer2ClipIndex_;
+      layer2ClipIndex_ = u8((layer2ClipIndex_ + 1) & 0x03);
       return;
     case 0x1B: // tilemap clip window, four writes: X1, X2, Y1, Y2
       next_.write(reg, value);
       tilemapClip_[tilemapClipIndex_ & 0x03] = value;
-      ++tilemapClipIndex_;
+      tilemapClipIndex_ = u8((tilemapClipIndex_ + 1) & 0x03);
       return;
     case 0x1A: // ULA clip window, four writes: X1, X2, Y1, Y2
       next_.write(reg, value);
       ulaClip_[ulaClipIndex_ & 0x03] = value;
-      ++ulaClipIndex_;
+      ulaClipIndex_ = u8((ulaClipIndex_ + 1) & 0x03);
       return;
     case 0x69: // Layer 2 control is mostly a mirror of the classic ports, so
                // the write is copied into them as well: bit 6 is the Layer 2
@@ -1507,6 +1670,16 @@ u8 Machine::contention(u16 addr, u32 t) {
   const u32 displayStart =
       tstatesPerLine_ * u32(timings_.topBorder) + timings_.leftBorder;
   return Pattern[(t - displayStart) & 7];
+}
+
+// At 28 MHz the SRAM needs more than one CPU clock to answer, so every memory
+// read costs a wait state. Bank 7 is the exception: it is the bank the ULA
+// reads the screen from, and the hardware lets it answer in time.
+u8 Machine::readWait(u16 addr, u32 t) {
+  (void)t;
+  if (!isNext() || next_.turbo() != 3) return 0;
+  const Page& page = page_[size_t(addr >> 13) & 7];
+  return (page.ram && page.page == 0x0E) ? 0 : 1;
 }
 
 u8 Machine::floatingBus() const {

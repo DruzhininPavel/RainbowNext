@@ -33,6 +33,16 @@ public:
   u32 sectors() const { return u32(image_.size() / 512); }
   const std::vector<u8>& image() const { return image_; }
 
+  // The capacity the card announces, which is normally the image size. It can
+  // be set apart from the image because a card's size is a property of the
+  // card, not of the bytes that happen to be on hand: a truncated dump still
+  // describes the card it came from, and the tests use that to reach the large
+  // card paths without holding gigabytes of image. Reads stay bounded by the
+  // image, so an announcement larger than the image simply ends in a range
+  // error where the bytes stop.
+  void setAnnouncedSectors(u32 sectors) { announced_ = sectors; }
+  u32 announcedSectors() const { return announced_ != 0 ? announced_ : sectors(); }
+
   // Card select is active low. While it is deasserted the card ignores the bus
   // and leaves MISO high, which is how a driver finds out it is alone.
   void select(bool asserted);
@@ -75,6 +85,8 @@ private:
   bool appCmd_ = false;
   bool idle_ = true;
   bool sdhc_ = false;
+  // Zero means "follow the image".
+  u32 announced_ = 0;
 
   std::vector<u8> out_;
   size_t outPos_ = 0;

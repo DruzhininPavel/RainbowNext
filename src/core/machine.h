@@ -172,6 +172,7 @@ public:
   u8 ioRead(u16 port, u32 t) override;
   void ioWrite(u16 port, u8 value, u32 t) override;
   u8 contention(u16 addr, u32 t) override;
+  u8 readWait(u16 addr, u32 t) override;
   void tick(u32 cycles) override;
   u32 now() const override { return u32(tstates_ % tstatesPerFrame_); }
   u8 interruptVector() override { return 0xFF; }
@@ -287,6 +288,7 @@ private:
   void writePort1ffd(u8 value);
   void updatePaging();
   void updateNextMmu();
+  void legacyRemap(bool ramChange, bool leavingSpecial);
   u8 nextRomBank() const;
   u8 nextAltRomBank() const;
   bool nextAltRomPage(u16 addr, bool write, u8& page) const;
@@ -448,6 +450,10 @@ private:
   // because the CPU mapping the rest of the port selects is not wired up.
   u8 port123b_ = 0;
   bool pagingLocked_ = false;
+  // Configuration mode, entered by writing 7 to the low three bits of register
+  // 0x03 and left by writing any other non-zero value there. The boot ROM runs
+  // in it, and it gates the machine configuration registers below.
+  bool configMode_ = false;
   bool specialPaging_ = false;
   bool romLoaded_ = false;
 

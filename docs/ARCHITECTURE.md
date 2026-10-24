@@ -164,9 +164,13 @@ A driver sends a six-byte command frame (`0x40 | cmd`, four argument bytes, a
 CRC that SPI mode ignores) and reads an R1 back; `CMD0`, `CMD8`, `CMD9`,
 `CMD10`, `CMD12`, `CMD13`, `CMD16`, `CMD17`, `CMD18`, `CMD23`, `CMD24`,
 `CMD25`, `CMD55`+`ACMD41`, `CMD58` and `CMD59` are answered, and everything else
-gets the illegal-command bit. The card reports SDHC and block addressing once
-`ACMD41` sets the HCS bit, and its `CSD` is rewritten to match the size of the
-image, because that is the one field a driver sanity-checks.
+gets the illegal-command bit. The card only claims SDHC, and with it block
+addressing, when the image really is larger than 2 GiB *and* `ACMD41` set the
+HCS bit; a smaller image stays a byte-addressed SDSC card even when the host
+asks for high capacity, which is what a real card does and what keeps a 32 KiB
+test image from being mistaken for an SDHC one. The `CSD` and `CID` are built to
+match, version 2.0 for SDHC and version 1.0 for SDSC, both with a real CRC7 in
+the last byte, because the `CSD` is the one field a driver sanity-checks.
 
 `CMD18` streams: the next block is generated on demand as the driver clocks
 bytes out, so a multi-block read of a 64M image never copies it. `CMD25`
@@ -236,6 +240,27 @@ dropped `.img` or `.mmc` does the same. The image is owned by `Machine`, so
 switching the machine type rebuilds the bus without ejecting the card, and the
 path picked in **Machine > ROM images...** is written to `rainbow.cfg` so the
 next start comes up with it already in.
+
+### Configuration mode
+
+The Next boot ROM does not run as a plain guest. It runs in *configuration
+mode*, the state in which the machine configuration registers accept writes,
+and it leaves the mode once it has finished programming the machine. The
+selector is the low three bits of the value written to NR `0x03`: `7` enters,
+any other non-zero value leaves, and `0` is not a command. NR `0x06` bit 2
+reports the mode rather than storing it.
+
+Two things depend on it, and both are invisible until a register read-back is
+compared against the reference:
+
+- NR `0x0A` bits 7:5 are the machine configuration and only reachable inside
+  the mode. Bit 4, the divMMC automap switch, is below them and always writable.
+- A machine that never enters the mode answers NR `0x06` with a bit the ROM does
+  not expect, and takes a different path from its first read onwards.
+
+A Next power-on therefore enters the mode, exactly as the firmware hook of the
+reference implementation does; a soft reset keeps whatever mode the machine is
+in, and the classic machines have no such mode at all.
 
 ## Timings
 

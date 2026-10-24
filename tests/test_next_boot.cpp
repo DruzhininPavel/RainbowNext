@@ -36,6 +36,10 @@ std::string romPath(const char* name) {
   return std::string(RAINBOW_SOURCE_DIR) + "/roms/" + name;
 }
 
+// The ROM images are not shipped with the source, so a test that needs one has
+// to skip itself rather than fail on a machine that has never had a Next.
+bool haveRom(const char* name) { return !readFile(romPath(name)).empty(); }
+
 // The board ROM is a 64 KiB image holding four 16 KiB banks.
 bool loadNextRom(Machine& machine) {
   const std::vector<u8> rom = readFile(romPath("next.rom"));
@@ -69,4 +73,88 @@ TEST(boot_real_next_rom_completes_its_ram_probe) {
   Machine machine(MachineType::Next);
   if (!loadNextRom(machine)) return;
   CHECK_EQ(countVisits(machine, 0x018E, 7, 2500000), 7);
+}
+
+// The boot ROM is handed the machine in configuration mode, which is the only
+// state in which the machine configuration registers accept writes. Register
+// 0x06 bit 2 is stored rather than composed, so the ROM reads back the bit the
+// firmware left in it; a machine that never entered the mode answers with a
+// bit it does not expect and takes a different path from the first read on.
+TEST(boot_next_starts_in_configuration_mode) {
+  Machine machine(MachineType::Next);
+  CHECK_EQ(machine.readNextReg(0x06) & 0x04, 0x00); // nothing has set it yet
+  machine.writeNextReg(0x0A, 0xB1);                 // the mode is on regardless
+  CHECK_EQ(machine.readNextReg(0x0A), 0xB1);
+}
+
+TEST(boot_spectrum_has_no_configuration_mode) {
+  Machine machine(MachineType::Spectrum48);
+  machine.writeNextReg(0x0A, 0xE0);
+  CHECK_EQ(machine.readNextReg(0x0A), 0x00); // bits 7:5 are not reachable
+}
+
+// The low three bits of register 0x03 are the mode selector: 7 enters, any
+// other non-zero value leaves and 0 is not a command at all.
+TEST(boot_configuration_mode_is_left_by_a_machine_type_write) {
+  Machine machine(MachineType::Next);
+  machine.writeNextReg(0x03, 0xB3); // leave
+  machine.writeNextReg(0x0A, 0xE0);
+  CHECK_EQ(machine.readNextReg(0x0A), 0x00); // the configuration bits are frozen
+  machine.writeNextReg(0x03, 0x00);          // not a command: still out
+  machine.writeNextReg(0x0A, 0xE0);
+  CHECK_EQ(machine.readNextReg(0x0A), 0x00);
+  machine.writeNextReg(0x03, 0xB7); // 7 enters again
+  machine.writeNextReg(0x0A, 0xE0);
+  CHECK_EQ(machine.readNextReg(0x0A), 0xE0);
+}
+
+// Bits 7:5 of register 0x0A are the machine configuration and are only
+// reachable while the mode is on; the divMMC automap switch below them is not.
+TEST(boot_configuration_mode_gates_register_0a) {
+  Machine machine(MachineType::Next);
+  machine.writeNextReg(0x0A, 0xB1);
+  CHECK_EQ(machine.readNextReg(0x0A), 0xB1);
+  machine.writeNextReg(0x03, 0xB3);
+  machine.writeNextReg(0x0A, 0xE0);
+  CHECK_EQ(machine.readNextReg(0x0A), 0xA0);
+  // The divMMC automap switch below the configuration bits is always writable.
+  machine.writeNextReg(0x0A, 0x10);
+  CHECK_EQ(machine.readNextReg(0x0A), 0xB0);
+}
+
+// The firmware is what hands a cold machine over to NextZXOS: it programs the
+// FPGA through the register file and finishes with a soft reset. It runs as
+// the last piece of a Next ROM set is loaded, so these values are what a
+// program finds at its first instruction rather than what a reset leaves.
+TEST(boot_next_firmware_programs_the_register_file) {
+  Machine machine(MachineType::Next);
+  if (!loadNextRom(machine)) return;
+  if (!haveRom("nxtmmc.rom")) return;
+  std::string error;
+  CHECK(machine.loadDivMmcRom(romPath("nxtmmc.rom"), error));
+
+  CHECK_EQ(machine.nextRegs().read(0x03), 0x33); // machine type: Next, 3.5 MHz
+  CHECK_EQ(machine.nextRegs().read(0x04), 0x03); // ROM trap: NextZXOS
+  CHECK_EQ(machine.nextRegs().read(0x0A), 0x11); // Next, divMMC automap off
+  CHECK_EQ(machine.nextRegs().read(0x10), 0x04); // Layer 2 at 256x192
+  CHECK_EQ(machine.nextRegs().read(0x11), 0x00); // ...and its scroll MSB
+  CHECK_EQ(machine.nextRegs().read(0x89), 0x8F); // the power-on palette index
+  CHECK_EQ(machine.nextRegs().read(0x8B), 0x00);
+  // The firmware writes 0x9D to 0x06 while the mode is on, so bit 2 is set in
+  // the file and the soft reset keeps it: the boot ROM's read-modify-write of
+  // the register sees the bit and writes 0x04 rather than 0x00.
+  CHECK_EQ(machine.readNextReg(0x06), 0xBD);
+}
+
+// Only the Next runs a firmware; every other machine just gets a divMMC ROM.
+TEST(boot_spectrum_is_not_touched_by_a_divmmc_rom) {
+  Machine machine(MachineType::Spectrum128);
+  if (!haveRom("nxtmmc.rom")) return;
+  std::string error;
+  CHECK(machine.loadDivMmcRom(romPath("nxtmmc.rom"), error));
+  // Only the firmware programs these, so a plain 128K still shows the power-on
+  // state rather than what a Next would have been configured with.
+  CHECK_EQ(machine.nextRegs().read(0x04), 0x00);
+  CHECK_EQ(machine.nextRegs().read(0x0A), 0x01);
+  CHECK_EQ(machine.nextRegs().read(0x8B), 0x00);
 }

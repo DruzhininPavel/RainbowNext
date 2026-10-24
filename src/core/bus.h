@@ -29,6 +29,15 @@ public:
   // time `t`. Contended machines use this to slow the CPU down.
   virtual u8 contention(u16 addr, u32 t) = 0;
 
+  // Wait states a machine adds to a memory *read* only. A write is never
+  // slowed this way. The Next spends one on every read while its CPU runs at
+  // 28 MHz, because the SRAM cannot answer inside a single 28 MHz clock.
+  virtual u8 readWait(u16 addr, u32 t) {
+    (void)addr;
+    (void)t;
+    return 0;
+  }
+
   // Advance the machine clock (ULA, audio, frame counter).
   virtual void tick(u32 cycles) = 0;
   virtual u32 now() const = 0;
