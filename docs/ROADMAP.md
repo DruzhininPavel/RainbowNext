@@ -344,11 +344,11 @@ These are deliberate simplifications, tracked here so they are not forgotten:
     the emulator exits. The SPI clock is not modelled: a command is answered on
     the next byte instead of after the few hundred cycles a real card needs, so
     a driver that polls for readiness simply sees it at once.
-17. NextZXOS boots to a live text console but never reaches the desktop: after
-    the boot screen is wiped the OS sits in an empty page waiting for a key and
-    then has nothing to hand over to. The hardware side of the boot is finished
-    -- the framebuffer is pixel-identical to an independent emulator -- so what
-    is left is the firmware's own handover condition.
+17. NextZXOS never reaches the desktop: the boot gets through both ROMs and into
+    the OS, and the screen then stops on either a blank grey page or an error
+    dialog, depending on the card. The hardware side of the boot is finished --
+    the framebuffer is pixel-identical to an independent emulator -- so what is
+    left is the firmware's own handover condition.
 
     *The gate that was blocking everything.* The boot ROM at `0x1EDB` does
     `OUT (0xE3),A` to map the card ROM over `0x0000` and then checks `0x0004`
@@ -398,6 +398,24 @@ These are deliberate simplifications, tracked here so they are not forgotten:
     involved (it is disabled unless a directory is mounted) and is not a
     substitute for this, because the boot ROM calls the card ROM's internal
     routines directly rather than going through `RST 8`.
+
+    *Measured, per card.* The outcome depends on which card is mounted, so
+    always name the card when quoting a frame:
+
+    | Card | Frame 600 | Frame 1800 | Frame 3000 | Screen |
+    |---|---|---|---|---|
+    | `cspect-next-1gb.img` (official emulator build) | `0x06D5` | `0x0168` | `0x0745` | blank grey `#B6B6B6`, no text |
+    | `make_sd_image.py` from `sn-complete-24.11` | `0x0C90` | `0x0C90` | `0x0C90` | grey page with a NextZXOS dialog and several lines of diagnostic text |
+    | hand-made test card | `0x0C90` | — | — | colour test blocks |
+
+    The oracle (`/tmp/xp`, `zxnext-bench`) also parks on `0x0C90` with a
+    non-NextZXOS card, so that address is the esxDOS idle loop described above
+    (the `HALT` at `0x0C8F`, woken by the frame interrupt) and not a crash of
+    ours. The folder-built card is the most informative of the three -- it gets
+    the OS far enough to draw a dialog -- and the text on that screen has not
+    been read yet, because NextZXOS renders it with its own font loaded off the
+    card rather than the boot ROM's. Reading that message is probably the
+    shortest route to the cause.
 
     *Where it stops now, checked against an independent emulator.* The screen
     renders as of `11e326b`: the boot ROM saves and restores the palette through

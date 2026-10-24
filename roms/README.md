@@ -29,11 +29,11 @@ roms/next.rom      (65 536 bytes)
 roms/next-0.rom … next-3.rom
 ```
 
-The board ROM is `machines/next/ennextzx.rom` inside the official System/Next
-card image; a `roms/next.rom` extracted from there (md5
-`8c34d957fb2cbbd0be423cea3b370fd5`) is the genuine article. It starts `F3 C3 EF
-00`, which is `DI` / `JP 0x00EF`, and its bank 3 carries the 8x8 Spectrum font at
-offset `0xFD08`.
+The board ROM is `enNextZX.rom` in the `machines/next/` folder of the official
+distribution, or in the emulator build alongside the card image; a `roms/next.rom`
+copied from there (md5 `8c34d957fb2cbbd0be423cea3b370fd5`) is the genuine
+article. It starts `F3 C3 EF 00`, which is `DI` / `JP 0x00EF`, and its bank 3
+carries the 8x8 Spectrum font at offset `0xFD08`.
 
 The Next also needs the divMMC card ROM, which the boot ROM maps in at `0x0000`
 and refuses to continue without:
@@ -124,6 +124,22 @@ redistributing anything you place here.
 The official SpecNext distribution (<https://www.specnext.com/latestdistro/>) is
 the usual source for the Next files: it ships the board ROM used by emulators and
 the NextZXOS SD card image. Nothing from it is committed here.
+
+The download to take is **System/Next distribution for emulators**, which unpacks
+to exactly the three files the Next needs. The board ROM is called
+`enNextZX.rom` and the divMMC ROM `enNxtmmc.rom` — there is no file named
+`next.rom` in the distribution, so rename on the way in:
+
+```sh
+cp enNextZX.rom   roms/next.rom     # 65 536 bytes, md5 8c34d957fb2cbbd0be423cea3b370fd5
+cp enNxtmmc.rom   roms/nxtmmc.rom   #  8 192 bytes, md5 81b6ed2a3dec124eb58ed023c66ea154
+cp cspect-next-1gb.img  roms/nextsd.img
+```
+
+The full distribution (`sn-complete-24.11.zip`) works too: the same two ROMs are
+in `machines/next/`, and `tools/make_sd_image.py` turns the folder into a card.
+[`../docs/NEXT-SETUP.md`](../docs/NEXT-SETUP.md) has the walkthrough for both,
+with the checksums and the troubleshooting table.
 
 ## Why they are not bundled
 
