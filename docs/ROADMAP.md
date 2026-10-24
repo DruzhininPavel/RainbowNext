@@ -344,11 +344,12 @@ These are deliberate simplifications, tracked here so they are not forgotten:
     the emulator exits. The SPI clock is not modelled: a command is answered on
     the next byte instead of after the few hundred cycles a real card needs, so
     a driver that polls for readiness simply sees it at once.
-17. NextZXOS never reaches the desktop: the boot gets through both ROMs and into
-    the OS, and the screen then stops on either a blank grey page or an error
-    dialog, depending on the card. The hardware side of the boot is finished --
-    the framebuffer is pixel-identical to an independent emulator -- so what is
-    left is the firmware's own handover condition.
+17. NextZXOS never reaches the desktop. The boot gets through both ROMs and into
+    the OS, the OS installs its own interrupt handler and runs its software --
+    the welcome program is drawn and pageable -- but the desktop never appears,
+    and the machine ends up idle on a blank grey page. The hardware side of the
+    boot is finished -- the framebuffer is pixel-identical to an independent
+    emulator -- so what is left is the firmware's own handover condition.
 
     *The gate that was blocking everything.* The boot ROM at `0x1EDB` does
     `OUT (0xE3),A` to map the card ROM over `0x0000` and then checks `0x0004`
@@ -405,7 +406,7 @@ These are deliberate simplifications, tracked here so they are not forgotten:
     | Card | Frame 600 | Frame 1800 | Frame 3000 | Screen |
     |---|---|---|---|---|
     | `cspect-next-1gb.img` (official emulator build) | `0x06D5` | `0x0168` | `0x0745` | blank grey `#B6B6B6`, no text |
-    | `make_sd_image.py` from `sn-complete-24.11` | `0x0C90` | `0x0C90` | `0x0C90` | grey page with a NextZXOS dialog and several lines of diagnostic text |
+    | `make_sd_image.py` from `sn-complete-24.11` | `0x0C90` | `0x0C90` | `0x0C90` | the NextZXOS welcome program, drawn and pageable |
     | hand-made test card | `0x0C90` | — | — | colour test blocks |
 
     The oracle (`/tmp/xp`, `zxnext-bench`) also parks on `0x0C90` with a
@@ -488,14 +489,62 @@ These are deliberate simplifications, tracked here so they are not forgotten:
     character-row terms of the interleave -- produced a phantom "framed dialog"
     that does not exist. Both are probe bugs, not emulator bugs.
 
-    *What is actually left.* The welcome program cannot advance past its first
-    page. SPACE starts the transition (the bottom rows clear first), but the
-    second page never draws and the machine ends up on a blank page spinning in
-    a ROM loop around `0x0C90`/`0x0BC8`. Our end state still matches the oracle
-    at the level that matters -- both stop at the same address (`0x0C8F` is the
-    `HALT`, `0x0C90` the return after it) and both finish with the same eight
-    MMU slots, `FF FF 0A 0B 04 05 0E 0F` -- so the paging and the firmware path
-    are not in question; the page transition itself is.
+    *What is actually left.* The welcome program is fine; leaving it is not.
+    `ENTER` and `P` move forward and back through its thirteen pages and the
+    screen changes both ways, so the key scan, the window stream, the paging and
+    the palette all work. `SPACE` is the key that breaks: it runs the program's
+    `RETURN`, and the machine lands in the NextBASIC editor's keyboard loop at
+    `0x0C90` with `7FFD=00` and MMU slots `.. .. 0A 0B 04 05 0B 10`. It sits
+    there indefinitely -- 3200 frames with no input change nothing -- until any
+    key is pressed, at which point it switches to the OS map
+    (`7FFD=07`, slots `.. .. 0A 0B 04 05 0E 0F`), clears the screen to the
+    `#B6B6B6` paper colour and idles again, this time permanently. The desktop
+    is never drawn.
+
+    That end state is byte-for-byte the state a **working** card reaches: boot
+    the same image with `nextzxos/autoexec.1st` removed and the OS goes straight
+    to the desktop, drawing its menu on the same `#B6B6B6` paper, and settles at
+    the same `0x0C90`, the same `7FFD=07` and the same eight MMU slots. The
+    only register difference between the working and the broken state is NR
+    `0x07` (`03` = 28 MHz against `00` = 3.5 MHz) and NR `0x14`; forcing NR
+    `0x07` back to `03` after the keypress does not bring the desktop back, so
+    the clock is not the cause either. With identical registers, identical
+    paging and identical PC, the difference has to be in RAM or in screen
+    memory, which points at the OS's own handover rather than at anything the
+    emulator maps.
+
+    The strongest form of that measurement: trace the set of addresses each
+    machine executes over 400 frames once both have settled, and they are
+    **the same 87 addresses**, in both cases the frame-interrupt handler at
+    `0x0038`, the 48K keyboard scan at `0x0C81`-`0x0C95`, the OS's IM1 handler
+    at `0x2009`, its dispatcher at `0x2300` and its key scan at `0x2400`. So
+    the working card is not running a desktop loop the broken one is missing --
+    both are idling in exactly the same place. The desktop on the working card
+    is a one-shot draw that happens during the boot, and on the autoexec card
+    that draw never happens at all.
+
+    The card layer is not implicated. Both files are read completely: with the
+    card mounted, `nextzxos/autoexec.1st` (10510 bytes) is fetched as 21 of its
+    24 sectors -- the trailing three are the rest of the last 8-sector cluster
+    and are correctly never requested -- and `nextzxos/ensystem.sys` (27698
+    bytes) as 55 of 56, for the same reason. Neither card issues a single
+    further card read after the welcome program returns, so the OS is not
+    reloading anything it failed to load.
+
+    So the remaining question is narrow: where does the OS's boot chain lose
+    control when it launches a `.1st` program. A whole-RAM diff between the two
+    settled states (16 KiB banks, 2 MiB) shows differences in banks 0, 2, 5, 7,
+    8, 14 and 111 -- bank 5 is the screen, so that one is expected, and the rest
+    is the welcome program's own working set plus whatever the desktop would
+    have written. Nothing in the diff identifies a single corrupted structure,
+    which is consistent with the desktop draw simply never being reached rather
+    than being reached and failing.
+
+    That makes the next step a question about NextZXOS rather than about the
+    emulator: find the routine in `ensystem.sys` that runs `autoexec.1st` and
+    what it expects on return. Our machine returns to the NextBASIC editor
+    (`sp` moves `5BE3` -> `5BF9` across the keypress), so whatever the OS
+    installed as the continuation is not where control ends up.
 
     *The instruction stream is identical, and the clock nearly so.* Both sides
     were traced from reset for 300 000 instructions and the PC columns diffed
