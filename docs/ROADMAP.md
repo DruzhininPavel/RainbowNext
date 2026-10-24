@@ -458,23 +458,44 @@ These are deliberate simplifications, tracked here so they are not forgotten:
     difference left at the end of the boot, and it is the reference that is
     wrong, not us.
 
-    *The screen after the wipe is a live console, not a hang.* What the reopened
-    window shows is NextZXOS' empty text page: ULA character RAM all `0x00` with
-    attribute `0x38` (ink 0 on paper 7), which the NextZXOS palette renders as a
-    uniform grey, plus a blinking cursor. It is not frozen. SPACE is consumed,
-    and the OS installs its own IM1 handler at `0x2009` in RAM which calls a
-    key-scan routine at `0x2400` every frame -- that routine walks the row
-    select `L` down, builds `BC = L<<8 | 0xFE`, reads the row with `IN A,(C)`,
-    complements it and stores it through `(DE)`. The result is visible in the
-    documented handshake bytes: `0x5C3B` FLAGS bit 5 is set on a keypress,
-    `0x5C08` holds the key code (`0x0D` for ENTER), and typing `A` echoes a
-    glyph into cell (1,0) next to the cursor. The machine is running a
-    responsive NextZXOS text console.
+    *The screen after the wipe is a live console, not a hang.* Once the window
+    is reopened, the display is a real NextZXOS text page. It is not frozen:
+    SPACE is consumed, and the OS installs its own IM1 handler at `0x2009` in
+    RAM which calls a key-scan routine at `0x2400` every frame -- that routine
+    walks the row select `L` down, builds `BC = L<<8 | 0xFE`, reads the row with
+    `IN A,(C)`, complements it and stores it through `(DE)`. The result is
+    visible in the documented handshake bytes: `0x5C3B` FLAGS bit 5 is set on a
+    keypress, `0x5C08` holds the key code (`0x0D` for ENTER), and typing `A`
+    echoes a glyph into cell (1,0) next to the cursor.
 
-    Our end state matches the oracle exactly at the level that matters: both stop
-    at the same address (`0x0C8F` is the `HALT`, `0x0C90` the return after it)
-    and both finish with the same eight MMU slots, `FF FF 0A 0B 04 05 0E 0F`.
-    So the paging and the firmware path are not in question.
+    *NextZXOS reaches its welcome program, and the ULA draws it correctly.* This
+    is the state to trust as of the 24.11 card: the OS starts the welcome
+    program and its first page is rendered in full -- title line, paragraphs,
+    highlighted footer. That is not an impression from a screenshot; the
+    rendered viewport and the 16 KiB bank the ULA reads (bank 5, i.e. 8 KiB page
+    `0x0A`, which is what the FPGA-derived reference uses in `nxv_bram()`) agree
+    bit for bit once both are addressed with the standard Spectrum interleave
+    `((y&0xC0)<<5) | ((y&0x07)<<8) | ((y&0x38)<<2) | column`. The ULA path,
+    the palette and the screen paging are therefore all correct here.
+
+    Two earlier readings of this page were wrong and are retracted. It was
+    recorded as a "blank grey page" with nothing to hand over to; it is a full
+    page of text. It was also recorded that a dump of the screen bank showed
+    plain-ASCII prose, which was taken as evidence that the OS had drawn
+    nothing. That dump indexed `ram_` with a `* 8192` stride, but `ram_` is
+    addressed in 16 KiB banks, so it read a neighbouring bank and produced
+    convincing garbage. The same class of mistake -- swapping the scanline and
+    character-row terms of the interleave -- produced a phantom "framed dialog"
+    that does not exist. Both are probe bugs, not emulator bugs.
+
+    *What is actually left.* The welcome program cannot advance past its first
+    page. SPACE starts the transition (the bottom rows clear first), but the
+    second page never draws and the machine ends up on a blank page spinning in
+    a ROM loop around `0x0C90`/`0x0BC8`. Our end state still matches the oracle
+    at the level that matters -- both stop at the same address (`0x0C8F` is the
+    `HALT`, `0x0C90` the return after it) and both finish with the same eight
+    MMU slots, `FF FF 0A 0B 04 05 0E 0F` -- so the paging and the firmware path
+    are not in question; the page transition itself is.
 
     *The instruction stream is identical, and the clock nearly so.* Both sides
     were traced from reset for 300 000 instructions and the PC columns diffed
