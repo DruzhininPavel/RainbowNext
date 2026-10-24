@@ -137,7 +137,9 @@ refuses the downloaded binary, clear the flag once with
 `xattr -d com.apple.quarantine rainbow`. SDL3 is linked into the binary, so
 nothing has to be installed; the Linux builds still need an X11 or Wayland
 session, a Vulkan driver and the usual audio libraries. The ROMs are **not** included — see
-[`roms/README.md`](roms/README.md).
+[`roms/README.md`](roms/README.md), and
+[`docs/NEXT-SETUP.md`](docs/NEXT-SETUP.md) for the Next, which needs two ROMs
+and an SD card image from the official distribution.
 
 ## Build
 
@@ -327,7 +329,7 @@ plugins/           example plugin: a Fuller Audio Box joystick interface
 src/formats/       SNA / Z80 / NEX images, TAP / TZX tapes, DSK / EDSK / TRD disks
 src/frontend/      SDL3 + Dear ImGui host: app, audio, input, debugger, config
 tests/             unit tests, incl. an end-to-end boot test (no ROM required)
-docs/              ARCHITECTURE.md, REFERENCES.md, ROADMAP.md
+docs/              ARCHITECTURE.md, NEXT-SETUP.md, REFERENCES.md, ROADMAP.md
 roms/              user-supplied ROMs (empty by design)
 ```
 
