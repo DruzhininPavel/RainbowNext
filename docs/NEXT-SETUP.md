@@ -151,24 +151,40 @@ stops.
 The boot goes: board ROM → divMMC ROM answers → esxDOS reads NextZXOS off the
 card → the OS takes over, installs its own interrupt handler and starts the
 welcome program. With a card built from the 24.11 folder (`Option B` above)
-that program's **first page is drawn in full** — a title line, several
-paragraphs of text and a highlighted footer, on grey paper.
+that program runs: a grey page with a **Welcome to NextZXOS** title line and a
+body of text, drawn through the OS's own window stream.
 
-That page is worth trusting as a picture of the video path, because it has been
-checked against the machine's own memory: with the card mounted and the machine
-settled, the rendered viewport and the 16 KiB bank the ULA reads (bank 5, i.e.
-8 KiB page `0x0A`) agree bit for bit. If the page looks right, the ULA, the
-palette and the paging are all right.
+The program is navigable, so the keyboard scan works too:
 
-What does not work yet is moving past that page. Pressing SPACE starts the page
-change — the bottom of the screen clears first — but the second page never
-draws, and the machine is left on a blank page spinning in a ROM loop. The
-desktop never arrives. That is the boot divergence tracked in
-[`ROADMAP.md`](ROADMAP.md), so treat the Next as a work in progress rather than
-a finished machine.
+| Key | Effect |
+|---|---|
+| `ENTER` | next page |
+| `P` | previous page |
+| `SPACE` | leave the program |
+| `D` | disable it — deletes `nextzxos/autoexec.1st` from the card and saves `nextzxos/welcome.bas` |
+
+The program has thirteen pages and `ENTER`/`P` walk through them in both
+directions. That is worth trusting as a picture of the video path, because it
+has been checked against the machine's own memory: with the card mounted and
+the machine settled, the rendered viewport and the 16 KiB bank the ULA reads
+(bank 5, i.e. 8 KiB page `0x0A`) agree bit for bit. If the pages look right,
+the ULA, the palette, the paging and the key scan are all right.
+
+What does not work yet is **leaving** the program. `SPACE` runs the program's
+`RETURN` and the machine drops to the NextBASIC editor rather than to the
+NextZXOS desktop; the next keypress moves it onto the OS memory map and clears
+the screen, but the desktop is never drawn and the machine idles there. That is
+the boot divergence tracked in [`ROADMAP.md`](ROADMAP.md), so treat the Next as
+a work in progress rather than a finished machine.
+
+There is a way round it: **delete `nextzxos/autoexec.1st` from the card** and
+boot again. With no autoexec program to run, the OS goes straight to the
+NextZXOS desktop and its menu draws normally. That is the supported route here
+— the emulator ships no cards, so this is one file out of a card you built
+yourself.
 
 If you built the card from the CSpect `.img` instead, you may not get as far as
-the welcome page; the two routes have not been compared in this build.
+the welcome program; the two routes have not been compared in this build.
 
 Everything else about the Next is implemented and tested: MMU, Layer 2, sprites,
 tilemap, Copper, DMA, the TurboSound Next, and `.nex` programs, which load and
@@ -188,7 +204,7 @@ working, load a `.nex` file:
 | `nxtmmc.rom not found` in the ROM window | The 8 KiB divMMC ROM is missing; the Next will not boot without it |
 | `NO SD CARD` in the toolbar | No card mounted; NextZXOS has nowhere to come from |
 | The card is rejected at load | The file is not a raw sector image, or its size is not a whole number of 512-byte sectors |
-| It stops on a blank page after the welcome screen | Expected in this build — the welcome program cannot draw its second page |
+| A blank grey screen after leaving the welcome program | Expected in this build — the OS does not redraw its desktop once the welcome program returns; delete `nextzxos/autoexec.1st` from the card to skip it |
 
 ## A note on memory
 
@@ -197,8 +213,9 @@ image built from the folder with `--size-mb 258` is a quarter of that, which
 makes it the better choice on a laptop.
 
 Note that the two routes have not been compared in this build. What has been
-verified is the folder-built card: it reaches the NextZXOS welcome program and
-draws its first page correctly. If you are comparing behaviour, compare like
+verified is the folder-built card: it reaches the NextZXOS welcome program,
+draws and pages it correctly, and — with `nextzxos/autoexec.1st` removed —
+brings up the NextZXOS desktop. If you are comparing behaviour, compare like
 with like.
 
 ## Licence
